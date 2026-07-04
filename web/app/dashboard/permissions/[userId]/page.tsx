@@ -38,18 +38,19 @@ export default async function PermissionsPage({
     },
   })
 
-  const permissions = tables.map(table => ({
-    tableId: table.id,
-    tableName: table.name,
-    tableLabel: table.label,
-    ...(table.permissions[0] || {
-      canView: false,
-      canCreate: false,
-      canEdit: false,
-      canDelete: false,
-      canExport: false,
-    }),
-  }))
+  const permissions = tables.map(table => {
+    const perm = table.permissions[0]
+    return {
+      tableId: table.id,
+      tableName: table.name,
+      tableLabel: table.label,
+      canView: perm?.canView ?? false,
+      canCreate: perm?.canCreate ?? false,
+      canEdit: perm?.canEdit ?? false,
+      canDelete: perm?.canDelete ?? false,
+      canExport: perm?.canExport ?? false,
+    }
+  })
 
   return (
     <PermissionManager
