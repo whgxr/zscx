@@ -44,6 +44,8 @@ import {
   Table as TableIcon,
   Layers,
   FileCheck,
+  Share2,
+  Check,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { ExportType, ExportFormat, DataTable, TableField, ExportTemplate } from '@prisma/client'
@@ -89,6 +91,9 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
   const [templates, setTemplates] = useState<TemplateWithTable[]>(initialTemplates)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [sharingTemplate, setSharingTemplate] = useState<any>(null)
+  const [sharedTableIds, setSharedTableIds] = useState<number[]>([])
   const [formData, setFormData] = useState({
     name: '',
     tableId: '',
@@ -173,6 +178,44 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
       }
     } catch (err) {
       console.error('Set default error:', err)
+    }
+  }
+
+  const handleShare = (template: any) => {
+    setSharingTemplate(template)
+    setSharedTableIds(template.sharedTables?.map((t: any) => t.id) || [])
+    setShareDialogOpen(true)
+  }
+
+  const toggleSharedTable = (tableId: number) => {
+    setSharedTableIds(prev =>
+      prev.includes(tableId)
+        ? prev.filter(id => id !== tableId)
+        : [...prev, tableId]
+    )
+  }
+
+  const handleSaveShare = async () => {
+    if (!sharingTemplate) return
+    try {
+      const res = await fetch(`/api/export-templates/${sharingTemplate.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          isShared: sharedTableIds.length > 0,
+          sharedTableIds,
+        }),
+      })
+
+      if (res.ok) {
+        setShareDialogOpen(false)
+        router.refresh()
+      } else {
+        const data = await res.json()
+        alert(data.message || '保存失败')
+      }
+    } catch (err) {
+      alert('保存失败')
     }
   }
 
@@ -308,7 +351,16 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                           <p className="text-xs text-gray-500 mt-1">{template.description}</p>
                         )}
                       </TableCell>
-                      <TableCell>{template.table?.label || '-'}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-1">
+                          <span>{template.table?.label || '-'}</span>
+                          {(template as any).sharedTables?.length > 0 && (
+                            <Badge variant="secondary" className="w-fit text-xs">
+                              共享给 {(template as any).sharedTables.length} 个表
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="gap-1">
                           {template.format === 'EXCEL' ? (
@@ -354,6 +406,16 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                             <Button
                               variant="ghost"
                               size="sm"
+                              title="共享设置"
+                              onClick={() => handleShare(template)}
+                            >
+                              <Share2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                          {!template.isSystem && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               className="text-red-500 hover:text-red-600"
                               title="删除模板"
                               onClick={() => handleDelete(template.id)}
@@ -378,6 +440,56 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>共享模板</DialogTitle>
+            <DialogDescription>
+              选择要共享此模板的项目表，共享后其他表也可以使用此模板导出
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="space-y-2">
+              <Label>共享给以下项目表</Label>
+              <div className="border rounded-lg max-h-80 overflow-y-auto">
+                {tables.map(table => (
+                  <div
+                    key={table.id}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b last:border-b-0"
+                    onClick={() => toggleSharedTable(table.id)}
+                  >
+                    <div className={
+                      'w-5 h-5 border rounded border-gray-300 flex items-center justify-center ' +
+                      (sharedTableIds.includes(table.id)
+                        ? 'bg-primary border-primary'
+                        : 'bg-white')
+                    }>
+                      {sharedTableIds.includes(table.id) && (
+                        <Check className="w-3.5 h-3.5 text-white" />
+                      )}
+                    </div>
+                    <span className="text-sm">{table.label}</span>
+                    {sharingTemplate?.tableId === table.id && (
+                      <Badge variant="secondary" className="text-xs">
+                        所属表
+                      </Badge>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShareDialogOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveShare}>
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

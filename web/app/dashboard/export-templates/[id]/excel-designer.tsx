@@ -49,6 +49,9 @@ import {
   AlignJustify,
   ChevronUp,
   ArrowUpDown,
+  Calculator,
+  FileSpreadsheet,
+  Settings,
 } from 'lucide-react'
 import { ExportTemplate, DataTable, TableField } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
@@ -77,6 +80,20 @@ interface CellData {
   rowSpan?: number
   colSpan?: number
   mergeHidden?: boolean
+  formula?: string
+}
+
+interface PageSetup {
+  paperSize: 'A4' | 'A3' | 'Letter'
+  orientation: 'portrait' | 'landscape'
+  marginTop: number
+  marginBottom: number
+  marginLeft: number
+  marginRight: number
+  headerMargin: number
+  footerMargin: number
+  printTitleRows?: string
+  printTitleCols?: string
 }
 
 interface RowConfig {
@@ -151,8 +168,14 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
+  const [formulaDialogOpen, setFormulaDialogOpen] = useState(false)
+  const [pageSetupDialogOpen, setPageSetupDialogOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const isSelecting = useRef(false)
+  const resizingCol = useRef<number | null>(null)
+  const resizingRow = useRef<number | null>(null)
+  const resizeStartPos = useRef<number>(0)
+  const resizeStartSize = useRef<number>(0)
 
   const table = template.table
   const allFields = table.fields
@@ -195,6 +218,28 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
 
   const [rowHeights, setRowHeights] = useState<number[]>(initRowHeights)
   const [colWidths, setColWidths] = useState<number[]>(initColWidths)
+
+  const initPageSetup = useCallback((): PageSetup => {
+    const cfg = template.config as any
+    if (cfg && cfg.pageSetup) {
+      return cfg.pageSetup
+    }
+    return {
+      paperSize: 'A4',
+      orientation: 'portrait',
+      marginTop: 0.75,
+      marginBottom: 0.75,
+      marginLeft: 0.7,
+      marginRight: 0.7,
+      headerMargin: 0.3,
+      footerMargin: 0.3,
+      printTitleRows: '',
+      printTitleCols: '',
+    }
+  }, [template.config])
+
+  const [pageSetup, setPageSetup] = useState<PageSetup>(initPageSetup)
+  const [formulaInput, setFormulaInput] = useState('')
 
   const getCell = (row: number, col: number): CellData => {
     return grid[row]?.[col] || emptyCell()
@@ -356,11 +401,56 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
 
   const handleMouseUp = () => {
     isSelecting.current = false
+    resizingCol.current = null
+    resizingRow.current = null
+  }
+
+  const handleColResizeStart = (e: React.MouseEvent, type: 'col' | 'row', index: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (type === 'col') {
+      resizingCol.current = index
+      resizeStartPos.current = e.clientX
+      resizeStartSize.current = colWidths[index] || 100
+    } else {
+      resizingRow.current = index
+      resizeStartPos.current = e.clientY
+      resizeStartSize.current = rowHeights[index] || 24
+    }
+  }
+
+  const handleTableMouseMove = (e: React.MouseEvent) => {
+    if (resizingCol.current !== null) {
+      const diff = e.clientX - resizeStartPos.current
+      const newWidth = Math.max(40, resizeStartSize.current + diff)
+      setColWidth(resizingCol.current, newWidth)
+    }
+    if (resizingRow.current !== null) {
+      const diff = e.clientY - resizeStartPos.current
+      const newHeight = Math.max(16, resizeStartSize.current + diff)
+      setRowHeight(resizingRow.current, newHeight)
+    }
   }
 
   useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (resizingCol.current !== null) {
+        const diff = e.clientX - resizeStartPos.current
+        const newWidth = Math.max(40, resizeStartSize.current + diff)
+        setColWidth(resizingCol.current, newWidth)
+      }
+      if (resizingRow.current !== null) {
+        const diff = e.clientY - resizeStartPos.current
+        const newHeight = Math.max(16, resizeStartSize.current + diff)
+        setRowHeight(resizingRow.current, newHeight)
+      }
+    }
     window.addEventListener('mouseup', handleMouseUp)
-    return () => window.removeEventListener('mouseup', handleMouseUp)
+    window.addEventListener('mousemove', handleGlobalMouseMove)
+    return () => {
+      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('mousemove', handleGlobalMouseMove)
+    }
   }, [])
 
   const handleCellEdit = (row: number, col: number, value: string) => {
@@ -508,6 +598,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
             grid,
             rowHeights,
             colWidths,
+            pageSetup,
             type: 'EXCEL_TEMPLATE',
           },
         }),
@@ -887,6 +978,210 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
             </div>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-1">
+              <Dialog open={formulaDialogOpen} onOpenChange={setFormulaDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8">
+                    <Calculator className="w-4 h-4 mr-1" />
+                    公式
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>插入公式</DialogTitle>
+                    <DialogDescription>
+                      在当前单元格插入 Excel 公式
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label>常用公式</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { name: '求和', formula: '=SUM(A1:A10)' },
+                          { name: '平均值', formula: '=AVERAGE(A1:A10)' },
+                          { name: '计数', formula: '=COUNT(A1:A10)' },
+                          { name: '最大值', formula: '=MAX(A1:A10)' },
+                          { name: '最小值', formula: '=MIN(A1:A10)' },
+                          { name: '日期', formula: '=TODAY()' },
+                        ].map(item => (
+                          <Button
+                            key={item.name}
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setFormulaInput(item.formula)
+                            }}
+                          >
+                            {item.name}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="formula">公式</Label>
+                      <Input
+                        id="formula"
+                        placeholder="例如: =SUM(A1:B2)"
+                        value={formulaInput}
+                        onChange={(e) => setFormulaInput(e.target.value)}
+                      />
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      提示：公式支持引用其他单元格，如 =A1+B1，或使用数据库字段如 ={'{{price}}'}*{'{{quantity}}'}
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setFormulaDialogOpen(false)}>
+                      取消
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (activeCell && formulaInput) {
+                          setCell(activeCell.row, activeCell.col, {
+                            value: formulaInput,
+                            formula: formulaInput,
+                          })
+                          setFormulaDialogOpen(false)
+                          setFormulaInput('')
+                        }
+                      }}
+                      disabled={!activeCell || !formulaInput}
+                    >
+                      插入
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              <Dialog open={pageSetupDialogOpen} onOpenChange={setPageSetupDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8">
+                    <Settings className="w-4 h-4 mr-1" />
+                    页面布局
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>页面布局设置</DialogTitle>
+                    <DialogDescription>
+                      设置打印纸张大小、方向和边距
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>纸张大小</Label>
+                        <Select
+                          value={pageSetup.paperSize}
+                          onValueChange={(v: any) => setPageSetup(p => ({ ...p, paperSize: v }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="A4">A4</SelectItem>
+                            <SelectItem value="A3">A3</SelectItem>
+                            <SelectItem value="Letter">Letter</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>方向</Label>
+                        <Select
+                          value={pageSetup.orientation}
+                          onValueChange={(v: any) => setPageSetup(p => ({ ...p, orientation: v }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="portrait">纵向</SelectItem>
+                            <SelectItem value="landscape">横向</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <Separator />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>上边距 (英寸)</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={pageSetup.marginTop}
+                          onChange={(e) => setPageSetup(p => ({ ...p, marginTop: parseFloat(e.target.value) || 0 }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>下边距 (英寸)</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={pageSetup.marginBottom}
+                          onChange={(e) => setPageSetup(p => ({ ...p, marginBottom: parseFloat(e.target.value) || 0 }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>左边距 (英寸)</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={pageSetup.marginLeft}
+                          onChange={(e) => setPageSetup(p => ({ ...p, marginLeft: parseFloat(e.target.value) || 0 }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>右边距 (英寸)</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={pageSetup.marginRight}
+                          onChange={(e) => setPageSetup(p => ({ ...p, marginRight: parseFloat(e.target.value) || 0 }))}
+                        />
+                      </div>
+                    </div>
+                    <Separator />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>页眉边距 (英寸)</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={pageSetup.headerMargin}
+                          onChange={(e) => setPageSetup(p => ({ ...p, headerMargin: parseFloat(e.target.value) || 0 }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>页脚边距 (英寸)</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={pageSetup.footerMargin}
+                          onChange={(e) => setPageSetup(p => ({ ...p, footerMargin: parseFloat(e.target.value) || 0 }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>打印标题行 (如: 1:3)</Label>
+                      <Input
+                        placeholder="例如: 1:3 表示第1到3行为每页重复标题"
+                        value={pageSetup.printTitleRows || ''}
+                        onChange={(e) => setPageSetup(p => ({ ...p, printTitleRows: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setPageSetupDialogOpen(false)}>
+                      取消
+                    </Button>
+                    <Button onClick={() => setPageSetupDialogOpen(false)}>
+                      确定
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-1">
               <Button variant="ghost" size="icon" className="h-8 w-8" title="添加行" onClick={addRow}>
                 <ChevronDown className="w-4 h-4" />
               </Button>
@@ -960,10 +1255,15 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                     {grid[0]?.map((_, cIdx) => (
                       <th
                         key={cIdx}
-                        className="h-6 bg-gray-100 border border-gray-300 text-gray-600 font-medium text-xs"
+                        className="h-6 bg-gray-100 border border-gray-300 text-gray-600 font-medium text-xs relative select-none"
                         style={{ width: colWidths[cIdx] || 100, minWidth: colWidths[cIdx] || 100 }}
                       >
-                        {getColLabel(cIdx)}
+                        <span className="px-1">{getColLabel(cIdx)}</span>
+                        <div
+                          className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-400 transition-colors z-10"
+                          onMouseDown={(e) => handleColResizeStart(e, 'col', cIdx)}
+                          title="拖动调整列宽"
+                        />
                       </th>
                     ))}
                   </tr>
@@ -972,10 +1272,15 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                   {grid.map((row, rIdx) => (
                     <tr key={rIdx} style={{ height: rowHeights[rIdx] || 24 }}>
                       <td 
-                        className="w-10 bg-gray-100 border border-gray-300 text-gray-500 font-normal text-xs text-center sticky left-0 z-10 align-middle"
+                        className="w-10 bg-gray-100 border border-gray-300 text-gray-500 font-normal text-xs text-center sticky left-0 z-10 align-middle relative select-none"
                         style={{ height: rowHeights[rIdx] || 24 }}
                       >
                         {rIdx + 1}
+                        <div
+                          className="absolute bottom-0 left-0 w-full h-1.5 cursor-row-resize hover:bg-blue-400 transition-colors z-10"
+                          onMouseDown={(e) => handleColResizeStart(e, 'row', rIdx)}
+                          title="拖动调整行高"
+                        />
                       </td>
                       {row.map((cell, cIdx) => {
                         if (cell.mergeHidden) return null

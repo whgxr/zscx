@@ -8,6 +8,8 @@ const updateTemplateSchema = z.object({
   description: z.string().optional().nullable(),
   config: z.record(z.any()).optional(),
   isDefault: z.boolean().optional(),
+  isShared: z.boolean().optional(),
+  sharedTableIds: z.array(z.number()).optional(),
 })
 
 export async function PUT(
@@ -60,6 +62,12 @@ export async function PUT(
         ...(data.description !== undefined && { description: data.description }),
         ...(data.config !== undefined && { config: data.config as any }),
         ...(data.isDefault !== undefined && { isDefault: data.isDefault }),
+        ...(data.isShared !== undefined && { isShared: data.isShared }),
+        ...(data.sharedTableIds !== undefined && {
+          sharedTables: {
+            set: data.sharedTableIds.map(id => ({ id })),
+          },
+        }),
       },
     })
 

@@ -27,6 +27,13 @@ export default async function ExportTemplatesPage() {
           label: true,
         },
       },
+      sharedTables: {
+        select: {
+          id: true,
+          name: true,
+          label: true,
+        },
+      },
     },
   })
 

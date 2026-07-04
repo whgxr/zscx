@@ -22,6 +22,8 @@ import {
   FileSpreadsheet,
   FileText,
   Download,
+  Eye,
+  Printer,
 } from 'lucide-react'
 import { DataTable, TableField, ExportType, ExportFormat } from '@prisma/client'
 
@@ -52,6 +54,8 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
   const [templates, setTemplates] = useState<ExportTemplate[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState<string>('')
   const [exporting, setExporting] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   useEffect(() => {
     if (open) {
@@ -86,6 +90,15 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
     }
   }
 
+  const buildExportUrl = () => {
+    const params = new URLSearchParams()
+    params.set('templateId', selectedTemplate)
+    params.set('useTemplate', 'true')
+    if (search) params.set('search', search)
+    if (status) params.set('status', status)
+    return `/api/export/${table.name}/${format === 'EXCEL' ? 'excel' : 'pdf'}?${params}`
+  }
+
   const handleExport = async () => {
     if (!selectedTemplate) {
       alert('请选择导出模板')
@@ -93,13 +106,7 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
     }
     setExporting(true)
     try {
-      const params = new URLSearchParams()
-      params.set('templateId', selectedTemplate)
-      params.set('useTemplate', 'true')
-      if (search) params.set('search', search)
-      if (status) params.set('status', status)
-
-      const res = await fetch(`/api/export/${table.name}/${format === 'EXCEL' ? 'excel' : 'pdf'}?${params}`)
+      const res = await fetch(buildExportUrl())
       if (res.ok) {
         const blob = await res.blob()
         const url = window.URL.createObjectURL(blob)
@@ -120,83 +127,155 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>导出数据</DialogTitle>
-          <DialogDescription>
-            选择导出格式和模板
-          </DialogDescription>
-        </DialogHeader>
+  const handlePreview = async () => {
+    if (!selectedTemplate) {
+      alert('请选择导出模板')
+      return
+    }
+    try {
+      const res = await fetch(buildExportUrl())
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = window.URL.createObjectURL(blob)
+        setPreviewUrl(url)
+        setPreviewOpen(true)
+      } else {
+        alert('预览失败')
+      }
+    } catch (err) {
+      alert('预览失败')
+    }
+  }
 
-        <div className="space-y-6 py-4">
-          <div>
-            <Label>导出格式</Label>
-            <div className="flex gap-2 mt-2">
-              <Button
-                variant={format === 'EXCEL' ? 'default' : 'outline'}
-                className="flex-1"
-                onClick={() => setFormat('EXCEL')}
-              >
-                <FileSpreadsheet className="w-4 h-4 mr-2" />
-                Excel
-              </Button>
-              <Button
-                variant={format === 'PDF' ? 'default' : 'outline'}
-                className="flex-1"
-                onClick={() => setFormat('PDF')}
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                PDF
-              </Button>
+  const handlePrint = () => {
+    if (previewUrl) {
+      const printWindow = window.open(previewUrl, '_blank')
+      if (printWindow) {
+        printWindow.onload = () => {
+          printWindow.print()
+        }
+      }
+    }
+  }
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>导出数据</DialogTitle>
+            <DialogDescription>
+              选择导出格式和模板
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            <div>
+              <Label>导出格式</Label>
+              <div className="flex gap-2 mt-2">
+                <Button
+                  variant={format === 'EXCEL' ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setFormat('EXCEL')}
+                >
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  Excel
+                </Button>
+                <Button
+                  variant={format === 'PDF' ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setFormat('PDF')}
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  PDF
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <Label>选择模板</Label>
+              <div className="flex gap-2 mt-2">
+                <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="请选择导出模板" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.length > 0 ? (
+                      templates.map(template => (
+                        <SelectItem key={template.id} value={template.id.toString()}>
+                          <div className="flex items-center gap-2">
+                            <span>{template.name}</span>
+                            {template.isSystem && <span className="text-xs text-gray-400">(系统)</span>}
+                            {template.isDefault && <span className="text-xs text-blue-500">(默认)</span>}
+                          </div>
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="__empty__" disabled>
+                        暂无模板，请先创建导出模板
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              {templates.length === 0 && (
+                <p className="text-xs text-amber-600 mt-2">
+                  暂无该格式的模板，请先在"导出模板设计"中创建模板
+                </p>
+              )}
             </div>
           </div>
 
-          <div>
-            <Label>选择模板</Label>
-            <div className="flex gap-2 mt-2">
-              <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="请选择导出模板" />
-                </SelectTrigger>
-                <SelectContent>
-                  {templates.length > 0 ? (
-                    templates.map(template => (
-                      <SelectItem key={template.id} value={template.id.toString()}>
-                        <div className="flex items-center gap-2">
-                          <span>{template.name}</span>
-                          {template.isSystem && <span className="text-xs text-gray-400">(系统)</span>}
-                          {template.isDefault && <span className="text-xs text-blue-500">(默认)</span>}
-                        </div>
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="__empty__" disabled>
-                      暂无模板，请先创建导出模板
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={handlePreview}
+                disabled={exporting || !selectedTemplate || templates.length === 0}
+              >
+                <Eye className="w-4 h-4 mr-2" />
+                预览
+              </Button>
+              <Button onClick={handleExport} disabled={exporting || !selectedTemplate || templates.length === 0}>
+                <Download className="w-4 h-4 mr-2" />
+                {exporting ? '导出中...' : '导出'}
+              </Button>
             </div>
-            {templates.length === 0 && (
-              <p className="text-xs text-amber-600 mt-2">
-                暂无该格式的模板，请先在"导出模板设计"中创建模板
-              </p>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-5xl h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>预览</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handlePrint}>
+                  <Printer className="w-4 h-4 mr-2" />
+                  打印
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleExport}>
+                  <Download className="w-4 h-4 mr-2" />
+                  下载
+                </Button>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden">
+            {previewUrl && (
+              <iframe
+                src={previewUrl}
+                className="w-full h-full border rounded"
+                title="预览"
+              />
             )}
           </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button onClick={handleExport} disabled={exporting || !selectedTemplate || templates.length === 0}>
-            <Download className="w-4 h-4 mr-2" />
-            {exporting ? '导出中...' : '导出'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
