@@ -28,3 +28,5 @@ miniprogram/project.private.config.json
 
 # Docker
 docker/.env
+
+.sync_temp_dir/

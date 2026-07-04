@@ -42,6 +42,13 @@ import {
   Trash2,
   Database,
   ChevronDown,
+  Merge,
+  Unlink,
+  Grid3x3,
+  Minus,
+  AlignJustify,
+  ChevronUp,
+  ArrowUpDown,
 } from 'lucide-react'
 import { ExportTemplate, DataTable, TableField } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
@@ -58,9 +65,26 @@ interface CellData {
   italic?: boolean
   underline?: boolean
   align?: 'left' | 'center' | 'right'
+  verticalAlign?: 'top' | 'middle' | 'bottom'
   bgColor?: string
   textColor?: string
   fontSize?: number
+  borderTop?: string
+  borderBottom?: string
+  borderLeft?: string
+  borderRight?: string
+  wrapText?: boolean
+  rowSpan?: number
+  colSpan?: number
+  mergeHidden?: boolean
+}
+
+interface RowConfig {
+  height: number
+}
+
+interface ColConfig {
+  width: number
 }
 
 interface ExcelTemplateDesignerProps {
@@ -153,6 +177,25 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
 
   const [grid, setGrid] = useState<CellData[][]>(initGrid)
 
+  const initRowHeights = useCallback((): number[] => {
+    const cfg = template.config as any
+    if (cfg && cfg.rowHeights) {
+      return cfg.rowHeights
+    }
+    return Array.from({ length: DEFAULT_ROWS }, () => 24)
+  }, [template.config])
+
+  const initColWidths = useCallback((): number[] => {
+    const cfg = template.config as any
+    if (cfg && cfg.colWidths) {
+      return cfg.colWidths
+    }
+    return Array.from({ length: DEFAULT_COLS }, () => 100)
+  }, [template.config])
+
+  const [rowHeights, setRowHeights] = useState<number[]>(initRowHeights)
+  const [colWidths, setColWidths] = useState<number[]>(initColWidths)
+
   const getCell = (row: number, col: number): CellData => {
     return grid[row]?.[col] || emptyCell()
   }
@@ -179,6 +222,122 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
       }
       return newGrid
     })
+  }
+
+  const mergeCells = () => {
+    if (!selection) return
+    const { start, end } = selection
+    if (start.row === end.row && start.col === end.col) return
+
+    const rowSpan = end.row - start.row + 1
+    const colSpan = end.col - start.col + 1
+
+    setGrid(prev => {
+      const newGrid = prev.map(r => r.map(c => ({ ...c })))
+      const topLeftCell = { ...newGrid[start.row][start.col] }
+      topLeftCell.rowSpan = rowSpan
+      topLeftCell.colSpan = colSpan
+      newGrid[start.row][start.col] = topLeftCell
+
+      for (let r = start.row; r <= end.row; r++) {
+        for (let c = start.col; c <= end.col; c++) {
+          if (r === start.row && c === start.col) continue
+          newGrid[r][c] = { ...newGrid[r][c], mergeHidden: true }
+        }
+      }
+      return newGrid
+    })
+  }
+
+  const unmergeCells = () => {
+    if (!selection) return
+    const { start, end } = selection
+
+    setGrid(prev => {
+      const newGrid = prev.map(r => r.map(c => ({ ...c })))
+      for (let r = start.row; r <= end.row; r++) {
+        for (let c = start.col; c <= end.col; c++) {
+          if (newGrid[r]?.[c]) {
+            delete newGrid[r][c].rowSpan
+            delete newGrid[r][c].colSpan
+            delete newGrid[r][c].mergeHidden
+          }
+        }
+      }
+      return newGrid
+    })
+  }
+
+  const setAllBorders = (borderStyle: string) => {
+    if (!selection) return
+    setGrid(prev => {
+      const newGrid = prev.map(r => r.map(c => ({ ...c })))
+      for (let r = selection.start.row; r <= selection.end.row; r++) {
+        for (let c = selection.start.col; c <= selection.end.col; c++) {
+          if (newGrid[r] && newGrid[r][c]) {
+            newGrid[r][c] = {
+              ...newGrid[r][c],
+              borderTop: borderStyle,
+              borderBottom: borderStyle,
+              borderLeft: borderStyle,
+              borderRight: borderStyle,
+            }
+          }
+        }
+      }
+      return newGrid
+    })
+  }
+
+  const clearAllBorders = () => {
+    if (!selection) return
+    setGrid(prev => {
+      const newGrid = prev.map(r => r.map(c => ({ ...c })))
+      for (let r = selection.start.row; r <= selection.end.row; r++) {
+        for (let c = selection.start.col; c <= selection.end.col; c++) {
+          if (newGrid[r] && newGrid[r][c]) {
+            delete newGrid[r][c].borderTop
+            delete newGrid[r][c].borderBottom
+            delete newGrid[r][c].borderLeft
+            delete newGrid[r][c].borderRight
+          }
+        }
+      }
+      return newGrid
+    })
+  }
+
+  const setRowHeight = (row: number, height: number) => {
+    setRowHeights(prev => {
+      const newHeights = [...prev]
+      newHeights[row] = height
+      return newHeights
+    })
+  }
+
+  const setColWidth = (col: number, width: number) => {
+    setColWidths(prev => {
+      const newWidths = [...prev]
+      newWidths[col] = width
+      return newWidths
+    })
+  }
+
+  const addRow = () => {
+    setGrid(prev => {
+      const newGrid = [...prev]
+      const cols = prev[0]?.length || DEFAULT_COLS
+      newGrid.push(Array.from({ length: cols }, () => emptyCell()))
+      return newGrid
+    })
+    setRowHeights(prev => [...prev, 24])
+  }
+
+  const addCol = () => {
+    setGrid(prev => {
+      return prev.map(row => [...row, emptyCell()])
+    })
+    setColWidths(prev => [...prev, 100])
   }
 
   const handleCellClick = (row: number, col: number) => {
@@ -229,26 +388,12 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
     }
   }
 
-  const addRow = () => {
-    setGrid(prev => {
-      const newGrid = [...prev]
-      const cols = prev[0]?.length || DEFAULT_COLS
-      newGrid.push(Array.from({ length: cols }, () => emptyCell()))
-      return newGrid
-    })
-  }
-
-  const addCol = () => {
-    setGrid(prev => {
-      return prev.map(row => [...row, emptyCell()])
-    })
-  }
-
   const deleteRow = () => {
     if (!selection) return
     const startRow = selection.start.row
     const endRow = selection.end.row
     setGrid(prev => prev.filter((_, i) => i < startRow || i > endRow))
+    setRowHeights(prev => prev.filter((_, i) => i < startRow || i > endRow))
     setActiveCell(null)
     setSelection(null)
   }
@@ -258,6 +403,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
     const startCol = selection.start.col
     const endCol = selection.end.col
     setGrid(prev => prev.map(row => row.filter((_, i) => i < startCol || i > endCol)))
+    setColWidths(prev => prev.filter((_, i) => i < startCol || i > endCol))
     setActiveCell(null)
     setSelection(null)
   }
@@ -289,10 +435,13 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
       const rowCount = worksheet.rowCount || 30
       const colCount = worksheet.columnCount || 15
       const newGrid: CellData[][] = []
+      const newRowHeights: number[] = []
+      const newColWidths: number[] = []
 
       for (let r = 1; r <= rowCount; r++) {
         const row: CellData[] = []
         const rowData = worksheet.getRow(r)
+        newRowHeights.push(rowData.height || 24)
         for (let c = 1; c <= colCount; c++) {
           const cellData = rowData.getCell(c)
           const cell: CellData = {
@@ -304,13 +453,40 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
             bgColor: (cellData.fill as any)?.fgColor?.argb ? '#' + (cellData.fill as any).fgColor.argb.slice(2) : undefined,
             textColor: cellData.font?.color?.argb ? '#' + cellData.font.color.argb.slice(2) : undefined,
             align: cellData.alignment?.horizontal as any,
+            verticalAlign: cellData.alignment?.vertical as any,
+            wrapText: cellData.alignment?.wrapText,
           }
           row.push(cell)
         }
         newGrid.push(row)
       }
 
+      for (let c = 1; c <= colCount; c++) {
+        const colData = worksheet.getColumn(c)
+        newColWidths.push((colData.width || 10) * 7)
+      }
+
+      const merges = (worksheet as any).model?.merges || []
+      merges.forEach((merge: any) => {
+        const top = (typeof merge === 'string') ? parseInt(merge.split(':')[0].replace(/\D/g, '')) - 1 : merge.top - 1
+        const left = (typeof merge === 'string') ? merge.split(':')[0].replace(/\d/g, '').toUpperCase().charCodeAt(0) - 65 : merge.left - 1
+        const bottom = (typeof merge === 'string') ? parseInt(merge.split(':')[1].replace(/\D/g, '')) - 1 : merge.bottom - 1
+        const right = (typeof merge === 'string') ? merge.split(':')[1].replace(/\d/g, '').toUpperCase().charCodeAt(0) - 65 : merge.right - 1
+        if (top >= 0 && left >= 0 && bottom < rowCount && right < colCount) {
+          newGrid[top][left].rowSpan = bottom - top + 1
+          newGrid[top][left].colSpan = right - left + 1
+          for (let r = top; r <= bottom; r++) {
+            for (let c = left; c <= right; c++) {
+              if (r === top && c === left) continue
+              newGrid[r][c].mergeHidden = true
+            }
+          }
+        }
+      })
+
       setGrid(newGrid)
+      setRowHeights(newRowHeights)
+      setColWidths(newColWidths)
       setImportDialogOpen(false)
       alert('导入成功！')
     } catch (err) {
@@ -330,6 +506,8 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
           description,
           config: {
             grid,
+            rowHeights,
+            colWidths,
             type: 'EXCEL_TEMPLATE',
           },
         }),
@@ -585,6 +763,91 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
             </div>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="合并单元格"
+                onClick={mergeCells}
+                disabled={!selection || (selection.start.row === selection.end.row && selection.start.col === selection.end.col)}
+              >
+                <Merge className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="取消合并"
+                onClick={unmergeCells}
+                disabled={!selection}
+              >
+                <Unlink className="w-4 h-4" />
+              </Button>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="全部边框"
+                onClick={() => setAllBorders('1px solid #d1d5db')}
+                disabled={!selection}
+              >
+                <Grid3x3 className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="清除边框"
+                onClick={clearAllBorders}
+                disabled={!selection}
+              >
+                <Minus className="w-4 h-4" />
+              </Button>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="自动换行"
+                onClick={() => setRangeStyle({ wrapText: !activeCellStyle.wrapText })}
+              >
+                <AlignJustify className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="顶端对齐"
+                onClick={() => setRangeStyle({ verticalAlign: 'top' })}
+              >
+                <ChevronUp className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="垂直居中"
+                onClick={() => setRangeStyle({ verticalAlign: 'middle' })}
+              >
+                <ArrowUpDown className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="底端对齐"
+                onClick={() => setRangeStyle({ verticalAlign: 'bottom' })}
+              >
+                <ChevronDown className="w-4 h-4" />
+              </Button>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-1">
               <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
                 <DialogTrigger asChild>
                   <Button variant="outline" size="sm" className="h-8">
@@ -689,7 +952,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
               className="overflow-auto max-h-[70vh]"
               onMouseUp={handleMouseUp}
             >
-              <table className="border-collapse text-xs w-full" style={{ tableLayout: 'fixed' }}>
+              <table className="border-collapse text-xs" style={{ tableLayout: 'fixed' }}>
                 <thead className="sticky top-0 z-10">
                   <tr>
                     <th className="w-10 h-6 bg-gray-100 border border-gray-300 text-gray-500 font-normal text-xs sticky left-0 z-20">
@@ -697,7 +960,8 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                     {grid[0]?.map((_, cIdx) => (
                       <th
                         key={cIdx}
-                        className="h-6 bg-gray-100 border border-gray-300 text-gray-600 font-medium text-xs min-w-[100px]"
+                        className="h-6 bg-gray-100 border border-gray-300 text-gray-600 font-medium text-xs"
+                        style={{ width: colWidths[cIdx] || 100, minWidth: colWidths[cIdx] || 100 }}
                       >
                         {getColLabel(cIdx)}
                       </th>
@@ -706,18 +970,26 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                 </thead>
                 <tbody>
                   {grid.map((row, rIdx) => (
-                    <tr key={rIdx}>
-                      <td className="w-10 h-6 bg-gray-100 border border-gray-300 text-gray-500 font-normal text-xs text-center sticky left-0 z-10">
+                    <tr key={rIdx} style={{ height: rowHeights[rIdx] || 24 }}>
+                      <td 
+                        className="w-10 bg-gray-100 border border-gray-300 text-gray-500 font-normal text-xs text-center sticky left-0 z-10 align-middle"
+                        style={{ height: rowHeights[rIdx] || 24 }}
+                      >
                         {rIdx + 1}
                       </td>
                       {row.map((cell, cIdx) => {
+                        if (cell.mergeHidden) return null
                         const selected = isCellSelected(rIdx, cIdx)
                         const active = isCellActive(rIdx, cIdx)
+                        const rowSpan = cell.rowSpan || 1
+                        const colSpan = cell.colSpan || 1
                         return (
                           <td
                             key={cIdx}
+                            rowSpan={rowSpan}
+                            colSpan={colSpan}
                             className={
-                              'border h-6 px-1 transition-colors overflow-hidden ' +
+                              'border px-1 transition-colors overflow-hidden align-middle ' +
                               (active
                                 ? 'border-blue-500 border-2'
                                 : selected
@@ -725,13 +997,20 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                                 : 'border-gray-200')
                             }
                             style={{
+                              height: rowHeights[rIdx] || 24,
                               fontWeight: cell.bold ? 'bold' : 'normal',
                               fontStyle: cell.italic ? 'italic' : 'normal',
                               textDecoration: cell.underline ? 'underline' : 'none',
                               textAlign: cell.align || 'left',
+                              verticalAlign: cell.verticalAlign || 'middle',
                               backgroundColor: cell.bgColor || (selected ? '#EFF6FF' : 'white'),
                               color: cell.textColor,
                               fontSize: cell.fontSize ? cell.fontSize + 'px' : '11px',
+                              whiteSpace: cell.wrapText ? 'pre-wrap' : 'nowrap',
+                              borderTop: cell.borderTop,
+                              borderBottom: cell.borderBottom,
+                              borderLeft: cell.borderLeft,
+                              borderRight: cell.borderRight,
                             }}
                             onMouseDown={() => handleCellClick(rIdx, cIdx)}
                             onMouseEnter={() => handleCellMouseEnter(rIdx, cIdx)}

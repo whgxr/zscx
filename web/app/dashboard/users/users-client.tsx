@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,10 +11,15 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs"
 import {
   Select,
   SelectContent,
@@ -37,6 +42,7 @@ import {
   Trash2, 
   Users,
   Shield,
+  Search,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { Role, UserStatus } from '@prisma/client'
@@ -70,6 +76,8 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<UserItem | null>(null)
   const [loading, setLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>('all')
+  const [searchTerm, setSearchTerm] = useState('')
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -78,6 +86,33 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
     email: '',
     role: 'USER' as Role,
   })
+
+  const roleTabConfigs = [
+    { value: 'all', label: '全部', role: null as Role | null },
+    { value: 'ADMIN', label: '超级管理员', role: Role.ADMIN },
+    { value: 'MANAGER', label: '管理员', role: Role.MANAGER },
+    { value: 'USER', label: '录入员', role: Role.USER },
+    { value: 'VIEWER', label: '查看员', role: Role.VIEWER },
+  ]
+
+  const filteredUsers = useMemo(() => {
+    return users.filter(user => {
+      const matchRole = activeTab === 'all' || user.role === activeTab
+      const matchSearch = !searchTerm || 
+        user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.realName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (user.phone && user.phone.includes(searchTerm))
+      return matchRole && matchSearch
+    })
+  }, [users, activeTab, searchTerm])
+
+  const roleCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: users.length }
+    users.forEach(u => {
+      counts[u.role] = (counts[u.role] || 0) + 1
+    })
+    return counts
+  }, [users])
 
   const openCreateDialog = () => {
     setEditingUser(null)
@@ -179,14 +214,13 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
           <p className="text-gray-500 mt-1">管理系统用户和角色</p>
         </div>
         {currentUserRole === 'ADMIN' && (
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button onClick={openCreateDialog}>
-                <Plus className="w-4 h-4 mr-2" />
-                新增用户
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
+          <>
+            <Button onClick={openCreateDialog}>
+              <Plus className="w-4 h-4 mr-2" />
+              新增用户
+            </Button>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogContent>
               <DialogHeader>
                 <DialogTitle>{editingUser ? '编辑用户' : '新增用户'}</DialogTitle>
                 <DialogDescription>
@@ -271,12 +305,36 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </>
         )}
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">用户列表</CardTitle>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-4">
+            <CardTitle className="text-lg">用户列表</CardTitle>
+            <div className="relative w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                placeholder="搜索用户名/姓名/手机号"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          </div>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
+            <TabsList className="grid grid-cols-5 w-full">
+              {roleTabConfigs.map(tab => (
+                <TabsTrigger key={tab.value} value={tab.value}>
+                  {tab.label}
+                  <Badge variant="secondary" className="ml-1.5 text-xs">
+                    {roleCounts[tab.value] || 0}
+                  </Badge>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </CardHeader>
         <CardContent>
           <Table>
@@ -292,58 +350,67 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell className="font-medium">{user.username}</TableCell>
-                  <TableCell>{user.realName}</TableCell>
-                  <TableCell>
-                    <Badge variant={user.role === 'ADMIN' ? 'default' : 'outline'}>
-                      {roleLabels[user.role]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{user.phone || '-'}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={user.status === 'ACTIVE' ? 'success' : 'destructive'}
-                      className="cursor-pointer"
-                      onClick={() => currentUserRole === 'ADMIN' && toggleStatus(user)}
-                    >
-                      {user.status === 'ACTIVE' ? '启用' : '禁用'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-gray-500">{formatDate(user.createdAt)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => router.push(`/dashboard/permissions/${user.id}`)}
+              {filteredUsers.length > 0 ? (
+                filteredUsers.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell className="font-medium">{user.username}</TableCell>
+                    <TableCell>{user.realName}</TableCell>
+                    <TableCell>
+                      <Badge variant={user.role === 'ADMIN' ? 'default' : 'outline'}>
+                        {roleLabels[user.role]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{user.phone || '-'}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={user.status === 'ACTIVE' ? 'success' : 'destructive'}
+                        className="cursor-pointer"
+                        onClick={() => currentUserRole === 'ADMIN' && toggleStatus(user)}
                       >
-                        <Shield className="w-4 h-4" />
-                      </Button>
-                      {currentUserRole === 'ADMIN' && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(user)}
-                          >
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-500 hover:text-red-600"
-                            onClick={() => handleDelete(user.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
+                        {user.status === 'ACTIVE' ? '启用' : '禁用'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-gray-500">{formatDate(user.createdAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => router.push(`/dashboard/permissions/${user.id}`)}
+                        >
+                          <Shield className="w-4 h-4" />
+                        </Button>
+                        {currentUserRole === 'ADMIN' && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditDialog(user)}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600"
+                              onClick={() => handleDelete(user.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-12 text-gray-500">
+                    <Users className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p>暂无用户</p>
                   </TableCell>
                 </TableRow>
-              ))}
+              )}
             </TableBody>
           </Table>
         </CardContent>

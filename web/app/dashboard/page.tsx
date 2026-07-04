@@ -11,6 +11,7 @@ import {
   Clock,
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
+import Link from 'next/link'
 
 export default async function DashboardPage() {
   const user = await getCurrentUser()
@@ -38,6 +39,43 @@ export default async function DashboardPage() {
     { label: '用户数', value: userCount, icon: Users, color: 'bg-purple-500' },
     { label: '今日新增', value: 0, icon: TrendingUp, color: 'bg-orange-500' },
   ]
+
+  const quickActions = [
+    {
+      title: '导入数据',
+      description: '批量导入Excel数据',
+      icon: Upload,
+      color: 'text-blue-500',
+      href: '/dashboard/tables',
+    },
+    {
+      title: '导出报表',
+      description: '导出数据为Excel/PDF',
+      icon: FileText,
+      color: 'text-green-500',
+      href: '/dashboard/export-templates',
+    },
+    {
+      title: '项目管理',
+      description: '自定义数据表结构',
+      icon: Database,
+      color: 'text-purple-500',
+      href: '/dashboard/tables',
+    },
+    {
+      title: '用户管理',
+      description: '管理用户和权限',
+      icon: Users,
+      color: 'text-orange-500',
+      href: '/dashboard/users',
+      adminOnly: true,
+    },
+  ]
+
+  const showQuickAction = (action: any) => {
+    if (action.adminOnly && user.role !== 'ADMIN') return false
+    return true
+  }
 
   return (
     <div className="space-y-6">
@@ -104,26 +142,20 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                <Upload className="w-8 h-8 text-blue-500 mb-2" />
-                <p className="font-medium">导入数据</p>
-                <p className="text-xs text-gray-500">批量导入Excel数据</p>
-              </div>
-              <div className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                <FileText className="w-8 h-8 text-green-500 mb-2" />
-                <p className="font-medium">导出报表</p>
-                <p className="text-xs text-gray-500">导出数据为Excel/PDF</p>
-              </div>
-              <div className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                <Database className="w-8 h-8 text-purple-500 mb-2" />
-                <p className="font-medium">数据表管理</p>
-                <p className="text-xs text-gray-500">自定义数据表结构</p>
-              </div>
-              <div className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                <Users className="w-8 h-8 text-orange-500 mb-2" />
-                <p className="font-medium">用户管理</p>
-                <p className="text-xs text-gray-500">管理用户和权限</p>
-              </div>
+              {quickActions.filter(showQuickAction).map((action) => {
+                const Icon = action.icon
+                return (
+                  <Link
+                    key={action.title}
+                    href={action.href}
+                    className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors block"
+                  >
+                    <Icon className={`w-8 h-8 ${action.color} mb-2`} />
+                    <p className="font-medium">{action.title}</p>
+                    <p className="text-xs text-gray-500">{action.description}</p>
+                  </Link>
+                )
+              })}
             </div>
           </CardContent>
         </Card>

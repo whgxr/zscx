@@ -438,6 +438,50 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       fgColor: { argb: 'FFE5E7EB' },
     }
 
+    const typeSheet = workbook.addWorksheet('字段类型说明')
+
+    typeSheet.columns = [
+      { header: '类型名称', key: 'type', width: 20 },
+      { header: '显示名称', key: 'label', width: 15 },
+      { header: '说明', key: 'description', width: 50 },
+    ]
+
+    const fieldTypeDescriptions = [
+      { type: 'TEXT', label: '单行文本', description: '短文本内容，如姓名、标题等' },
+      { type: 'TEXTAREA', label: '多行文本', description: '长文本内容，如备注、描述等' },
+      { type: 'NUMBER', label: '数字', description: '普通数字，支持小数' },
+      { type: 'INTEGER', label: '整数', description: '整数数字，不支持小数' },
+      { type: 'FLOAT', label: '小数', description: '浮点数，支持多位小数' },
+      { type: 'MONEY', label: '金额', description: '货币金额，保留2位小数' },
+      { type: 'DATE', label: '日期', description: '日期选择，格式 YYYY-MM-DD' },
+      { type: 'DATETIME', label: '日期时间', description: '日期时间选择，格式 YYYY-MM-DD HH:mm:ss' },
+      { type: 'SELECT', label: '单选下拉', description: '下拉框选择，单选一个选项' },
+      { type: 'RADIO', label: '单选按钮', description: '单选按钮组，单选一个选项' },
+      { type: 'MULTISELECT', label: '多选', description: '多选下拉框，可选择多个选项' },
+      { type: 'CHECKBOX', label: '复选框', description: '复选框组，可勾选多个' },
+      { type: 'SWITCH', label: '开关', description: '开关/是/否选项' },
+      { type: 'UPLOAD_IMAGE', label: '图片上传', description: '上传图片文件，支持多图' },
+      { type: 'UPLOAD_FILE', label: '文件上传', description: '上传任意文件，支持多文件' },
+      { type: 'PHONE', label: '手机号', description: '手机号码输入，自动校验格式' },
+      { type: 'EMAIL', label: '邮箱', description: '邮箱地址输入，自动校验格式' },
+      { type: 'IDCARD', label: '身份证号', description: '身份证号码输入，自动校验格式' },
+      { type: 'ADDRESS', label: '地址', description: '地址文本输入' },
+      { type: 'RICHTEXT', label: '富文本', description: '富文本编辑器，支持图文混排' },
+      { type: 'RELATION', label: '关联表', description: '关联其他数据表的记录' },
+    ]
+
+    fieldTypeDescriptions.forEach(item => {
+      typeSheet.addRow(item)
+    })
+
+    const typeHeaderRow = typeSheet.getRow(1)
+    typeHeaderRow.font = { bold: true }
+    typeHeaderRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE5E7EB' },
+    }
+
     const buffer = await workbook.xlsx.writeBuffer()
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     const url = URL.createObjectURL(blob)

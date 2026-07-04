@@ -11,6 +11,7 @@ import {
   FileBarChart,
   ShieldCheck,
   Palette,
+  Activity,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Role } from '@prisma/client'
@@ -44,6 +45,7 @@ export function Sidebar({ user, tables }: SidebarProps) {
   const pathname = usePathname()
 
   const isAdmin = user.role === 'ADMIN' || user.role === 'MANAGER'
+  const isSuperAdmin = user.role === 'ADMIN'
 
   return (
     <aside className="w-64 bg-white border-r flex flex-col">
@@ -164,6 +166,20 @@ export function Sidebar({ user, tables }: SidebarProps) {
               <Settings className="w-5 h-5" />
               系统设置
             </Link>
+            {isSuperAdmin && (
+              <Link
+                href="/dashboard/logs"
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+                  pathname.startsWith('/dashboard/logs')
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-gray-600 hover:bg-gray-100"
+                )}
+              >
+                <Activity className="w-5 h-5" />
+                操作日志
+              </Link>
+            )}
           </div>
         )}
       </nav>

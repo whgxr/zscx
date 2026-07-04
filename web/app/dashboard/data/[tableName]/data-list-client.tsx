@@ -7,6 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Table,
   TableBody,
   TableCell,
@@ -34,10 +40,12 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
+  Image as ImageIcon,
+  X,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
 import { formatDateTime } from '@/lib/utils'
-import { DataTable, TableField, RecordStatus, Role } from '@prisma/client'
+import { DataTable, TableField, RecordStatus, Role, FieldType } from '@prisma/client'
 
 interface DataListClientProps {
   table: DataTable & {
@@ -67,6 +75,11 @@ export function DataListClient({ table, user }: DataListClientProps) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [imageGallery, setImageGallery] = useState<{ open: boolean; images: string[]; fieldLabel: string }>({
+    open: false,
+    images: [],
+    fieldLabel: '',
+  })
 
   const listFields = table.fields.filter((f: any) => f.showInList)
 
@@ -214,7 +227,48 @@ export function DataListClient({ table, user }: DataListClientProps) {
                       <TableCell className="font-mono text-sm">#{record.id}</TableCell>
                       {listFields.map((field) => (
                         <TableCell key={field.id}>
-                          {record.data?.[field.name]?.toString().slice(0, 50) || '-'}
+                          {field.type === FieldType.UPLOAD_IMAGE ? (() => {
+                            const val = record.data?.[field.name]
+                            const images: string[] = Array.isArray(val) ? val : (val ? [val] : [])
+                            if (images.length === 0) return <span className="text-gray-400">-</span>
+                            return (
+                              <div 
+                                className="flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => setImageGallery({
+                                  open: true,
+                                  images,
+                                  fieldLabel: field.label,
+                                })}
+                              >
+                                <div className="w-10 h-10 rounded border overflow-hidden flex-shrink-0">
+                                  <img 
+                                    src={images[0]} 
+                                    alt="" 
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                                {images.length > 1 && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    +{images.length - 1}
+                                  </Badge>
+                                )}
+                              </div>
+                            )
+                          })() : field.type === FieldType.UPLOAD_FILE ? (() => {
+                            const val = record.data?.[field.name]
+                            const files: string[] = Array.isArray(val) ? val : (val ? [val] : [])
+                            if (files.length === 0) return <span className="text-gray-400">-</span>
+                            return (
+                              <div className="flex items-center gap-1">
+                                <FileText className="w-4 h-4 text-gray-400" />
+                                <span className="text-sm">{files.length} 个文件</span>
+                              </div>
+                            )
+                          })() : (
+                            <span className="text-sm">
+                              {record.data?.[field.name]?.toString().slice(0, 50) || '-'}
+                            </span>
+                          )}
                         </TableCell>
                       ))}
                       <TableCell>
@@ -297,6 +351,47 @@ export function DataListClient({ table, user }: DataListClientProps) {
         search={search}
         status={status}
       />
+
+      <Dialog open={imageGallery.open} onOpenChange={(o) => setImageGallery(g => ({ ...g, open: o }))}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>{imageGallery.fieldLabel} - 图片列表（共 {imageGallery.images.length} 张）</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 py-4">
+            {imageGallery.images.map((url, idx) => (
+              <div key={idx} className="relative group">
+                <div className="aspect-square border rounded-lg overflow-hidden">
+                  <img 
+                    src={url} 
+                    alt={`图片 ${idx + 1}`} 
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center w-8 h-8 bg-black/60 text-white rounded hover:bg-black/80"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </a>
+                  <a
+                    href={url}
+                    download
+                    className="inline-flex items-center justify-center w-8 h-8 bg-black/60 text-white rounded hover:bg-black/80 ml-1"
+                  >
+                    <Download className="w-4 h-4" />
+                  </a>
+                </div>
+                <div className="absolute bottom-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                  {idx + 1} / {imageGallery.images.length}
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

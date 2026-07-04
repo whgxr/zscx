@@ -59,11 +59,18 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
       adminOnly: false,
     },
     {
-      title: '导出模板',
+      title: '导出模板设计',
       description: '可视化设计 Excel/PDF 导出模板',
       href: '/dashboard/export-templates',
       icon: Palette,
       adminOnly: false,
+    },
+    {
+      title: '操作日志',
+      description: '查看系统操作记录和审计日志',
+      href: '/dashboard/logs',
+      icon: Activity,
+      adminOnly: true,
     },
   ]
 
