@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { z } from 'zod'
 
 const updateTableSchema = z.object({
+  name: z.string().min(1, '表名不能为空').optional(),
   label: z.string().min(1, '显示名称不能为空').optional(),
   description: z.string().nullable().optional(),
   icon: z.string().nullable().optional(),
@@ -63,6 +64,14 @@ export async function PUT(
 
     const body = await req.json()
     const data = updateTableSchema.parse(body)
+
+    // 只有管理员可以修改表名和显示名称
+    if ((data.name || data.label) && user.role !== 'ADMIN') {
+      return NextResponse.json(
+        { message: '只有系统管理员可以修改表名和显示名称' },
+        { status: 403 }
+      )
+    }
 
     const table = await prisma.dataTable.update({
       where: { id },

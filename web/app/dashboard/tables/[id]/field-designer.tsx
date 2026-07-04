@@ -53,13 +53,15 @@ import {
   DollarSign,
   ToggleLeft,
   AlignLeft,
+  Pencil,
 } from 'lucide-react'
-import { FieldType, DataTable, TableField } from '@prisma/client'
+import { FieldType, DataTable, TableField, Role } from '@prisma/client'
 
 interface FieldDesignerProps {
   table: DataTable & {
     fields: TableField[]
   }
+  userRole: Role
 }
 
 const fieldTypeConfig: Record<FieldType, { label: string; icon: any }> = {
@@ -86,12 +88,18 @@ const fieldTypeConfig: Record<FieldType, { label: string; icon: any }> = {
   RELATION: { label: '关联表', icon: Table },
 }
 
-export function FieldDesigner({ table }: FieldDesignerProps) {
+export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const router = useRouter()
   const [fields, setFields] = useState<TableField[]>(table.fields)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingField, setEditingField] = useState<TableField | null>(null)
   const [loading, setLoading] = useState(false)
+  const [tableEditOpen, setTableEditOpen] = useState(false)
+  const [tableForm, setTableForm] = useState({
+    name: table.name,
+    label: table.label,
+  })
+  const [tableEditLoading, setTableEditLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     label: '',
@@ -182,6 +190,29 @@ export function FieldDesigner({ table }: FieldDesignerProps) {
     }
   }
 
+  const handleUpdateTable = async () => {
+    setTableEditLoading(true)
+    try {
+      const res = await fetch(`/api/tables/${table.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tableForm),
+      })
+
+      if (res.ok) {
+        setTableEditOpen(false)
+        router.refresh()
+      } else {
+        const data = await res.json()
+        alert(data.message || '修改失败')
+      }
+    } catch (err) {
+      alert('修改失败')
+    } finally {
+      setTableEditLoading(false)
+    }
+  }
+
   const typeInfo = fieldTypeConfig[formData.type]
   const TypeIcon = typeInfo?.icon || Type
 
@@ -192,10 +223,62 @@ export function FieldDesigner({ table }: FieldDesignerProps) {
           <ArrowLeft className="w-4 h-4 mr-2" />
           返回
         </Button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold text-gray-900">字段设计 - {table.label}</h1>
           <p className="text-gray-500 mt-1">表名: {table.name}</p>
         </div>
+        {userRole === 'ADMIN' && (
+          <Dialog open={tableEditOpen} onOpenChange={setTableEditOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Pencil className="w-4 h-4 mr-2" />
+                修改表名
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>修改数据表信息</DialogTitle>
+                <DialogDescription>
+                  只有系统管理员可以修改表名和显示名称
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="table-name">表名（英文标识）</Label>
+                  <Input
+                    id="table-name"
+                    placeholder="如：household_info"
+                    value={tableForm.name}
+                    onChange={(e) => setTableForm({ ...tableForm, name: e.target.value })}
+                  />
+                  <p className="text-xs text-gray-500">
+                    只能包含字母、数字和下划线，且以字母开头
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="table-label">显示名称</Label>
+                  <Input
+                    id="table-label"
+                    placeholder="如：住户信息表"
+                    value={tableForm.label}
+                    onChange={(e) => setTableForm({ ...tableForm, label: e.target.value })}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setTableEditOpen(false)}>
+                  取消
+                </Button>
+                <Button
+                  onClick={handleUpdateTable}
+                  disabled={tableEditLoading || !tableForm.name || !tableForm.label}
+                >
+                  {tableEditLoading ? '保存中...' : '保存'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

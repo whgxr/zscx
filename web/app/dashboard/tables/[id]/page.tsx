@@ -36,5 +36,5 @@ export default async function TableDesignerPage({
     redirect('/dashboard/tables')
   }
 
-  return <FieldDesigner table={table} />
+  return <FieldDesigner table={table} userRole={user.role} />
 }
