@@ -33,7 +33,18 @@ export async function GET(req: NextRequest) {
     }
 
     if (tableId) {
-      where.tableId = parseInt(tableId)
+      where.OR = [
+        { ...where.OR[0], tableId: parseInt(tableId) },
+        { ...where.OR[1], tableId: parseInt(tableId) },
+        {
+          isShared: true,
+          sharedTables: {
+            some: {
+              id: parseInt(tableId),
+            },
+          },
+        },
+      ]
     }
 
     if (format) {
@@ -42,6 +53,15 @@ export async function GET(req: NextRequest) {
 
     const templates = await prisma.exportTemplate.findMany({
       where,
+      include: {
+        table: {
+          select: {
+            id: true,
+            name: true,
+            label: true,
+          },
+        },
+      },
       orderBy: [
         { isSystem: 'desc' },
         { isDefault: 'desc' },

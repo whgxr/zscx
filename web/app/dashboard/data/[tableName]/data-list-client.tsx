@@ -6,9 +6,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -44,6 +47,7 @@ import {
   X,
   Settings2,
   Check,
+  Printer,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
 import { formatDateTime } from '@/lib/utils'
@@ -105,6 +109,13 @@ export function DataListClient({ table, user }: DataListClientProps) {
   })
   const [columnSettingOpen, setColumnSettingOpen] = useState(false)
   const [visibleFields, setVisibleFields] = useState<string[]>([])
+  const [recordPrintDialogOpen, setRecordPrintDialogOpen] = useState(false)
+  const [selectedRecord, setSelectedRecord] = useState<any>(null)
+  const [printFormat, setPrintFormat] = useState<'EXCEL' | 'PDF'>('PDF')
+  const [printTemplates, setPrintTemplates] = useState<any[]>([])
+  const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<string>('')
+  const [printPreviewUrl, setPrintPreviewUrl] = useState<string | null>(null)
+  const [printPreviewOpen, setPrintPreviewOpen] = useState(false)
 
   const defaultListFields = table.fields.filter((f: any) => f.showInList)
 
@@ -266,6 +277,82 @@ export function DataListClient({ table, user }: DataListClientProps) {
     } catch (err) {
       console.error('打包图片失败:', err)
       alert('打包图片失败')
+    }
+  }
+
+  const handleRecordPrint = async (record: any) => {
+    setSelectedRecord(record)
+    setPrintFormat('PDF')
+    setRecordPrintDialogOpen(true)
+    try {
+      const res = await fetch(`/api/export-templates?tableId=${table.id}&format=PDF`)
+      if (res.ok) {
+        const data = await res.json()
+        setPrintTemplates(data.templates || [])
+        const defaultTemplate = data.templates?.find((t: any) => t.isDefault)
+        if (defaultTemplate) {
+          setSelectedPrintTemplate(defaultTemplate.id.toString())
+        } else if (data.templates?.length > 0) {
+          setSelectedPrintTemplate(data.templates[0].id.toString())
+        } else {
+          setSelectedPrintTemplate('')
+        }
+      }
+    } catch (err) {
+      console.error('Fetch templates error:', err)
+    }
+  }
+
+  const handlePrintFormatChange = async (fmt: 'EXCEL' | 'PDF') => {
+    setPrintFormat(fmt)
+    try {
+      const res = await fetch(`/api/export-templates?tableId=${table.id}&format=${fmt}`)
+      if (res.ok) {
+        const data = await res.json()
+        setPrintTemplates(data.templates || [])
+        if (data.templates?.length > 0) {
+          setSelectedPrintTemplate(data.templates[0].id.toString())
+        } else {
+          setSelectedPrintTemplate('')
+        }
+      }
+    } catch (err) {
+      console.error('Fetch templates error:', err)
+    }
+  }
+
+  const handlePrintPreview = async () => {
+    if (!selectedPrintTemplate || !selectedRecord) {
+      alert('请选择打印模板')
+      return
+    }
+    try {
+      const params = new URLSearchParams()
+      params.set('templateId', selectedPrintTemplate)
+      params.set('useTemplate', 'true')
+      params.set('recordId', selectedRecord.id.toString())
+      const res = await fetch(`/api/export/${table.name}/${printFormat === 'EXCEL' ? 'excel' : 'pdf'}?${params}`)
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = window.URL.createObjectURL(blob)
+        setPrintPreviewUrl(url)
+        setPrintPreviewOpen(true)
+      } else {
+        alert('预览失败')
+      }
+    } catch (err) {
+      alert('预览失败')
+    }
+  }
+
+  const handlePrint = () => {
+    if (printPreviewUrl) {
+      const printWindow = window.open(printPreviewUrl, '_blank')
+      if (printWindow) {
+        printWindow.onload = () => {
+          printWindow.print()
+        }
+      }
     }
   }
 
@@ -439,6 +526,14 @@ export function DataListClient({ table, user }: DataListClientProps) {
                           <Button
                             variant="ghost"
                             size="sm"
+                            title="打印/预览"
+                            onClick={() => handleRecordPrint(record)}
+                          >
+                            <Printer className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             className="text-red-500 hover:text-red-600"
                             title="删除"
                             onClick={() => handleDelete(record.id)}
@@ -594,6 +689,124 @@ export function DataListClient({ table, user }: DataListClientProps) {
                 </div>
               </div>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={recordPrintDialogOpen} onOpenChange={setRecordPrintDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>打印/预览</DialogTitle>
+            <DialogDescription>
+              选择打印格式和模板
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 py-4">
+            <div>
+              <Label>打印格式</Label>
+              <div className="flex gap-2 mt-2">
+                <Button
+                  variant={printFormat === 'EXCEL' ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => handlePrintFormatChange('EXCEL')}
+                >
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  Excel
+                </Button>
+                <Button
+                  variant={printFormat === 'PDF' ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => handlePrintFormatChange('PDF')}
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  PDF
+                </Button>
+              </div>
+            </div>
+            <div>
+              <Label>选择模板</Label>
+              <div className="flex gap-2 mt-2">
+                <Select value={selectedPrintTemplate} onValueChange={setSelectedPrintTemplate}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="请选择打印模板" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {printTemplates.length > 0 ? (
+                      printTemplates.map((template: any) => (
+                        <SelectItem key={template.id} value={template.id.toString()}>
+                          <div className="flex items-center gap-2">
+                            <span>{template.name}</span>
+                            {template.isSystem && <span className="text-xs text-gray-400">(系统)</span>}
+                            {template.isDefault && <span className="text-xs text-blue-500">(默认)</span>}
+                          </div>
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="__empty__" disabled>
+                        暂无模板，请先创建导出模板
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              {printTemplates.length === 0 && (
+                <p className="text-xs text-amber-600 mt-2">
+                  暂无该格式的模板，请先在"导出模板设计"中创建模板
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecordPrintDialogOpen(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={handlePrintPreview}
+              disabled={!selectedPrintTemplate || printTemplates.length === 0}
+            >
+              <Eye className="w-4 h-4 mr-2" />
+              预览
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={printPreviewOpen} onOpenChange={setPrintPreviewOpen}>
+        <DialogContent className="max-w-5xl h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>打印预览</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handlePrint}>
+                  <Printer className="w-4 h-4 mr-2" />
+                  打印
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    if (printPreviewUrl && selectedRecord) {
+                      const a = document.createElement('a')
+                      a.href = printPreviewUrl
+                      a.download = `${table.label}_记录${selectedRecord.id}.${printFormat === 'EXCEL' ? 'xlsx' : 'pdf'}`
+                      a.click()
+                    }
+                  }}
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  下载
+                </Button>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden">
+            {printPreviewUrl && (
+              <iframe
+                src={printPreviewUrl}
+                className="w-full h-full border rounded"
+                title="打印预览"
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>

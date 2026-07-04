@@ -87,6 +87,7 @@ model DataTable {
   permissions    TablePermission[]
   files          UploadedFile[]
   exportTemplates ExportTemplate[]
+  sharedExportTemplates ExportTemplate[] @relation("SharedTemplates")
 
   @@unique([name])
   @@index([status])
@@ -248,15 +249,18 @@ model ExportTemplate {
   config       Json             // 导出配置（字段、样式等）
   isDefault    Boolean          @default(false)
   isSystem     Boolean          @default(false) // 是否系统模板
+  isShared     Boolean          @default(false) // 是否共享给其他表使用
   createdBy    Int?
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 
   table        DataTable        @relation(fields: [tableId], references: [id])
+  sharedTables DataTable[]      @relation("SharedTemplates")
 
   @@index([tableId])
   @@index([format])
   @@index([createdBy])
+  @@index([isShared])
 }
 
 enum ExportType {

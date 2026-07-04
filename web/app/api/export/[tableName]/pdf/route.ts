@@ -47,14 +47,16 @@ export async function GET(
     const type = (searchParams.get('type') as ExportType) || ExportType.STANDARD
     const templateId = searchParams.get('templateId')
     const fieldsParam = searchParams.get('fields')
+    const recordId = searchParams.get('recordId')
 
     const where: any = { tableId: table.id }
     if (status) where.status = status
+    if (recordId) where.id = parseInt(recordId)
 
     const records = await prisma.dataRecord.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: 100,
+      take: recordId ? 1 : 100,
     })
 
     let selectedFields = table.fields.filter((f: any) => f.showInList)

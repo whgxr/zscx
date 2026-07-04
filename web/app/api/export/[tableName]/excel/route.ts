@@ -47,9 +47,11 @@ export async function GET(
     const templateId = searchParams.get('templateId')
     const fieldsParam = searchParams.get('fields')
     const useTemplate = searchParams.get('useTemplate') === 'true'
+    const recordId = searchParams.get('recordId')
 
     const where: any = { tableId: table.id }
     if (status) where.status = status
+    if (recordId) where.id = parseInt(recordId)
 
     const records = await prisma.dataRecord.findMany({
       where,
