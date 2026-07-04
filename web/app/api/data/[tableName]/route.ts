@@ -132,7 +132,7 @@ export async function POST(
         status,
         createdBy: user.id,
         updatedBy: user.id,
-      },
+      } as any,
     })
 
     await prisma.operationLog.create({

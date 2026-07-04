@@ -92,7 +92,7 @@ export async function POST(
         ...data,
         tableId,
         sortOrder: (maxSortOrder._max.sortOrder || 0) + 1,
-      },
+      } as any,
     })
 
     await prisma.operationLog.create({

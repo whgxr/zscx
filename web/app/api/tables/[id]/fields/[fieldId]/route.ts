@@ -56,7 +56,7 @@ export async function PUT(
 
     const updatedField = await prisma.tableField.update({
       where: { id: fieldId },
-      data,
+      data: data as any,
     })
 
     await prisma.operationLog.create({
@@ -65,7 +65,7 @@ export async function PUT(
         action: 'UPDATE_FIELD',
         module: 'TABLE',
         tableId: field.tableId,
-        detail: { fieldId, ...data },
+        detail: { fieldId, ...data } as any,
       },
     })
 
