@@ -150,7 +150,7 @@ export function Sidebar({ user, tables }: SidebarProps) {
               )}
             >
               <Palette className="w-5 h-5" />
-              导出模板
+              导出模板设计
             </Link>
             <Link
               href="/dashboard/settings"
