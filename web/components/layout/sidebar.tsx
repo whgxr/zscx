@@ -10,6 +10,7 @@ import {
   Building2,
   FileBarChart,
   ShieldCheck,
+  Palette,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Role } from '@prisma/client'
@@ -138,6 +139,18 @@ export function Sidebar({ user, tables }: SidebarProps) {
             >
               <ShieldCheck className="w-5 h-5" />
               权限管理
+            </Link>
+            <Link
+              href="/dashboard/export-templates"
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+                pathname.startsWith('/dashboard/export-templates')
+                  ? "bg-primary/10 text-primary font-medium"
+                  : "text-gray-600 hover:bg-gray-100"
+              )}
+            >
+              <Palette className="w-5 h-5" />
+              导出模板
             </Link>
             <Link
               href="/dashboard/settings"
