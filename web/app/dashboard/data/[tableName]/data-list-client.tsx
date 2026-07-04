@@ -289,7 +289,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}/edit`)}
+                            onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}?mode=edit`)}
                           >
                             <Edit className="w-4 h-4" />
                           </Button>

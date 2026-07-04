@@ -5,8 +5,10 @@ import { RecordDetailClient } from './record-detail-client'
 
 export default async function RecordDetailPage({
   params,
+  searchParams,
 }: {
   params: { tableName: string; id: string }
+  searchParams: { mode?: string }
 }) {
   const user = await getCurrentUser()
   
@@ -39,5 +41,5 @@ export default async function RecordDetailPage({
     redirect(`/dashboard/data/${table.name}`)
   }
 
-  return <RecordDetailClient table={table} record={record} />
+  return <RecordDetailClient table={table} record={record} initialEditMode={searchParams.mode === 'edit'} />
 }

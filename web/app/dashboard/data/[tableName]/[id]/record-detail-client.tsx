@@ -29,11 +29,12 @@ interface RecordDetailClientProps {
       username: string
     } | null
   }
+  initialEditMode?: boolean
 }
 
-export function RecordDetailClient({ table, record }: RecordDetailClientProps) {
+export function RecordDetailClient({ table, record, initialEditMode = false }: RecordDetailClientProps) {
   const router = useRouter()
-  const [isEditing, setIsEditing] = useState(false)
+  const [isEditing, setIsEditing] = useState(initialEditMode)
   const [formData, setFormData] = useState<Record<string, any>>(record.data as any || {})
   const [loading, setLoading] = useState(false)
 
