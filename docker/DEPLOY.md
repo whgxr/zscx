@@ -445,6 +445,32 @@ npx prisma db seed
 exit
 ```
 
+#### 重要版本迁移说明
+
+**v1.1.0 及以上版本升级注意：**
+
+从旧版本升级到包含以下功能的版本时，会自动新增数据库表：
+
+- **个人资料功能**：使用现有 User 表，无需新增表
+- **多格式导出 + 导出模板**：新增 `ExportTemplate` 表
+
+升级步骤：
+```bash
+cd zscx
+git pull
+cd docker
+docker compose down
+docker compose up -d --build
+
+# 等待容器启动后，手动执行数据库同步（确保新表创建）
+docker exec zscx-web npx prisma db push
+```
+
+验证新表是否创建成功：
+```bash
+docker exec -it zscx-mysql mysql -u zscx -p zscx -e "SHOW TABLES LIKE 'ExportTemplate';"
+```
+
 ---
 
 ## 五、常用操作命令
@@ -742,6 +768,52 @@ sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
+### Q9: 导出功能用不了，点击导出没反应？
+
+**排查步骤：**
+
+1. **检查 ExportTemplate 表是否存在**
+   ```bash
+   docker exec -it zscx-mysql mysql -u zscx -p zscx -e "SHOW TABLES LIKE 'ExportTemplate';"
+   ```
+   如果不存在，手动执行数据库同步：
+   ```bash
+   docker exec zscx-web npx prisma db push
+   ```
+
+2. **检查是否有导出权限**
+   - 管理员账号默认有所有权限
+   - 普通用户需要在用户权限管理中分配对应表的"导出"权限
+
+3. **检查浏览器控制台是否有报错**
+   - 按 F12 打开开发者工具
+   - 查看 Console 和 Network 标签页
+
+### Q10: 个人资料页面显示 404？
+
+**可能原因及解决：**
+
+1. **Docker 镜像不是最新版本**
+   ```bash
+   cd ~/zscx
+   git pull
+   cd docker
+   docker compose down
+   docker compose up -d --build
+   ```
+
+2. **清除浏览器缓存**
+   - 按 Ctrl + F5 强制刷新页面
+   - 或清除浏览器缓存后重新登录
+
+### Q11: PDF 导出显示乱码或中文不显示？
+
+**说明：** 当前版本的 PDF 导出使用系统字体，在 Docker 环境中可能存在中文字体问题。
+
+**解决方案：**
+- 优先使用 Excel 导出（无乱码问题）
+- 后续版本会添加中文字体支持
+
 ---
 
 ## 技术支持
@@ -754,5 +826,5 @@ sudo systemctl restart docker
 
 ---
 
-*文档版本：v1.0*
-*更新日期：2026-07-04*
+*文档版本：v1.1.0*
+*更新日期：2026-07-05*
