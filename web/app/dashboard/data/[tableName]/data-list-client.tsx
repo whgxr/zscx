@@ -66,6 +66,25 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   ARCHIVED: { label: '已归档', variant: 'outline' },
 }
 
+function ImageThumbnail({ src, alt = '' }: { src: string; alt?: string }) {
+  const [error, setError] = useState(false)
+  if (error) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-gray-400 bg-gray-50">
+        <ImageIcon className="w-5 h-5" />
+      </div>
+    )
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="w-full h-full object-cover"
+      onError={() => setError(true)}
+    />
+  )
+}
+
 export function DataListClient({ table, user }: DataListClientProps) {
   const router = useRouter()
   const [records, setRecords] = useState<any[]>([])
@@ -313,11 +332,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
                                 })}
                               >
                                 <div className="w-10 h-10 rounded border overflow-hidden flex-shrink-0">
-                                  <img 
-                                    src={images[0]} 
-                                    alt="" 
-                                    className="w-full h-full object-cover"
-                                  />
+                                  <ImageThumbnail src={images[0]} />
                                 </div>
                                 {images.length > 1 && (
                                   <Badge variant="secondary" className="text-xs">

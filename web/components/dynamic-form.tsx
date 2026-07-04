@@ -13,9 +13,144 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Button } from '@/components/ui/button'
-import { Upload, X, Image as ImageIcon, File } from 'lucide-react'
+import { Upload, X, Image as ImageIcon, File, Loader2 } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
+
+interface ImageInfo {
+  url: string
+  name?: string
+  size?: number
+  type?: string
+  uploading?: boolean
+}
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+}
+
+const getFileExtension = (url: string): string => {
+  const ext = url.split('.').pop()?.split('?')[0] || ''
+  return ext.toUpperCase()
+}
+
+interface ImageUploadFieldProps {
+  urls: string[]
+  onChange: (urls: string[]) => void
+  disabled?: boolean
+  fieldName: string
+}
+
+function ImageUploadField({ urls, onChange, disabled, fieldName }: ImageUploadFieldProps) {
+  const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({})
+  const [imgSizes, setImgSizes] = useState<Record<number, { width: number; height: number }>>({})
+
+  const handleImgLoad = (idx: number, e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.target as HTMLImageElement
+    setImgSizes(prev => ({
+      ...prev,
+      [idx]: { width: img.naturalWidth, height: img.naturalHeight }
+    }))
+  }
+
+  const handleImgError = (idx: number) => {
+    setImgErrors(prev => ({ ...prev, [idx]: true }))
+  }
+
+  const handleFileUpload = async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('fieldName', fieldName)
+
+    try {
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      if (res.ok) {
+        const data = await res.json()
+        onChange([...urls, data.url])
+      }
+    } catch (err) {
+      console.error('Upload error:', err)
+      alert('上传失败')
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-3">
+        {urls.map((url, idx) => (
+          <div key={idx} className="flex flex-col gap-1.5">
+            <div className="relative w-24 h-24 border rounded-lg overflow-hidden bg-gray-50">
+              {imgErrors[idx] ? (
+                <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+                  <ImageIcon className="w-8 h-8 mb-1" />
+                  <span className="text-xs">加载失败</span>
+                </div>
+              ) : (
+                <img 
+                  src={url} 
+                  alt="" 
+                  className="w-full h-full object-cover"
+                  onLoad={(e) => handleImgLoad(idx, e)}
+                  onError={() => handleImgError(idx)}
+                />
+              )}
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newUrls = urls.filter((_, i) => i !== idx)
+                    onChange(newUrls)
+                  }}
+                  className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            <div className="text-xs text-gray-500 space-y-0.5 w-24">
+              <div className="truncate" title={url.split('/').pop()}>
+                {url.split('/').pop()}
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="inline-block px-1 bg-gray-100 rounded text-[10px]">
+                  {getFileExtension(url)}
+                </span>
+                {imgSizes[idx] && (
+                  <span className="text-[10px] text-gray-400">
+                    {imgSizes[idx].width}×{imgSizes[idx].height}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        {!disabled && (
+          <label className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors">
+            <ImageIcon className="w-6 h-6 text-gray-400" />
+            <span className="text-xs text-gray-500 mt-1">上传图片</span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              multiple
+              onChange={(e) => {
+                const files = e.target.files
+                if (files) {
+                  Array.from(files).forEach(f => handleFileUpload(f))
+                }
+              }}
+            />
+          </label>
+        )}
+      </div>
+    </div>
+  )
+}
 
 interface DynamicFormProps {
   fields: TableField[]
@@ -44,13 +179,8 @@ export function DynamicForm({ fields, values, onChange, disabled }: DynamicFormP
       if (res.ok) {
         const data = await res.json()
         const current = values[fieldName]
-        if (Array.isArray(current)) {
-          handleChange(fieldName, [...current, data.url])
-        } else if (current) {
-          handleChange(fieldName, data.url)
-        } else {
-          handleChange(fieldName, data.url)
-        }
+        const currentArr: string[] = Array.isArray(current) ? current : (current ? [current] : [])
+        handleChange(fieldName, [...currentArr, data.url])
       }
     } catch (err) {
       console.error('Upload error:', err)
@@ -185,45 +315,12 @@ export function DynamicForm({ fields, values, onChange, disabled }: DynamicFormP
       case FieldType.UPLOAD_IMAGE:
         const imageUrls: string[] = Array.isArray(value) ? value : (value ? [value] : [])
         return (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-3">
-              {imageUrls.map((url, idx) => (
-                <div key={idx} className="relative w-24 h-24 border rounded-lg overflow-hidden">
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                  {!disabled && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newUrls = imageUrls.filter((_, i) => i !== idx)
-                        handleChange(field.name, newUrls)
-                      }}
-                      className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              {!disabled && (
-                <label className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors">
-                  <ImageIcon className="w-6 h-6 text-gray-400" />
-                  <span className="text-xs text-gray-500 mt-1">上传图片</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    multiple
-                    onChange={(e) => {
-                      const files = e.target.files
-                      if (files) {
-                        Array.from(files).forEach(f => handleFileUpload(field.name, f))
-                      }
-                    }}
-                  />
-                </label>
-              )}
-            </div>
-          </div>
+          <ImageUploadField
+            urls={imageUrls}
+            onChange={(urls) => handleChange(field.name, urls)}
+            disabled={disabled}
+            fieldName={field.name}
+          />
         )
 
       case FieldType.UPLOAD_FILE:
