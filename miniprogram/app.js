@@ -1,6 +1,6 @@
 App({
   globalData: {
-    baseUrl: 'https://your-api-domain.com',
+    baseUrl: 'https://oa.whgxr.cn:777',
     token: '',
     userInfo: null,
   },
