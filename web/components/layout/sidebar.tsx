@@ -114,7 +114,7 @@ export function Sidebar({ user, tables }: SidebarProps) {
               )}
             >
               <Table2 className="w-5 h-5" />
-              数据表管理
+              项目管理
             </Link>
             <Link
               href="/dashboard/users"
