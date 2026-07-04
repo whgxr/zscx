@@ -282,6 +282,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
                           <Button
                             variant="ghost"
                             size="sm"
+                            title="查看"
                             onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}`)}
                           >
                             <Eye className="w-4 h-4" />
@@ -289,6 +290,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
                           <Button
                             variant="ghost"
                             size="sm"
+                            title="编辑"
                             onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}?mode=edit`)}
                           >
                             <Edit className="w-4 h-4" />
@@ -297,6 +299,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
                             variant="ghost"
                             size="sm"
                             className="text-red-500 hover:text-red-600"
+                            title="删除"
                             onClick={() => handleDelete(record.id)}
                           >
                             <Trash2 className="w-4 h-4" />

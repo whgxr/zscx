@@ -359,6 +359,7 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
                         <Button
                           variant="ghost"
                           size="sm"
+                          title="字段设计"
                           onClick={() => router.push(`/dashboard/tables/${table.id}`)}
                         >
                           <Edit className="w-4 h-4" />
@@ -376,6 +377,7 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
                             variant="ghost"
                             size="sm"
                             className="text-red-500 hover:text-red-600"
+                            title="删除项目"
                             onClick={() => handleDelete(table.id)}
                           >
                             <Trash2 className="w-4 h-4" />

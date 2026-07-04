@@ -345,6 +345,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                           <Button
                             variant="ghost"
                             size="sm"
+                            title="编辑模板"
                             onClick={() => router.push(`/dashboard/export-templates/${template.id}`)}
                           >
                             <Edit className="w-4 h-4" />
@@ -354,6 +355,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                               variant="ghost"
                               size="sm"
                               className="text-red-500 hover:text-red-600"
+                              title="删除模板"
                               onClick={() => handleDelete(template.id)}
                             >
                               <Trash2 className="w-4 h-4" />

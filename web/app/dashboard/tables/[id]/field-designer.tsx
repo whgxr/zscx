@@ -713,6 +713,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                                         variant="ghost"
                                         size="sm"
                                         className="text-red-500 hover:text-red-600"
+                                        title="移除"
                                         onClick={() => removeImportField(index)}
                                       >
                                         <Trash2 className="w-4 h-4" />
@@ -929,6 +930,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                                 size="sm"
                                 onClick={() => openEditDialog(field)}
                                 disabled={field.isSystem}
+                                title="编辑字段"
                               >
                                 <Edit className="w-4 h-4" />
                               </Button>
@@ -938,6 +940,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                                 className="text-red-500 hover:text-red-600"
                                 onClick={() => handleDelete(field.id)}
                                 disabled={field.isSystem}
+                                title="删除字段"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>

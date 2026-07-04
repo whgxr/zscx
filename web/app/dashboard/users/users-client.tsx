@@ -376,6 +376,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                         <Button
                           variant="ghost"
                           size="sm"
+                          title="权限管理"
                           onClick={() => router.push(`/dashboard/permissions/${user.id}`)}
                         >
                           <Shield className="w-4 h-4" />
@@ -385,6 +386,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                             <Button
                               variant="ghost"
                               size="sm"
+                              title="编辑用户"
                               onClick={() => openEditDialog(user)}
                             >
                               <Edit className="w-4 h-4" />
@@ -393,6 +395,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                               variant="ghost"
                               size="sm"
                               className="text-red-500 hover:text-red-600"
+                              title="删除用户"
                               onClick={() => handleDelete(user.id)}
                             >
                               <Trash2 className="w-4 h-4" />
