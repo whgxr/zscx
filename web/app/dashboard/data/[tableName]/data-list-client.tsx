@@ -42,6 +42,8 @@ import {
   ChevronsUpDown,
   Image as ImageIcon,
   X,
+  Settings2,
+  Check,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
 import { formatDateTime } from '@/lib/utils'
@@ -101,8 +103,46 @@ export function DataListClient({ table, user }: DataListClientProps) {
     images: [],
     fieldLabel: '',
   })
+  const [columnSettingOpen, setColumnSettingOpen] = useState(false)
+  const [visibleFields, setVisibleFields] = useState<string[]>([])
 
-  const listFields = table.fields.filter((f: any) => f.showInList)
+  const defaultListFields = table.fields.filter((f: any) => f.showInList)
+
+  useEffect(() => {
+    const saved = localStorage.getItem(`table_columns_${table.name}`)
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        const validFields = parsed.filter((name: string) =>
+          defaultListFields.some(f => f.name === name)
+        )
+        if (validFields.length > 0) {
+          setVisibleFields(validFields)
+          return
+        }
+      } catch {}
+    }
+    setVisibleFields(defaultListFields.map(f => f.name))
+  }, [table.id, table.name])
+
+  const listFields = defaultListFields.filter(f => visibleFields.includes(f.name))
+
+  const handleSaveColumnSetting = () => {
+    localStorage.setItem(`table_columns_${table.name}`, JSON.stringify(visibleFields))
+    setColumnSettingOpen(false)
+  }
+
+  const toggleField = (fieldName: string) => {
+    setVisibleFields(prev =>
+      prev.includes(fieldName)
+        ? prev.filter(n => n !== fieldName)
+        : [...prev, fieldName]
+    )
+  }
+
+  const resetColumns = () => {
+    setVisibleFields(defaultListFields.map(f => f.name))
+  }
 
   const fetchRecords = async () => {
     setLoading(true)
@@ -268,6 +308,10 @@ export function DataListClient({ table, user }: DataListClientProps) {
               <Button variant="outline" onClick={() => handleExport('pdf')}>
                 <FileText className="w-4 h-4 mr-2" />
                 PDF
+              </Button>
+              <Button variant="outline" onClick={() => setColumnSettingOpen(true)} title="列设置">
+                <Settings2 className="w-4 h-4 mr-2" />
+                列设置
               </Button>
               {canCreate && (
                 <Button onClick={() => router.push(`/dashboard/data/${table.name}/new`)}>
@@ -452,6 +496,66 @@ export function DataListClient({ table, user }: DataListClientProps) {
         status={status}
         initialFormat={exportFormat}
       />
+
+      <Dialog open={columnSettingOpen} onOpenChange={setColumnSettingOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>列设置</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">
+                已选择要显示的列（{visibleFields.length}/{defaultListFields.length}）
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setVisibleFields(defaultListFields.map(f => f.name))}
+                >
+                  全选
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetColumns}
+                >
+                  重置
+                </Button>
+              </div>
+            </div>
+            <div className="border rounded-lg divide-y max-h-80 overflow-y-auto">
+              {defaultListFields.map((field) => (
+                <div
+                  key={field.id}
+                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer"
+                  onClick={() => toggleField(field.name)}
+                >
+                  <div className={
+                    'w-5 h-5 border rounded border-gray-300 flex items-center justify-center ' +
+                    (visibleFields.includes(field.name)
+                      ? 'bg-primary border-primary'
+                      : 'bg-white')
+                  }>
+                    {visibleFields.includes(field.name) && (
+                      <Check className="w-3.5 h-3.5 text-white" />
+                    )}
+                  </div>
+                  <span className="text-sm">{field.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setColumnSettingOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveColumnSetting}>
+              确定
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={imageGallery.open} onOpenChange={(o) => setImageGallery(g => ({ ...g, open: o }))}>
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-auto">

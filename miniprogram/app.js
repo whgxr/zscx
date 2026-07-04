@@ -1,6 +1,6 @@
 App({
   globalData: {
-    baseUrl: 'https://your-api-domain.com',
+    baseUrl: 'https://REDACTED_DOMAIN:777',
     token: '',
     userInfo: null,
   },
