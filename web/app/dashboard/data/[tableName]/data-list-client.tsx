@@ -65,7 +65,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
 
-  const listFields = table.fields.filter(f => f.showInList)
+  const listFields = table.fields.filter((f: any) => f.showInList)
 
   const fetchRecords = async () => {
     setLoading(true)

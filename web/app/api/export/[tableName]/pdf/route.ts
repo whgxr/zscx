@@ -45,7 +45,7 @@ export async function GET(
       take: 100,
     })
 
-    const listFields = table.fields.filter(f => f.showInList)
+    const listFields = table.fields.filter((f: any) => f.showInList)
 
     const doc = new jsPDF({
       orientation: listFields.length > 6 ? 'landscape' : 'portrait',

@@ -43,7 +43,7 @@ export async function GET(
       orderBy: { createdAt: 'desc' },
     })
 
-    const listFields = table.fields.filter(f => f.showInList)
+    const listFields = table.fields.filter((f: any) => f.showInList)
 
     const workbook = new ExcelJS.Workbook()
     const worksheet = workbook.addWorksheet(table.label)
