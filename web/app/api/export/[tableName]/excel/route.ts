@@ -46,6 +46,7 @@ export async function GET(
     const type = (searchParams.get('type') as ExportType) || ExportType.STANDARD
     const templateId = searchParams.get('templateId')
     const fieldsParam = searchParams.get('fields')
+    const useTemplate = searchParams.get('useTemplate') === 'true'
 
     const where: any = { tableId: table.id }
     if (status) where.status = status
@@ -62,12 +63,13 @@ export async function GET(
     }
 
     let templateConfig: any = null
+    let exportTemplate: any = null
     if (templateId) {
-      const template = await prisma.exportTemplate.findUnique({
+      exportTemplate = await prisma.exportTemplate.findUnique({
         where: { id: parseInt(templateId) },
       })
-      if (template) {
-        templateConfig = template.config
+      if (exportTemplate) {
+        templateConfig = exportTemplate.config
         if (templateConfig?.fields) {
           const fieldNames = templateConfig.fields.map((f: any) => f.name)
           selectedFields = table.fields.filter((f: any) => fieldNames.includes(f.name))
@@ -80,21 +82,25 @@ export async function GET(
 
     const workbook = new ExcelJS.Workbook()
 
-    switch (type) {
-      case ExportType.STANDARD:
-        await exportStandardExcel(workbook, table, selectedFields, records, templateConfig)
-        break
-      case ExportType.CARD:
-        await exportCardExcel(workbook, table, selectedFields, records, templateConfig)
-        break
-      case ExportType.GROUPED:
-        await exportGroupedExcel(workbook, table, selectedFields, records, templateConfig)
-        break
-      case ExportType.FORM:
-        await exportFormExcel(workbook, table, selectedFields, records, templateConfig)
-        break
-      default:
-        await exportStandardExcel(workbook, table, selectedFields, records, templateConfig)
+    if (useTemplate && templateConfig?.grid) {
+      await exportTemplateExcel(workbook, table, records, templateConfig, exportTemplate)
+    } else {
+      switch (type) {
+        case ExportType.STANDARD:
+          await exportStandardExcel(workbook, table, selectedFields, records, templateConfig)
+          break
+        case ExportType.CARD:
+          await exportCardExcel(workbook, table, selectedFields, records, templateConfig)
+          break
+        case ExportType.GROUPED:
+          await exportGroupedExcel(workbook, table, selectedFields, records, templateConfig)
+          break
+        case ExportType.FORM:
+          await exportFormExcel(workbook, table, selectedFields, records, templateConfig)
+          break
+        default:
+          await exportStandardExcel(workbook, table, selectedFields, records, templateConfig)
+      }
     }
 
     const buffer = await workbook.xlsx.writeBuffer()
@@ -412,4 +418,171 @@ async function exportFormExcel(
     worksheet.getColumn(3).width = 15
     worksheet.getColumn(4).width = 25
   })
+}
+
+async function exportTemplateExcel(
+  workbook: ExcelJS.Workbook,
+  table: any,
+  records: any[],
+  config: any,
+  templateMeta: any
+) {
+  const grid = config.grid
+  const worksheet = workbook.addWorksheet(templateMeta?.name || table.label)
+
+  const maxRow = grid.length
+  const maxCol = grid[0]?.length || 0
+
+  for (let r = 0; r < maxRow; r++) {
+    const row = worksheet.getRow(r + 1)
+    row.height = 20
+    for (let c = 0; c < maxCol; c++) {
+      const cell = row.getCell(c + 1)
+      const cellData = grid[r]?.[c]
+      if (!cellData) continue
+
+      let cellValue = cellData.value || ''
+
+      if (cellData.bold || cellData.italic || cellData.underline || cellData.fontSize) {
+        cell.font = {
+          bold: cellData.bold,
+          italic: cellData.italic,
+          underline: cellData.underline ? 'single' : undefined,
+          size: cellData.fontSize,
+        }
+      }
+
+      if (cellData.bgColor) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FF' + cellData.bgColor.replace('#', '').toUpperCase() },
+        }
+      }
+
+      if (cellData.textColor) {
+        if (!cell.font) cell.font = {}
+        cell.font = {
+          ...cell.font,
+          color: { argb: 'FF' + cellData.textColor.replace('#', '').toUpperCase() },
+        }
+      }
+
+      if (cellData.align) {
+        cell.alignment = {
+          horizontal: cellData.align as any,
+          vertical: 'middle',
+        }
+      }
+
+      cell.value = cellValue
+    }
+  }
+
+  for (let c = 0; c < maxCol; c++) {
+    worksheet.getColumn(c + 1).width = 15
+  }
+
+  const firstRecord = records[0]
+  const firstData = firstRecord?.data as Record<string, any> || {}
+
+  for (let r = 0; r < maxRow; r++) {
+    for (let c = 0; c < maxCol; c++) {
+      const cell = worksheet.getCell(r + 1, c + 1)
+      let value = cell.value?.toString() || ''
+
+      const placeholders = value.match(/\{\{[^}]+\}\}/g)
+      if (placeholders) {
+        placeholders.forEach(placeholder => {
+          const fieldName = placeholder.slice(2, -2)
+          let fieldValue = ''
+
+          if (fieldName === 'id') {
+            fieldValue = firstRecord?.id?.toString() || ''
+          } else if (fieldName === 'status') {
+            fieldValue = statusText[firstRecord?.status] || firstRecord?.status || ''
+          } else if (fieldName === 'createdAt' || fieldName === 'createTime') {
+            fieldValue = firstRecord?.createdAt ? new Date(firstRecord.createdAt).toLocaleString('zh-CN') : ''
+          } else if (fieldName === 'updatedAt' || fieldName === 'updateTime') {
+            fieldValue = firstRecord?.updatedAt ? new Date(firstRecord.updatedAt).toLocaleString('zh-CN') : ''
+          } else {
+            fieldValue = firstData[fieldName]?.toString() || ''
+          }
+
+          value = value.replace(placeholder, fieldValue)
+        })
+
+        cell.value = value
+      }
+    }
+  }
+
+  if (records.length > 1) {
+    let dataStartRow = -1
+    let dataEndRow = -1
+
+    for (let r = 0; r < maxRow; r++) {
+      for (let c = 0; c < maxCol; c++) {
+        const cellValue = grid[r]?.[c]?.value || ''
+        if (cellValue.match(/\{\{[^}]+\}\}/)) {
+          if (dataStartRow === -1) dataStartRow = r
+          dataEndRow = r
+        }
+      }
+    }
+
+    if (dataStartRow >= 0 && dataEndRow >= 0) {
+      for (let i = 1; i < records.length; i++) {
+        const record = records[i]
+        const data = record.data as Record<string, any> || {}
+        const offset = i * (dataEndRow - dataStartRow + 1)
+
+        for (let r = dataStartRow; r <= dataEndRow; r++) {
+          const targetRowIdx = maxRow + offset + (r - dataStartRow) + 1
+          const sourceRowIdx = r + 1
+          const targetRow = worksheet.getRow(targetRowIdx)
+
+          for (let c = 0; c < maxCol; c++) {
+            const sourceCell = worksheet.getCell(sourceRowIdx, c + 1)
+            const targetCell = targetRow.getCell(c + 1)
+
+            if (sourceCell.font) {
+              targetCell.font = { ...sourceCell.font }
+            }
+            if (sourceCell.fill) {
+              targetCell.fill = { ...sourceCell.fill }
+            }
+            if (sourceCell.alignment) {
+              targetCell.alignment = { ...sourceCell.alignment }
+            }
+
+            let value = sourceCell.value?.toString() || ''
+            const placeholders = value.match(/\{\{[^}]+\}\}/g)
+            if (placeholders) {
+              placeholders.forEach(placeholder => {
+                const fieldName = placeholder.slice(2, -2)
+                let fieldValue = ''
+
+                if (fieldName === 'id') {
+                  fieldValue = record.id?.toString() || ''
+                } else if (fieldName === 'status') {
+                  fieldValue = statusText[record.status] || record.status || ''
+                } else if (fieldName === 'createdAt' || fieldName === 'createTime') {
+                  fieldValue = record.createdAt ? new Date(record.createdAt).toLocaleString('zh-CN') : ''
+                } else if (fieldName === 'updatedAt' || fieldName === 'updateTime') {
+                  fieldValue = record.updatedAt ? new Date(record.updatedAt).toLocaleString('zh-CN') : ''
+                } else {
+                  fieldValue = data[fieldName]?.toString() || ''
+                }
+
+                value = value.replace(placeholder, fieldValue)
+              })
+            }
+
+            targetCell.value = value
+          }
+        }
+      }
+    }
+  }
 }

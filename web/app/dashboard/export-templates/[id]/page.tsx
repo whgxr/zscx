@@ -1,9 +1,14 @@
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { ExcelTemplateDesigner } from './excel-designer'
 import { TemplateDesigner } from './template-designer'
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { ArrowLeft } from 'lucide-react'
 
-export default async function TemplateDesignerPage({
+export default async function TemplateDetailPage({
   params,
 }: {
   params: { id: string }
@@ -33,6 +38,13 @@ export default async function TemplateDesignerPage({
 
   if (!template) {
     redirect('/dashboard/export-templates')
+  }
+
+  const config = template.config as any
+  const isExcelTemplate = template.format === 'EXCEL' && config?.type === 'EXCEL_TEMPLATE'
+
+  if (template.format === 'EXCEL') {
+    return <ExcelTemplateDesigner template={template as any} />
   }
 
   return <TemplateDesigner template={template as any} />
