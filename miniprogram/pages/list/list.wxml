@@ -1,0 +1,53 @@
+<view class="container">
+  <view class="search-bar">
+    <input
+      class="search-input"
+      placeholder="搜索数据..."
+      value="{{searchText}}"
+      bindinput="onSearchInput"
+      bindconfirm="onSearch"
+    />
+    <button class="search-btn" bindtap="onSearch">搜索</button>
+  </view>
+
+  <view class="record-list">
+    <view
+      class="record-item card"
+      wx:for="{{records}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="goToDetail"
+    >
+      <view class="record-header">
+        <text class="record-id">#{{item.id}}</text>
+        <text class="record-status status-{{item.status}}">
+          <block wx:if="{{item.status === 'DRAFT'}}">草稿</block>
+          <block wx:elif="{{item.status === 'SUBMITTED'}}">已提交</block>
+          <block wx:elif="{{item.status === 'REVIEWED'}}">已审核</block>
+          <block wx:elif="{{item.status === 'REJECTED'}}">已驳回</block>
+          <block wx:else>已归档</block>
+        </text>
+      </view>
+      <view class="record-content">
+        <view class="record-field" wx:for="{{listFields}}" wx:for-item="field" wx:key="id" wx:if="{{index < 3}}">
+          <text class="field-label">{{field.label}}:</text>
+          <text class="field-value">{{item.data[field.name] || '-'}}</text>
+        </view>
+      </view>
+      <view class="record-footer">
+        <text class="record-time">{{item.createdAt}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{!loading && records.length === 0}}" class="empty">
+    <view class="empty-icon">📋</view>
+    <view class="empty-text">暂无数据</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading">加载中...</view>
+
+  <view wx:if="{{!hasMore && records.length > 0}}" class="no-more">没有更多数据了</view>
+
+  <button class="fab" bindtap="goToAdd">+</button>
+</view>

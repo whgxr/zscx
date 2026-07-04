@@ -1,0 +1,114 @@
+<view class="container" wx:if="{{!loading}}">
+  <view class="card">
+    <view class="form-item" wx:for="{{formFields}}" wx:key="id">
+      <text class="form-label">
+        <text wx:if="{{item.required}}" class="required">*</text>
+        {{item.label}}
+      </text>
+
+      <block wx:if="{{item.type === 'TEXT' || item.type === 'PHONE' || item.type === 'EMAIL' || item.type === 'IDCARD'}}">
+        <input
+          class="form-input"
+          placeholder="请输入{{item.label}}"
+          value="{{formData[item.name]}}"
+          data-field="{{item.name}}"
+          bindinput="onInputChange"
+          type="{{item.type === 'NUMBER' || item.type === 'INTEGER' || item.type === 'FLOAT' || item.type === 'MONEY' ? 'digit' : 'text'}}"
+        />
+      </block>
+
+      <block wx:elif="{{item.type === 'NUMBER' || item.type === 'INTEGER' || item.type === 'FLOAT' || item.type === 'MONEY'}}">
+        <input
+          class="form-input"
+          placeholder="请输入{{item.label}}"
+          value="{{formData[item.name]}}"
+          data-field="{{item.name}}"
+          bindinput="onInputChange"
+          type="digit"
+        />
+      </block>
+
+      <block wx:elif="{{item.type === 'TEXTAREA' || item.type === 'ADDRESS'}}">
+        <textarea
+          class="form-textarea"
+          placeholder="请输入{{item.label}}"
+          value="{{formData[item.name]}}"
+          data-field="{{item.name}}"
+          bindinput="onInputChange"
+          auto-height
+        />
+      </block>
+
+      <block wx:elif="{{item.type === 'DATE'}}">
+        <picker mode="date" value="{{formData[item.name]}}" data-field="{{item.name}}" bindchange="onPickerChange">
+          <view class="form-input">{{formData[item.name] || '请选择日期'}}</view>
+        </picker>
+      </block>
+
+      <block wx:elif="{{item.type === 'SELECT' || item.type === 'RADIO'}}">
+        <picker range="{{item.options}}" range-key="label" data-field="{{item.name}}" bindchange="onPickerChange">
+          <view class="form-input">
+            <block wx:for="{{item.options}}" wx:for-item="opt" wx:key="value">
+              <block wx:if="{{opt.value === formData[item.name]}}">{{opt.label}}</block>
+            </block>
+            <block wx:if="{{!formData[item.name]}}">请选择{{item.label}}</block>
+          </view>
+        </picker>
+      </block>
+
+      <block wx:elif="{{item.type === 'UPLOAD_IMAGE'}}">
+        <view class="upload-list">
+          <view
+            class="upload-item"
+            wx:for="{{formData[item.name]}}"
+            wx:for-item="img"
+            wx:key="*this"
+          >
+            <image
+              src="{{img}}"
+              mode="aspectFill"
+              data-field="{{item.name}}"
+              data-index="{{index}}"
+              bindtap="previewImage"
+            />
+            <view
+              class="remove-btn"
+              catchtap="removeImage"
+              data-field="{{item.name}}"
+              data-index="{{index}}"
+            >×</view>
+          </view>
+          <view
+            class="upload-add"
+            bindtap="chooseImage"
+            data-field="{{item.name}}"
+          >
+            <text class="upload-add-icon">+</text>
+            <text>上传图片</text>
+          </view>
+        </view>
+      </block>
+
+      <block wx:else>
+        <input
+          class="form-input"
+          placeholder="请输入{{item.label}}"
+          value="{{formData[item.name]}}"
+          data-field="{{item.name}}"
+          bindinput="onInputChange"
+        />
+      </block>
+    </view>
+  </view>
+
+  <view class="action-buttons">
+    <button class="btn-outline" bindtap="saveDraft" disabled="{{submitting}}">
+      保存草稿
+    </button>
+    <button class="btn-primary" bindtap="submitForm" disabled="{{submitting}}" loading="{{submitting}}">
+      提交
+    </button>
+  </view>
+</view>
+
+<view wx:if="{{loading}}" class="loading">加载中...</view>

@@ -1,0 +1,38 @@
+<view class="container">
+  <view class="header card">
+    <view class="user-info">
+      <view class="avatar">{{userInfo.realName ? userInfo.realName.charAt(0) : 'U'}}</view>
+      <view class="user-detail">
+        <view class="user-name">{{userInfo.realName || userInfo.username}}</view>
+        <view class="user-role">
+          <block wx:if="{{userInfo.role === 'ADMIN'}}">超级管理员</block>
+          <block wx:elif="{{userInfo.role === 'MANAGER'}}">管理员</block>
+          <block wx:elif="{{userInfo.role === 'USER'}}">录入员</block>
+          <block wx:else>查看员</block>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section-title">数据采集</view>
+
+  <view class="table-grid">
+    <view
+      class="table-card"
+      wx:for="{{tables}}"
+      wx:key="id"
+      data-name="{{item.name}}"
+      data-label="{{item.label}}"
+      bindtap="goToList"
+    >
+      <view class="table-icon">📋</view>
+      <view class="table-name">{{item.label}}</view>
+      <view class="table-count">{{item._count.records}} 条记录</view>
+    </view>
+  </view>
+
+  <view wx:if="{{!loading && tables.length === 0}}" class="empty">
+    <view class="empty-icon">📭</view>
+    <view class="empty-text">暂无可访问的数据表</view>
+  </view>
+</view>

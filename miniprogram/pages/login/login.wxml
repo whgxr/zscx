@@ -1,0 +1,41 @@
+<view class="login-container">
+  <view class="login-header">
+    <view class="logo">
+      <text class="logo-icon">🏠</text>
+    </view>
+    <view class="app-name">房屋征收调查系统</view>
+    <view class="app-desc">移动端数据采集平台</view>
+  </view>
+
+  <view class="login-form">
+    <view class="form-item">
+      <text class="form-label">用户名</text>
+      <input
+        class="form-input"
+        placeholder="请输入用户名"
+        value="{{username}}"
+        bindinput="onUsernameInput"
+      />
+    </view>
+
+    <view class="form-item">
+      <text class="form-label">密码</text>
+      <input
+        class="form-input"
+        placeholder="请输入密码"
+        type="password"
+        value="{{password}}"
+        bindinput="onPasswordInput"
+      />
+    </view>
+
+    <button
+      class="btn-primary mt-4"
+      bindtap="handleLogin"
+      loading="{{loading}}"
+      disabled="{{loading}}"
+    >
+      登 录
+    </button>
+  </view>
+</view>

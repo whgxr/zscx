@@ -1,0 +1,235 @@
+// Prisma Schema for 房屋征收调查系统
+// MySQL 5.7
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 用户与权限系统 ====================
+
+model User {
+  id            Int          @id @default(autoincrement())
+  username      String       @unique
+  passwordHash  String
+  realName      String
+  phone         String?
+  email         String?
+  role          Role         @default(USER)
+  status        UserStatus   @default(ACTIVE)
+  avatar        String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  createdBy     Int?
+
+  // 关系
+  tablePermissions TablePermission[]
+  dataRecords      DataRecord[]      @relation("CreatedRecords")
+  uploadedFiles    UploadedFile[]
+
+  @@index([username])
+  @@index([role])
+}
+
+enum Role {
+  ADMIN      // 超级管理员 - 全部权限
+  MANAGER    // 管理员 - 可管理用户和表设计
+  USER       // 普通用户 - 录入和查询数据（按表分配权限）
+  VIEWER     // 查看员 - 只能查看导出数据（按表分配权限）
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+// 按数据表分配的权限
+model TablePermission {
+  id         Int           @id @default(autoincrement())
+  userId     Int
+  tableId    Int
+  canView    Boolean       @default(true)
+  canCreate  Boolean       @default(false)
+  canEdit    Boolean       @default(false)
+  canDelete  Boolean       @default(false)
+  canExport  Boolean       @default(false)
+  createdAt  DateTime      @default(now())
+
+  user       User          @relation(fields: [userId], references: [id])
+  table      DataTable     @relation(fields: [tableId], references: [id])
+
+  @@unique([userId, tableId])
+  @@index([tableId])
+}
+
+// ==================== 动态数据表定义 ====================
+
+model DataTable {
+  id          Int              @id @default(autoincrement())
+  name        String           // 表名（英文标识）
+  label       String           // 显示名称
+  description String?
+  icon        String?          // 图标名
+  status      TableStatus      @default(ACTIVE)
+  sortOrder   Int              @default(0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  createdBy   Int?
+
+  // 关系
+  fields     TableField[]
+  records    DataRecord[]
+  permissions TablePermission[]
+  files      UploadedFile[]
+
+  @@unique([name])
+  @@index([status])
+  @@index([sortOrder])
+}
+
+enum TableStatus {
+  ACTIVE
+  ARCHIVED
+  DRAFT
+}
+
+model TableField {
+  id            Int              @id @default(autoincrement())
+  tableId       Int
+  name          String           // 字段名（英文标识）
+  label         String           // 显示名称
+  type          FieldType        // 字段类型
+  required      Boolean          @default(false)
+  unique        Boolean          @default(false)
+  sortOrder     Int              @default(0)
+  description   String?
+  placeholder   String?          // 输入提示
+  defaultValue  String?          // 默认值
+  options       Json?            // 选项（用于select/radio/checkbox等）
+  validation    Json?            // 验证规则 {min, max, pattern, ...}
+  config        Json?            // 其他配置（如图片上传限制、关联表等）
+  isSystem      Boolean          @default(false) // 是否系统字段（不可删除）
+  showInList    Boolean          @default(true)  // 是否在列表显示
+  showInForm    Boolean          @default(true)  // 是否在表单显示
+  showInSearch  Boolean          @default(true)  // 是否可搜索
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  table         DataTable        @relation(fields: [tableId], references: [id])
+
+  @@index([tableId])
+  @@index([sortOrder])
+}
+
+enum FieldType {
+  TEXT           // 单行文本
+  TEXTAREA       // 多行文本
+  NUMBER         // 数字
+  INTEGER        // 整数
+  FLOAT          // 小数
+  DATE           // 日期
+  DATETIME       // 日期时间
+  SELECT         // 单选下拉
+  RADIO          // 单选按钮
+  MULTISELECT    // 多选
+  CHECKBOX       // 复选框
+  UPLOAD_IMAGE   // 图片上传
+  UPLOAD_FILE    // 文件上传
+  PHONE          // 手机号
+  EMAIL          // 邮箱
+  IDCARD         // 身份证号
+  ADDRESS        // 地址
+  MONEY          // 金额
+  SWITCH         // 开关/是否
+  RICHTEXT       // 富文本
+  RELATION       // 关联其他表
+}
+
+// ==================== 数据记录 ====================
+
+model DataRecord {
+  id            Int              @id @default(autoincrement())
+  tableId       Int
+  data          Json             // 动态字段数据
+  status        RecordStatus     @default(DRAFT)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  createdBy     Int?
+  updatedBy     Int?
+
+  // 关系
+  table         DataTable        @relation(fields: [tableId], references: [id])
+  creator       User?            @relation("CreatedRecords", fields: [createdBy], references: [id])
+  files         UploadedFile[]
+
+  @@index([tableId])
+  @@index([createdAt])
+  @@index([createdBy])
+  @@index([status])
+}
+
+enum RecordStatus {
+  DRAFT      // 草稿
+  SUBMITTED  // 已提交
+  REVIEWED   // 已审核
+  REJECTED   // 已驳回
+  ARCHIVED   // 已归档
+}
+
+// ==================== 文件上传 ====================
+
+model UploadedFile {
+  id            Int              @id @default(autoincrement())
+  tableId       Int?
+  recordId      Int?
+  fieldName     String?
+  originalName  String           // 原始文件名
+  fileName      String           // 存储文件名
+  filePath      String           // 文件路径
+  fileSize      Int              // 文件大小（字节）
+  mimeType      String           // MIME类型
+  fileType      FileType         @default(OTHER)
+  uploadedBy    Int?
+  createdAt     DateTime         @default(now())
+
+  // 关系
+  table         DataTable?       @relation(fields: [tableId], references: [id])
+  record        DataRecord?      @relation(fields: [recordId], references: [id])
+  uploader      User?            @relation(fields: [uploadedBy], references: [id])
+
+  @@index([tableId])
+  @@index([recordId])
+  @@index([createdAt])
+}
+
+enum FileType {
+  IMAGE
+  DOCUMENT
+  VIDEO
+  AUDIO
+  OTHER
+}
+
+// ==================== 操作日志 ====================
+
+model OperationLog {
+  id            Int              @id @default(autoincrement())
+  userId        Int?
+  action        String
+  module        String
+  tableId       Int?
+  recordId      Int?
+  detail        Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime         @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([module])
+  @@index([createdAt])
+}

@@ -1,0 +1,25 @@
+node_modules
+.next
+out
+dist
+.env
+.env.local
+.env.*.local
+
+# 上传文件
+public/uploads/*
+!public/uploads/.gitkeep
+
+# 日志
+logs
+*.log
+npm-debug.log*
+
+# 编辑器
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Prisma
+prisma/migrations/dev.db

@@ -1,0 +1,30 @@
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+
+# 上传文件
+web/public/uploads/*
+!web/public/uploads/.gitkeep
+
+# 日志
+*.log
+npm-debug.log*
+
+# 编辑器
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Prisma
+web/prisma/migrations/dev.db
+
+# 小程序
+miniprogram/node_modules
+miniprogram/miniprogram_npm
+miniprogram/project.private.config.json
+
+# Docker
+docker/.env

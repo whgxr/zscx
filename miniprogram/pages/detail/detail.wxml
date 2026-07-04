@@ -1,0 +1,62 @@
+<view class="container" wx:if="{{!loading && record}}">
+  <view class="card">
+    <view class="detail-header">
+      <view class="detail-title">记录 #{record.id}</view>
+      <view class="detail-status status-{{record.status}}">
+        <block wx:if="{{record.status === 'DRAFT'}}">草稿</block>
+        <block wx:elif="{{record.status === 'SUBMITTED'}}">已提交</block>
+        <block wx:elif="{{record.status === 'REVIEWED'}}">已审核</block>
+        <block wx:elif="{{record.status === 'REJECTED'}}">已驳回</block>
+        <block wx:else>已归档</block>
+      </view>
+    </view>
+  </view>
+
+  <view class="card form-fields">
+    <view class="form-item" wx:for="{{formFields}}" wx:key="id">
+      <text class="form-label">{{item.label}}</text>
+      
+      <block wx:if="{{item.type === 'UPLOAD_IMAGE'}}">
+        <view class="image-list">
+          <image
+            wx:for="{{record.data[item.name]}}"
+            wx:for-item="img"
+            wx:key="*this"
+            src="{{img}}"
+            mode="aspectFill"
+            class="preview-image"
+            data-url="{{img}}"
+            data-urls="{{record.data[item.name]}}"
+            bindtap="previewImage"
+          />
+          <view wx:if="{{!record.data[item.name] || record.data[item.name].length === 0}}" class="text-gray">
+            暂无图片
+          </view>
+        </view>
+      </block>
+
+      <block wx:elif="{{item.type === 'TEXTAREA' || item.type === 'ADDRESS'}}">
+        <view class="detail-textarea">{{record.data[item.name] || '-'}}</view>
+      </block>
+
+      <block wx:else>
+        <view class="detail-value">{{record.data[item.name] || '-'}}</view>
+      </block>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="info-row">
+      <text class="info-label">创建时间</text>
+      <text class="info-value">{{record.createdAt}}</text>
+    </view>
+    <view class="info-row">
+      <text class="info-label">更新时间</text>
+      <text class="info-value">{{record.updatedAt}}</text>
+    </view>
+  </view>
+
+  <button class="btn-primary mt-4" bindtap="goToEdit">编辑</button>
+</view>
+
+<view wx:if="{{loading}}" class="loading">加载中...</view>

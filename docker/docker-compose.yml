@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:5.7
+    container_name: zscx-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-zscx}
+      MYSQL_USER: ${MYSQL_USER:-zscx}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-zscx123456}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=1000
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    container_name: zscx-web
+    restart: always
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      - DATABASE_URL=mysql://${MYSQL_USER:-zscx}:${MYSQL_PASSWORD:-zscx123456}@mysql:3306/${MYSQL_DATABASE:-zscx}
+      - JWT_SECRET=${JWT_SECRET:-change-this-secret-in-production}
+      - JWT_EXPIRES_IN=7d
+      - UPLOAD_DIR=./public/uploads
+      - MAX_FILE_SIZE=10485760
+      - NEXT_PUBLIC_APP_NAME=${APP_NAME:-房屋征收调查系统}
+      - NODE_ENV=production
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/public/uploads
+    command: sh -c "npx prisma db push && npx prisma db seed && npm start"
+
+volumes:
+  mysql_data:
+  uploads:

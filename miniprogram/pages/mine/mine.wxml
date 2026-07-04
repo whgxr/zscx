@@ -1,0 +1,26 @@
+<view class="container">
+  <view class="profile-card">
+    <view class="profile-avatar">
+      {{userInfo.realName ? userInfo.realName.charAt(0) : 'U'}}
+    </view>
+    <view class="profile-info">
+      <view class="profile-name">{{userInfo.realName || userInfo.username}}</view>
+      <view class="profile-role">
+        <block wx:if="{{userInfo.role === 'ADMIN'}}">超级管理员</block>
+        <block wx:elif="{{userInfo.role === 'MANAGER'}}">管理员</block>
+        <block wx:elif="{{userInfo.role === 'USER'}}">录入员</block>
+        <block wx:else>查看员</block>
+      </view>
+    </view>
+  </view>
+
+  <view class="menu-list">
+    <view class="menu-item" bindtap="goToAbout">
+      <text class="menu-icon">ℹ️</text>
+      <text class="menu-text">关于</text>
+      <text class="menu-arrow">›</text>
+    </view>
+  </view>
+
+  <button class="logout-btn" bindtap="handleLogout">退出登录</button>
+</view>

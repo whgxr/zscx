@@ -1,0 +1,98 @@
+.form-input {
+  display: flex;
+  align-items: center;
+  min-height: 80rpx;
+}
+
+.upload-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.upload-item {
+  width: 160rpx;
+  height: 160rpx;
+  position: relative;
+  border-radius: 12rpx;
+  overflow: hidden;
+}
+
+.upload-item image {
+  width: 100%;
+  height: 100%;
+}
+
+.remove-btn {
+  position: absolute;
+  top: 4rpx;
+  right: 4rpx;
+  width: 36rpx;
+  height: 36rpx;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+}
+
+.upload-add {
+  width: 160rpx;
+  height: 160rpx;
+  border: 2rpx dashed #d1d5db;
+  border-radius: 12rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 22rpx;
+}
+
+.upload-add-icon {
+  font-size: 40rpx;
+  line-height: 1;
+  margin-bottom: 4rpx;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 40rpx;
+  padding: 0 20rpx;
+}
+
+.btn-outline {
+  flex: 1;
+  background: white;
+  color: #3b82f6;
+  border: 2rpx solid #3b82f6;
+  border-radius: 12rpx;
+  padding: 24rpx 0;
+  font-size: 30rpx;
+}
+
+.btn-outline::after {
+  border: none;
+}
+
+.btn-primary {
+  flex: 1;
+  background: #3b82f6;
+  color: white;
+  border-radius: 12rpx;
+  padding: 24rpx 0;
+  font-size: 30rpx;
+}
+
+.btn-primary::after {
+  border: none;
+}
+
+.loading {
+  text-align: center;
+  padding: 120rpx 0;
+  color: #9ca3af;
+}
