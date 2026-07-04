@@ -33,7 +33,9 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
 } from 'lucide-react'
+import { ExportDialog } from '@/components/export/export-dialog'
 import { formatDateTime } from '@/lib/utils'
 import { DataTable, TableField, RecordStatus, Role } from '@prisma/client'
 
@@ -64,6 +66,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
 
   const listFields = table.fields.filter((f: any) => f.showInList)
 
@@ -119,26 +122,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
   }
 
   const handleExport = async (type: 'excel' | 'pdf') => {
-    try {
-      const params = new URLSearchParams()
-      if (search) params.set('search', search)
-      if (status) params.set('status', status)
-
-      const res = await fetch(`/api/export/${table.name}/${type}?${params}`)
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${table.label}_${new Date().toISOString().slice(0, 10)}.${type === 'excel' ? 'xlsx' : 'pdf'}`
-        a.click()
-        window.URL.revokeObjectURL(url)
-      } else {
-        alert('导出失败')
-      }
-    } catch (err) {
-      alert('导出失败')
-    }
+    setExportDialogOpen(true)
   }
 
   const totalPages = Math.ceil(total / pageSize)
@@ -305,6 +289,14 @@ export function DataListClient({ table, user }: DataListClientProps) {
           )}
         </CardContent>
       </Card>
+
+      <ExportDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+        table={table}
+        search={search}
+        status={status}
+      />
     </div>
   )
 }

@@ -82,10 +82,11 @@ model DataTable {
   createdBy   Int?
 
   // 关系
-  fields     TableField[]
-  records    DataRecord[]
-  permissions TablePermission[]
-  files      UploadedFile[]
+  fields         TableField[]
+  records        DataRecord[]
+  permissions    TablePermission[]
+  files          UploadedFile[]
+  exportTemplates ExportTemplate[]
 
   @@unique([name])
   @@index([status])
@@ -233,4 +234,39 @@ model OperationLog {
   @@index([action])
   @@index([module])
   @@index([createdAt])
+}
+
+// ==================== 导出模板 ====================
+
+model ExportTemplate {
+  id           Int              @id @default(autoincrement())
+  tableId      Int
+  name         String           // 模板名称
+  type         ExportType       // 导出类型
+  format       ExportFormat     // 导出格式（excel/pdf）
+  description  String?
+  config       Json             // 导出配置（字段、样式等）
+  isDefault    Boolean          @default(false)
+  isSystem     Boolean          @default(false) // 是否系统模板
+  createdBy    Int?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  table        DataTable        @relation(fields: [tableId], references: [id])
+
+  @@index([tableId])
+  @@index([format])
+  @@index([createdBy])
+}
+
+enum ExportType {
+  STANDARD     // 标准列表
+  CARD         // 卡片式
+  GROUPED      // 分组汇总
+  FORM         // 表单式（单条记录详情）
+}
+
+enum ExportFormat {
+  EXCEL
+  PDF
 }
