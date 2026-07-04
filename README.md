@@ -2,6 +2,8 @@
 
 一个功能完整的房屋征收调查数据管理系统，支持PC网页端和微信小程序端数据采集。
 
+> 仓库地址：https://github.com/whgxr/zscx
+
 ## 功能特性
 
 ### 核心功能
@@ -40,17 +42,33 @@ zscx/
 │   ├── pages/               # 小程序页面
 │   ├── app.js               # 小程序入口
 │   └── app.json             # 小程序配置
-└── docker/                  # Docker部署配置
-    └── docker-compose.yml
+├── docker/                  # Docker部署配置（源码构建方式）
+│   ├── docker-compose.yml   # Compose配置文件
+│   ├── .env.example         # 环境变量模板
+│   ├── deploy.sh            # Linux一键部署脚本
+│   ├── deploy.bat           # Windows一键部署脚本
+│   ├── backup.sh / .bat     # 数据备份脚本
+│   ├── restore.sh / .bat    # 数据恢复脚本
+│   └── DEPLOY.md            # 详细部署文档
+├── docker-nas/              # NAS专用部署配置（镜像拉取方式）
+│   ├── docker-compose.yml   # 使用GHCR预构建镜像
+│   ├── .env.example         # 环境变量模板
+│   └── README.md            # NAS部署指南
+├── .github/workflows/       # GitHub Actions 自动构建镜像
+│   └── docker-build.yml
+├── push.sh / push.bat       # 一键推送代码到GitHub
+└── README.md
 ```
 
 ## 快速开始
 
-### 方式一：Docker 部署（推荐）
+### 方式一：Docker 源码构建部署（推荐）
 
-1. 克隆项目到服务器/NAS
+适用于服务器/NAS，直接从源码构建镜像。
+
+1. 克隆项目
 ```bash
-git clone <你的仓库地址>
+git clone https://github.com/whgxr/zscx.git
 cd zscx/docker
 ```
 
@@ -59,21 +77,43 @@ cd zscx/docker
 cp .env.example .env
 ```
 
-3. 修改 `.env` 中的配置（特别是密码）
+3. 修改 `.env` 中的配置（特别是密码和密钥）
 ```bash
-# 编辑 .env 文件
+# Linux/Mac
+nano .env
+# Windows
+notepad .env
 ```
 
 4. 启动服务
 ```bash
-docker-compose up -d
+docker compose up -d --build
 ```
 
 5. 访问系统
    - 前端：http://localhost:3000
    - 默认管理员：admin / admin123
 
-### 方式二：本地开发
+### 方式二：Docker 镜像拉取部署（NAS 推荐）
+
+使用 GitHub Actions 自动构建的镜像，NAS 无需源码，压力更小。
+
+1. 将 `docker-nas/` 目录下的文件上传到 NAS
+2. 配置环境变量
+```bash
+cp .env.example .env
+# 编辑 .env 修改密码和密钥
+```
+
+3. 拉取镜像并启动
+```bash
+docker compose pull
+docker compose up -d
+```
+
+> 详细说明请参考 [docker-nas/README.md](docker-nas/README.md)
+
+### 方式三：本地开发
 
 #### 环境要求
 - Node.js 18+
@@ -113,6 +153,8 @@ npm run dev
 | 超级管理员 | admin | admin123 | 全部权限 |
 | 录入员 | user01 | 123456 | 可录入和编辑数据 |
 | 查看员 | viewer01 | 123456 | 只能查看和导出 |
+
+> 安全提示：部署后请立即修改默认密码！
 
 ## 支持的字段类型
 
@@ -168,12 +210,19 @@ npm run dev
 
 ## 部署更新
 
-### Docker 更新
+### 方式一：源码构建更新
 ```bash
-cd docker
+cd zscx
 git pull
-docker-compose build
-docker-compose up -d
+cd docker
+docker compose up -d --build
+```
+
+### 方式二：镜像拉取更新
+```bash
+cd /你的部署目录
+docker compose pull
+docker compose up -d
 ```
 
 ### 数据库迁移
@@ -182,6 +231,51 @@ docker-compose up -d
 docker exec -it zscx-web sh
 npx prisma db push
 npx prisma db seed
+exit
+```
+
+## 数据备份与恢复
+
+项目自带备份恢复脚本，位于 `docker/` 目录下：
+
+```bash
+# Linux/Mac
+./backup.sh     # 备份数据
+./restore.sh    # 恢复数据
+
+# Windows
+backup.bat      # 备份数据
+restore.bat     # 恢复数据
+```
+
+手动备份：
+```bash
+# 备份数据库
+docker exec zscx-mysql mysqldump -u root -p你的密码 --databases zscx --single-transaction | gzip > backup_$(date +%Y%m%d).sql.gz
+
+# 备份上传文件
+docker run --rm -v zscx_uploads:/data -v $(pwd):/backup alpine tar czf /backup/uploads_$(date +%Y%m%d).tar.gz -C /data .
+```
+
+> 完整部署文档请参考 [docker/DEPLOY.md](docker/DEPLOY.md)
+
+## 常用命令
+
+```bash
+# 查看服务状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f
+
+# 重启服务
+docker compose restart
+
+# 停止服务
+docker compose down
+
+# 启动服务
+docker compose up -d
 ```
 
 ## 技术栈说明
@@ -205,6 +299,10 @@ npx prisma db seed
 - 本地磁盘存储（Docker卷挂载）
 - 按月份分目录存储
 - 支持图片和文件上传
+
+### CI/CD
+- GitHub Actions 自动构建 Docker 镜像
+- 推送到 GitHub Container Registry (GHCR)
 
 ## License
 
