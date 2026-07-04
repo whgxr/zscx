@@ -46,6 +46,7 @@ import {
 import { ExportDialog } from '@/components/export/export-dialog'
 import { formatDateTime } from '@/lib/utils'
 import { DataTable, TableField, RecordStatus, Role, FieldType } from '@prisma/client'
+import JSZip from 'jszip'
 
 interface DataListClientProps {
   table: DataTable & {
@@ -75,6 +76,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [exportFormat, setExportFormat] = useState<'EXCEL' | 'PDF'>('EXCEL')
   const [imageGallery, setImageGallery] = useState<{ open: boolean; images: string[]; fieldLabel: string }>({
     open: false,
     images: [],
@@ -134,8 +136,78 @@ export function DataListClient({ table, user }: DataListClientProps) {
     }
   }
 
-  const handleExport = async (type: 'excel' | 'pdf') => {
+  const handleExport = (type: 'excel' | 'pdf') => {
+    setExportFormat(type === 'excel' ? 'EXCEL' : 'PDF')
     setExportDialogOpen(true)
+  }
+
+  const getRecordImages = (record: any): { fieldLabel: string; images: string[] }[] => {
+    const imageFields = table.fields.filter(f => f.type === FieldType.UPLOAD_IMAGE)
+    return imageFields
+      .map(field => {
+        const val = record.data?.[field.name]
+        const images: string[] = Array.isArray(val) ? val : (val ? [val] : [])
+        return { fieldLabel: field.label, images }
+      })
+      .filter(f => f.images.length > 0)
+  }
+
+  const hasRecordImages = (record: any): boolean => {
+    return getRecordImages(record).length > 0
+  }
+
+  const handleDownloadImages = async (record: any) => {
+    const imageGroups = getRecordImages(record)
+    if (imageGroups.length === 0) {
+      alert('该记录没有图片')
+      return
+    }
+
+    const totalImages = imageGroups.reduce((sum, g) => sum + g.images.length, 0)
+    if (totalImages === 0) {
+      alert('该记录没有图片')
+      return
+    }
+
+    if (!confirm(`确定要下载该记录的 ${totalImages} 张图片吗？`)) {
+      return
+    }
+
+    try {
+      const zip = new JSZip()
+      const folderName = `${table.label}_记录${record.id}_图片`
+      const folder = zip.folder(folderName)
+      if (!folder) return
+
+      let imgIndex = 1
+      for (const group of imageGroups) {
+        const fieldFolder = folder.folder(group.fieldLabel)
+        if (!fieldFolder) continue
+        for (const imgUrl of group.images) {
+          try {
+            const response = await fetch(imgUrl)
+            const blob = await response.blob()
+            const ext = imgUrl.split('.').pop()?.split('?')[0] || 'jpg'
+            const fileName = `${imgIndex.toString().padStart(3, '0')}.${ext}`
+            fieldFolder.file(fileName, blob)
+            imgIndex++
+          } catch (err) {
+            console.error('下载图片失败:', imgUrl, err)
+          }
+        }
+      }
+
+      const content = await zip.generateAsync({ type: 'blob' })
+      const url = window.URL.createObjectURL(content)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${folderName}.zip`
+      a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('打包图片失败:', err)
+      alert('打包图片失败')
+    }
   }
 
   const totalPages = Math.ceil(total / pageSize)
@@ -295,6 +367,16 @@ export function DataListClient({ table, user }: DataListClientProps) {
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
+                          {hasRecordImages(record) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="下载图片"
+                              onClick={() => handleDownloadImages(record)}
+                            >
+                              <ImageIcon className="w-4 h-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -353,6 +435,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
         table={table}
         search={search}
         status={status}
+        initialFormat={exportFormat}
       />
 
       <Dialog open={imageGallery.open} onOpenChange={(o) => setImageGallery(g => ({ ...g, open: o }))}>
