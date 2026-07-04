@@ -2,7 +2,8 @@
 // MySQL 5.7
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-alpine"]
 }
 
 datasource db {
