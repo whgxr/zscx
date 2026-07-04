@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from '@/components/ui/badge'
 import { ArrowLeft, Shield } from 'lucide-react'
+import { Role, UserStatus } from '@prisma/client'
 
 export default async function PermissionsPage() {
   const user = await getCurrentUser()
@@ -27,22 +28,53 @@ export default async function PermissionsPage() {
     redirect('/dashboard')
   }
 
-  const users = await prisma.user.findMany({
-    where: {
-      role: { in: ['USER', 'VIEWER'] },
-    },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      username: true,
-      realName: true,
-      role: true,
-      status: true,
-      _count: {
-        select: { tablePermissions: true },
+  let users: any[] = []
+  try {
+    users = await prisma.user.findMany({
+      where: {
+        role: { in: [Role.USER, Role.VIEWER] },
       },
-    },
-  })
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        username: true,
+        realName: true,
+        role: true,
+        status: true,
+        _count: {
+          select: { tablePermissions: true },
+        },
+      },
+    })
+  } catch (err) {
+    console.error('Permissions page query error:', err)
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Link href="/dashboard">
+            <Button variant="ghost">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              返回
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">权限管理</h1>
+          </div>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-red-500 mb-2">数据加载失败</p>
+            <p className="text-gray-500 text-sm mb-4">
+              可能是数据库未同步，请在服务器执行：<br/>
+              <code className="bg-gray-100 px-2 py-1 rounded mt-2 inline-block">
+                docker exec zscx-web npx prisma db push
+              </code>
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   const roleLabels: Record<string, string> = {
     USER: '录入员',
@@ -52,10 +84,12 @@ export default async function PermissionsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" onClick={() => redirect('/dashboard')}>
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          返回
-        </Button>
+        <Link href="/dashboard">
+          <Button variant="ghost">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            返回
+          </Button>
+        </Link>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">权限管理</h1>
           <p className="text-gray-500 mt-1">为用户分配数据表权限</p>
@@ -80,7 +114,7 @@ export default async function PermissionsPage() {
             </TableHeader>
             <TableBody>
               {users.length > 0 ? (
-                users.map((u) => (
+                users.map((u: any) => (
                   <TableRow key={u.id}>
                     <TableCell className="font-medium">{u.username}</TableCell>
                     <TableCell>{u.realName}</TableCell>
