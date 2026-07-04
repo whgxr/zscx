@@ -80,7 +80,7 @@ export function Sidebar({ user, tables }: SidebarProps) {
 
         <div className="mb-2">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 mb-2">
-            数据管理
+            项目管理
           </p>
           {tables.map((table) => (
             <Link
