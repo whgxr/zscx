@@ -32,6 +32,7 @@ import {
   Settings,
   Database,
   FileText,
+  Copy,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { TableStatus, Role } from '@prisma/client'
@@ -67,6 +68,15 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
     description: '',
     icon: '',
   })
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false)
+  const [cloneLoading, setCloneLoading] = useState(false)
+  const [cloneSource, setCloneSource] = useState<TableItem | null>(null)
+  const [cloneForm, setCloneForm] = useState({
+    name: '',
+    label: '',
+    description: '',
+    cloneFields: true,
+  })
 
   const handleCreate = async () => {
     if (!formData.name || !formData.label) return
@@ -95,7 +105,7 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
   }
 
   const handleDelete = async (id: number) => {
-    if (!confirm('确定要删除这个数据表吗？此操作不可恢复。')) return
+    if (!confirm('确定要删除这个项目吗？此操作不可恢复。')) return
 
     try {
       const res = await fetch(`/api/tables/${id}`, {
@@ -110,6 +120,42 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
       }
     } catch (err) {
       alert('删除失败')
+    }
+  }
+
+  const openCloneDialog = (table: TableItem) => {
+    setCloneSource(table)
+    setCloneForm({
+      name: table.name + '_copy',
+      label: table.label + ' - 副本',
+      description: table.description || '',
+      cloneFields: true,
+    })
+    setCloneDialogOpen(true)
+  }
+
+  const handleClone = async () => {
+    if (!cloneSource || !cloneForm.name || !cloneForm.label) return
+
+    setCloneLoading(true)
+    try {
+      const res = await fetch(`/api/tables/${cloneSource.id}/clone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cloneForm),
+      })
+
+      if (res.ok) {
+        setCloneDialogOpen(false)
+        router.refresh()
+      } else {
+        const data = await res.json()
+        alert(data.message || '复制失败')
+      }
+    } catch (err) {
+      alert('复制失败')
+    } finally {
+      setCloneLoading(false)
     }
   }
 
@@ -129,26 +175,26 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">数据表管理</h1>
-          <p className="text-gray-500 mt-1">管理系统中的动态数据表</p>
+          <h1 className="text-2xl font-bold text-gray-900">项目管理</h1>
+          <p className="text-gray-500 mt-1">管理系统中的项目数据表</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="w-4 h-4 mr-2" />
-              新建数据表
+              新建项目
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>新建数据表</DialogTitle>
+              <DialogTitle>新建项目</DialogTitle>
               <DialogDescription>
-                创建一个新的数据表，之后可以添加字段。
+                创建一个新项目，之后可以添加字段。
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="name">表名（英文标识）</Label>
+                <Label htmlFor="name">项目名（英文标识）</Label>
                 <Input
                   id="name"
                   placeholder="如：household_info"
@@ -172,7 +218,7 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
                 <Label htmlFor="description">描述（可选）</Label>
                 <Input
                   id="description"
-                  placeholder="数据表描述"
+                  placeholder="项目描述"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 />
@@ -199,15 +245,76 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
         </Dialog>
       </div>
 
+      <Dialog open={cloneDialogOpen} onOpenChange={setCloneDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>复制项目</DialogTitle>
+            <DialogDescription>
+              基于 "{cloneSource?.label}" 创建新项目
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="clone-name">项目名（英文标识）</Label>
+              <Input
+                id="clone-name"
+                placeholder="如：household_info_copy"
+                value={cloneForm.name}
+                onChange={(e) => setCloneForm({ ...cloneForm, name: e.target.value })}
+              />
+              <p className="text-xs text-gray-500">
+                只能包含字母、数字和下划线，且以字母开头
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clone-label">显示名称</Label>
+              <Input
+                id="clone-label"
+                placeholder="如：住户信息表 - 副本"
+                value={cloneForm.label}
+                onChange={(e) => setCloneForm({ ...cloneForm, label: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clone-description">描述（可选）</Label>
+              <Input
+                id="clone-description"
+                placeholder="项目描述"
+                value={cloneForm.description}
+                onChange={(e) => setCloneForm({ ...cloneForm, description: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center space-x-2 pt-2">
+              <input
+                type="checkbox"
+                id="clone-fields"
+                checked={cloneForm.cloneFields}
+                onChange={(e) => setCloneForm({ ...cloneForm, cloneFields: e.target.checked })}
+                className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
+              />
+              <Label htmlFor="clone-fields" className="cursor-pointer">同时复制字段结构</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCloneDialogOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleClone} disabled={cloneLoading || !cloneForm.name || !cloneForm.label}>
+              {cloneLoading ? '复制中...' : '复制'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">数据表列表</CardTitle>
+          <CardTitle className="text-lg">项目列表</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>表名</TableHead>
+                <TableHead>项目名</TableHead>
                 <TableHead>显示名称</TableHead>
                 <TableHead>字段数</TableHead>
                 <TableHead>记录数</TableHead>
@@ -256,6 +363,14 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
                         >
                           <Edit className="w-4 h-4" />
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openCloneDialog(table)}
+                          title="复制项目"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
                         {userRole === 'ADMIN' && (
                           <Button
                             variant="ghost"
@@ -274,7 +389,7 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-12 text-gray-500">
                     <Database className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>暂无数据表，点击右上角创建</p>
+                    <p>暂无项目，点击右上角创建</p>
                   </TableCell>
                 </TableRow>
               )}
