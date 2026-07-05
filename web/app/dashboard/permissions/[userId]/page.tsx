@@ -92,7 +92,12 @@ export default async function PermissionsPage({
 
   return (
     <PermissionManager
-      targetUser={targetUser}
+      targetUser={{
+        id: targetUser.id,
+        username: targetUser.username,
+        realName: targetUser.realName,
+        role: targetUser.role?.name || targetUser.role?.label || '未知',
+      }}
       initialPermissions={permissions}
     />
   )

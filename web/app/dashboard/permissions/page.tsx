@@ -119,7 +119,7 @@ export default async function PermissionsPage() {
                     <TableCell className="font-medium">{u.username}</TableCell>
                     <TableCell>{u.realName}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{roleLabels[u.role] || u.role}</Badge>
+                      <Badge variant="outline">{roleLabels[u.role?.name] || u.role?.label || '未知'}</Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant={u.status === 'ACTIVE' ? 'success' : 'destructive'}>
