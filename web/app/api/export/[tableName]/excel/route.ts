@@ -31,7 +31,7 @@ export async function GET(
       return NextResponse.json({ message: '数据表不存在' }, { status: 404 })
     }
 
-    if (user.role === 'USER' || user.role === 'VIEWER') {
+    if (user.role?.name === 'USER' || user.role?.name === 'VIEWER') {
       const permission = await prisma.tablePermission.findUnique({
         where: { userId_tableId: { userId: user.id, tableId: table.id } },
       })

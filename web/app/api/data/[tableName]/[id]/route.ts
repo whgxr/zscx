@@ -20,7 +20,7 @@ export async function GET(
       return NextResponse.json({ message: '数据表不存在' }, { status: 404 })
     }
 
-    if (user.role === 'USER' || user.role === 'VIEWER') {
+    if (user.role?.name === 'USER' || user.role?.name === 'VIEWER') {
       const permission = await prisma.tablePermission.findUnique({
         where: { userId_tableId: { userId: user.id, tableId: table.id } },
       })
@@ -67,7 +67,7 @@ export async function PUT(
       return NextResponse.json({ message: '数据表不存在' }, { status: 404 })
     }
 
-    if (user.role === 'USER' || user.role === 'VIEWER') {
+    if (user.role?.name === 'USER' || user.role?.name === 'VIEWER') {
       const permission = await prisma.tablePermission.findUnique({
         where: { userId_tableId: { userId: user.id, tableId: table.id } },
       })
@@ -76,7 +76,7 @@ export async function PUT(
       }
     }
 
-    if (user.role === 'VIEWER') {
+    if (user.role?.name === 'VIEWER') {
       return NextResponse.json({ message: '查看员无法编辑数据' }, { status: 403 })
     }
 
@@ -131,7 +131,7 @@ export async function DELETE(
       return NextResponse.json({ message: '数据表不存在' }, { status: 404 })
     }
 
-    if (user.role !== 'ADMIN' && user.role !== 'MANAGER') {
+    if (user.role?.name !== 'ADMIN' && user.role?.name !== 'MANAGER') {
       const permission = await prisma.tablePermission.findUnique({
         where: { userId_tableId: { userId: user.id, tableId: table.id } },
       })

@@ -10,7 +10,7 @@ export default async function TablesPage() {
     redirect('/login')
   }
 
-  if (user.role !== 'ADMIN' && user.role !== 'MANAGER') {
+  if (user.role?.name !== 'ADMIN' && user.role?.name !== 'MANAGER') {
     redirect('/dashboard')
   }
 

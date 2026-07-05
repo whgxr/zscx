@@ -73,7 +73,7 @@ export default async function DashboardPage() {
   ]
 
   const showQuickAction = (action: any) => {
-    if (action.adminOnly && user.role !== 'ADMIN') return false
+    if (action.adminOnly && user.role?.name !== 'ADMIN') return false
     return true
   }
 

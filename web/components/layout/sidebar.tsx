@@ -21,7 +21,7 @@ interface SidebarProps {
     id: number
     username: string
     realName: string
-    role: Role
+    role: { name: string } | null
     avatar?: string | null
   }
   tables: {
@@ -44,8 +44,8 @@ const iconMap: Record<string, React.ReactNode> = {
 export function Sidebar({ user, tables }: SidebarProps) {
   const pathname = usePathname()
 
-  const isAdmin = user.role === 'ADMIN' || user.role === 'MANAGER'
-  const isSuperAdmin = user.role === 'ADMIN'
+  const isAdmin = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER'
+  const isSuperAdmin = user.role?.name === 'ADMIN'
 
   return (
     <aside className="w-64 bg-white border-r flex flex-col">
@@ -196,10 +196,10 @@ export function Sidebar({ user, tables }: SidebarProps) {
               {user.realName || user.username}
             </p>
             <p className="text-xs text-gray-500">
-              {user.role === 'ADMIN' && '超级管理员'}
-              {user.role === 'MANAGER' && '管理员'}
-              {user.role === 'USER' && '录入员'}
-              {user.role === 'VIEWER' && '查看员'}
+              {user.role?.name === 'ADMIN' && '超级管理员'}
+              {user.role?.name === 'MANAGER' && '管理员'}
+              {user.role?.name === 'USER' && '录入员'}
+              {user.role?.name === 'VIEWER' && '查看员'}
             </p>
           </div>
         </div>

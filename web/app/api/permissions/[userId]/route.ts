@@ -8,7 +8,7 @@ export async function GET(
 ) {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'ADMIN') {
+    if (!user || user.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -35,6 +35,7 @@ export async function GET(
         canEdit: perm?.canEdit ?? false,
         canDelete: perm?.canDelete ?? false,
         canExport: perm?.canExport ?? false,
+        canPrint: perm?.canPrint ?? false,
       }
     })
 
@@ -51,7 +52,7 @@ export async function PUT(
 ) {
   try {
     const currentUser = await getCurrentUser()
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    if (!currentUser || currentUser.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -73,9 +74,10 @@ export async function PUT(
             canEdit: perm.canEdit,
             canDelete: perm.canDelete,
             canExport: perm.canExport,
+            canPrint: perm.canPrint,
           },
         })
-      } else if (perm.canView || perm.canCreate || perm.canEdit || perm.canDelete || perm.canExport) {
+      } else if (perm.canView || perm.canCreate || perm.canEdit || perm.canDelete || perm.canExport || perm.canPrint) {
         await prisma.tablePermission.create({
           data: {
             userId,
@@ -85,6 +87,7 @@ export async function PUT(
             canEdit: perm.canEdit,
             canDelete: perm.canDelete,
             canExport: perm.canExport,
+            canPrint: perm.canPrint,
           },
         })
       }

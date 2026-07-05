@@ -35,7 +35,7 @@ export async function PUT(
       return NextResponse.json({ message: '系统模板不能修改' }, { status: 403 })
     }
 
-    if (template.createdBy !== user.id && user.role !== 'ADMIN') {
+    if (template.createdBy !== user.id && user.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限修改此模板' }, { status: 403 })
     }
 
@@ -117,7 +117,7 @@ export async function DELETE(
       return NextResponse.json({ message: '系统模板不能删除' }, { status: 403 })
     }
 
-    if (template.createdBy !== user.id && user.role !== 'ADMIN') {
+    if (template.createdBy !== user.id && user.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限删除此模板' }, { status: 403 })
     }
 

@@ -41,7 +41,7 @@ services:
         condition: service_healthy
     volumes:
       - uploads:/app/public/uploads
-    command: sh -c "npx prisma db push && npx prisma db seed && npm start"
+    command: sh -c "node prisma/docker-migrate.js && npm start"
 
 volumes:
   mysql_data:

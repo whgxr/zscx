@@ -53,7 +53,7 @@ export async function PUT(
 ) {
   try {
     const user = await getCurrentUser()
-    if (!user || (user.role !== 'ADMIN' && user.role !== 'MANAGER')) {
+    if (!user || (user.role?.name !== 'ADMIN' && user.role?.name !== 'MANAGER')) {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -66,7 +66,7 @@ export async function PUT(
     const data = updateTableSchema.parse(body)
 
     // 只有管理员可以修改表名和显示名称
-    if ((data.name || data.label) && user.role !== 'ADMIN') {
+    if ((data.name || data.label) && user.role?.name !== 'ADMIN') {
       return NextResponse.json(
         { message: '只有系统管理员可以修改表名和显示名称' },
         { status: 403 }
@@ -107,7 +107,7 @@ export async function DELETE(
 ) {
   try {
     const user = await getCurrentUser()
-    if (!user || user.role !== 'ADMIN') {
+    if (!user || user.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 

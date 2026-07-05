@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { comparePassword, generateToken, setTokenCookie } from '@/lib/auth'
 import { z } from 'zod'
@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { username },
+      include: { role: true },
     })
 
     if (!user) {
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
     const token = generateToken({
       userId: user.id,
       username: user.username,
-      role: user.role,
+      roleId: user.roleId,
     })
 
     setTokenCookie(token)
@@ -81,3 +82,4 @@ export async function POST(req: NextRequest) {
     )
   }
 }
+

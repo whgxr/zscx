@@ -1,10 +1,83 @@
-import { PrismaClient, Role, FieldType, TableStatus, RecordStatus } from '@prisma/client'
+import { PrismaClient, FieldType, TableStatus, RecordStatus } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
 async function main() {
   console.log('开始初始化数据库...')
+
+  // 创建默认角色
+  const adminRole = await prisma.role.upsert({
+    where: { name: 'ADMIN' },
+    update: {},
+    create: {
+      name: 'ADMIN',
+      label: '超级管理员',
+      description: '系统超级管理员，拥有所有权限',
+      canManageTables: true,
+      canManageUsers: true,
+      canManagePermissions: true,
+      canManageTemplates: true,
+      canViewLogs: true,
+      canManageSettings: true,
+      isSystem: true,
+      sortOrder: 1,
+    },
+  })
+
+  const managerRole = await prisma.role.upsert({
+    where: { name: 'MANAGER' },
+    update: {},
+    create: {
+      name: 'MANAGER',
+      label: '管理员',
+      description: '系统管理员，可管理数据和用户',
+      canManageTables: true,
+      canManageUsers: true,
+      canManagePermissions: false,
+      canManageTemplates: true,
+      canViewLogs: true,
+      canManageSettings: false,
+      isSystem: true,
+      sortOrder: 2,
+    },
+  })
+
+  const userRole = await prisma.role.upsert({
+    where: { name: 'USER' },
+    update: {},
+    create: {
+      name: 'USER',
+      label: '录入员',
+      description: '数据录入员，可录入和编辑数据',
+      canManageTables: false,
+      canManageUsers: false,
+      canManagePermissions: false,
+      canManageTemplates: false,
+      canViewLogs: false,
+      canManageSettings: false,
+      isSystem: true,
+      sortOrder: 3,
+    },
+  })
+
+  const viewerRole = await prisma.role.upsert({
+    where: { name: 'VIEWER' },
+    update: {},
+    create: {
+      name: 'VIEWER',
+      label: '查看员',
+      description: '数据查看员，仅可查看数据',
+      canManageTables: false,
+      canManageUsers: false,
+      canManagePermissions: false,
+      canManageTemplates: false,
+      canViewLogs: false,
+      canManageSettings: false,
+      isSystem: true,
+      sortOrder: 4,
+    },
+  })
 
   // 创建默认管理员
   const adminPassword = await bcrypt.hash('admin123', 10)
@@ -15,7 +88,7 @@ async function main() {
       username: 'admin',
       passwordHash: adminPassword,
       realName: '系统管理员',
-      role: Role.ADMIN,
+      roleId: adminRole.id,
       phone: '13800138000',
     },
   })
@@ -271,7 +344,7 @@ async function main() {
       username: 'user01',
       passwordHash: userPassword,
       realName: '张录入',
-      role: Role.USER,
+      roleId: userRole.id,
       phone: '13800138001',
       createdBy: admin.id,
       tablePermissions: {
@@ -305,7 +378,7 @@ async function main() {
       username: 'viewer01',
       passwordHash: userPassword,
       realName: '李查看',
-      role: Role.VIEWER,
+      roleId: viewerRole.id,
       phone: '13800138002',
       createdBy: admin.id,
       tablePermissions: {

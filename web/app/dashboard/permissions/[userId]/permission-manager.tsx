@@ -17,6 +17,7 @@ interface Permission {
   canEdit: boolean
   canDelete: boolean
   canExport: boolean
+  canPrint: boolean
 }
 
 interface PermissionManagerProps {
@@ -45,6 +46,8 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
           updated.canCreate = false
           updated.canEdit = false
           updated.canDelete = false
+          updated.canExport = false
+          updated.canPrint = false
         }
         return updated
       }
@@ -127,6 +130,7 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
                   <th className="text-center py-3 px-4 font-medium">编辑</th>
                   <th className="text-center py-3 px-4 font-medium">删除</th>
                   <th className="text-center py-3 px-4 font-medium">导出</th>
+                  <th className="text-center py-3 px-4 font-medium">打印</th>
                 </tr>
               </thead>
               <tbody>
@@ -168,6 +172,13 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
                       <Switch
                         checked={perm.canExport}
                         onCheckedChange={(v) => updatePermission(perm.tableId, 'canExport', v)}
+                        disabled={isAdmin || !perm.canView}
+                      />
+                    </td>
+                    <td className="text-center py-3 px-4">
+                      <Switch
+                        checked={perm.canPrint}
+                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canPrint', v)}
                         disabled={isAdmin || !perm.canView}
                       />
                     </td>

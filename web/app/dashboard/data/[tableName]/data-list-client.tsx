@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -62,6 +62,14 @@ interface DataListClientProps {
     id: number
     role: Role
   }
+  permission?: {
+    canView: boolean
+    canCreate: boolean
+    canEdit: boolean
+    canDelete: boolean
+    canExport: boolean
+    canPrint: boolean
+  }
 }
 
 const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
@@ -91,8 +99,9 @@ function ImageThumbnail({ src, alt = '' }: { src: string; alt?: string }) {
   )
 }
 
-export function DataListClient({ table, user }: DataListClientProps) {
+export function DataListClient({ table, user, permission }: DataListClientProps) {
   const router = useRouter()
+  const pathname = usePathname()
   const [records, setRecords] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
@@ -116,6 +125,7 @@ export function DataListClient({ table, user }: DataListClientProps) {
   const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<string>('')
   const [printPreviewUrl, setPrintPreviewUrl] = useState<string | null>(null)
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false)
+  const [pathKey, setPathKey] = useState(Date.now())
 
   const defaultListFields = table.fields.filter((f: any) => f.showInList)
 
@@ -180,7 +190,11 @@ export function DataListClient({ table, user }: DataListClientProps) {
 
   useEffect(() => {
     fetchRecords()
-  }, [page, status])
+  }, [page, status, pathKey])
+
+  useEffect(() => {
+    setPathKey(Date.now())
+  }, [pathname])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -357,7 +371,8 @@ export function DataListClient({ table, user }: DataListClientProps) {
   }
 
   const totalPages = Math.ceil(total / pageSize)
-  const canCreate = user.role === 'ADMIN' || user.role === 'MANAGER' || true
+  const canCreate = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canCreate
+  const canPrint = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canPrint
 
   return (
     <div className="space-y-6">
@@ -523,14 +538,16 @@ export function DataListClient({ table, user }: DataListClientProps) {
                               <ImageIcon className="w-4 h-4" />
                             </Button>
                           )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="打印/预览"
-                            onClick={() => handleRecordPrint(record)}
-                          >
-                            <Printer className="w-4 h-4" />
-                          </Button>
+                          {canPrint && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="打印/预览"
+                              onClick={() => handleRecordPrint(record)}
+                            >
+                              <Printer className="w-4 h-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"

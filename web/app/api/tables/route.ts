@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { z } from 'zod'
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user || (user.role !== 'ADMIN' && user.role !== 'MANAGER')) {
+    if (!user || (user.role?.name !== 'ADMIN' && user.role?.name !== 'MANAGER')) {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -88,3 +88,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: '创建数据表失败' }, { status: 500 })
   }
 }
+

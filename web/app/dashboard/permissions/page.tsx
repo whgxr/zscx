@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from '@/components/ui/badge'
 import { ArrowLeft, Shield } from 'lucide-react'
-import { Role, UserStatus } from '@prisma/client'
+import { UserStatus } from '@prisma/client'
 
 export default async function PermissionsPage() {
   const user = await getCurrentUser()
@@ -24,7 +24,7 @@ export default async function PermissionsPage() {
     redirect('/login')
   }
 
-  if (user.role !== 'ADMIN') {
+  if (user.role?.name !== 'ADMIN') {
     redirect('/dashboard')
   }
 
@@ -32,7 +32,7 @@ export default async function PermissionsPage() {
   try {
     users = await prisma.user.findMany({
       where: {
-        role: { in: [Role.USER, Role.VIEWER] },
+        role: { name: { in: ['USER', 'VIEWER'] } },
       },
       orderBy: { createdAt: 'desc' },
       select: {

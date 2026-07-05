@@ -20,7 +20,7 @@ model User {
   realName      String
   phone         String?
   email         String?
-  role          Role         @default(USER)
+  roleId        Int
   status        UserStatus   @default(ACTIVE)
   avatar        String?
   createdAt     DateTime     @default(now())
@@ -28,19 +28,41 @@ model User {
   createdBy     Int?
 
   // 关系
+  role          Role         @relation(fields: [roleId], references: [id])
   tablePermissions TablePermission[]
   dataRecords      DataRecord[]      @relation("CreatedRecords")
   uploadedFiles    UploadedFile[]
 
   @@index([username])
-  @@index([role])
+  @@index([roleId])
 }
 
-enum Role {
-  ADMIN      // 超级管理员 - 全部权限
-  MANAGER    // 管理员 - 可管理用户和表设计
-  USER       // 普通用户 - 录入和查询数据（按表分配权限）
-  VIEWER     // 查看员 - 只能查看导出数据（按表分配权限）
+model Role {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  label       String
+  description String?
+  canManageTables Boolean @default(false)
+  canManageUsers Boolean @default(false)
+  canManagePermissions Boolean @default(false)
+  canManageTemplates Boolean @default(false)
+  canViewLogs Boolean @default(false)
+  canManageSettings Boolean @default(false)
+  isSystem    Boolean      @default(false)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  users       User[]
+
+  @@index([sortOrder])
+}
+
+enum DefaultRole {
+  ADMIN
+  MANAGER
+  USER
+  VIEWER
 }
 
 enum UserStatus {
@@ -58,6 +80,7 @@ model TablePermission {
   canEdit    Boolean       @default(false)
   canDelete  Boolean       @default(false)
   canExport  Boolean       @default(false)
+  canPrint   Boolean       @default(false)
   createdAt  DateTime      @default(now())
 
   user       User          @relation(fields: [userId], references: [id])
@@ -67,7 +90,18 @@ model TablePermission {
   @@index([tableId])
 }
 
-// ==================== 动态数据表定义 ====================
+// ==================== 系统设置 ====================
+
+model SystemSetting {
+  id             Int          @id @default(autoincrement())
+  key            String       @unique
+  value          String
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([key])
+}
 
 model DataTable {
   id          Int              @id @default(autoincrement())
