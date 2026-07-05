@@ -10,13 +10,19 @@ import { Badge } from '@/components/ui/badge'
 import { User, Key, Phone, Mail, Shield, Clock } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 
+interface RoleInfo {
+  id: number
+  name: string
+  label: string
+}
+
 interface UserProfile {
   id: number
   username: string
   realName: string
   phone: string | null
   email: string | null
-  role: string
+  role: RoleInfo
   status: string
   avatar: string | null
   createdAt: string
