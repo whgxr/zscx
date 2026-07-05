@@ -254,27 +254,31 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
 
     const insertField = useCallback((fieldName: string, fieldLabel: string) => {
       if (!hotRef.current) return
-      const selection = hotRef.current.getSelected()
+      const selection = hotRef.current.getSelected() as unknown as number[]
       if (!selection || selection.length < 4) return
       
-      const [row, col] = [selection[0], selection[1]]
+      const row = selection[0]
+      const col = selection[1]
       const newValue = `{{${fieldName}}}`
       hotRef.current.setDataAtCell(row, col, newValue)
     }, [])
 
     const getSelectedCell = useCallback(() => {
       if (!hotRef.current) return null
-      const selection = hotRef.current.getSelected()
+      const selection = hotRef.current.getSelected() as unknown as number[]
       if (!selection || selection.length < 4) return null
       return { row: selection[0], col: selection[1] }
     }, [])
 
     const mergeSelected = useCallback(() => {
       if (!hotRef.current) return
-      const selection = hotRef.current.getSelected()
+      const selection = hotRef.current.getSelected() as unknown as number[]
       if (!selection || selection.length < 4) return
       
-      const [startRow, startCol, endRow, endCol] = selection
+      const startRow = selection[0]
+      const startCol = selection[1]
+      const endRow = selection[2]
+      const endCol = selection[3]
       const mergePlugin = hotRef.current.getPlugin('mergeCells')
       if (mergePlugin) {
         mergePlugin.merge(startRow, startCol, endRow, endCol)
@@ -283,10 +287,13 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
 
     const unmergeSelected = useCallback(() => {
       if (!hotRef.current) return
-      const selection = hotRef.current.getSelected()
+      const selection = hotRef.current.getSelected() as unknown as number[]
       if (!selection || selection.length < 4) return
       
-      const [startRow, startCol, endRow, endCol] = selection
+      const startRow = selection[0]
+      const startCol = selection[1]
+      const endRow = selection[2]
+      const endCol = selection[3]
       const mergePlugin = hotRef.current.getPlugin('mergeCells')
       if (mergePlugin) {
         mergePlugin.unmerge(startRow, startCol, endRow, endCol)
@@ -449,7 +456,7 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
 
     const deleteRow = useCallback(() => {
       if (!hotRef.current) return
-      const selection = hotRef.current.getSelected()
+      const selection = hotRef.current.getSelected() as unknown as number[]
       if (!selection) return
       hotRef.current.alter('remove_row', selection[0])
       const newRowHeights = [...rowHeights]
@@ -459,7 +466,7 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
 
     const deleteCol = useCallback(() => {
       if (!hotRef.current) return
-      const selection = hotRef.current.getSelected()
+      const selection = hotRef.current.getSelected() as unknown as number[]
       if (!selection) return
       hotRef.current.alter('remove_col', selection[1])
       const newColWidths = [...colWidths]
