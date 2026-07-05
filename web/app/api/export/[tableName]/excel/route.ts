@@ -429,7 +429,13 @@ async function exportTemplateExcel(
   config: any,
   templateMeta: any
 ) {
-  const grid = config.grid
+  const grid = config.grid || []
+  const styles = config.styles || []
+  const colWidths = config.colWidths || []
+  const rowHeights = config.rowHeights || []
+  const mergedCells = config.mergedCells || []
+  const formulas = config.formulas || []
+  
   const worksheet = workbook.addWorksheet(templateMeta?.name || table.label)
 
   const maxRow = grid.length
@@ -437,7 +443,7 @@ async function exportTemplateExcel(
 
   for (let r = 0; r < maxRow; r++) {
     const row = worksheet.getRow(r + 1)
-    row.height = 20
+    row.height = rowHeights[r] || 20
     for (let c = 0; c < maxCol; c++) {
       const cell = row.getCell(c + 1)
       const cellData = grid[r]?.[c]
@@ -445,45 +451,54 @@ async function exportTemplateExcel(
 
       let cellValue = cellData.value || ''
 
-      if (cellData.bold || cellData.italic || cellData.underline || cellData.fontSize) {
+      const cellStyle = styles[r]?.[c] || {}
+      
+      if (cellStyle.bold || cellStyle.italic || cellStyle.underline || cellStyle.fontSize || cellStyle.textColor) {
         cell.font = {
-          bold: cellData.bold,
-          italic: cellData.italic,
-          underline: cellData.underline ? 'single' : undefined,
-          size: cellData.fontSize,
+          bold: cellStyle.bold,
+          italic: cellStyle.italic,
+          underline: cellStyle.underline ? 'single' : undefined,
+          size: cellStyle.fontSize,
+          color: cellStyle.textColor ? { argb: 'FF' + cellStyle.textColor.replace('#', '').toUpperCase() } : undefined,
         }
       }
 
-      if (cellData.bgColor) {
+      if (cellStyle.bgColor) {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: 'FF' + cellData.bgColor.replace('#', '').toUpperCase() },
+          fgColor: { argb: 'FF' + cellStyle.bgColor.replace('#', '').toUpperCase() },
         }
       }
 
-      if (cellData.textColor) {
-        if (!cell.font) cell.font = {}
-        cell.font = {
-          ...cell.font,
-          color: { argb: 'FF' + cellData.textColor.replace('#', '').toUpperCase() },
-        }
-      }
-
-      if (cellData.align) {
+      if (cellStyle.align || cellStyle.verticalAlign || cellStyle.wrapText) {
         cell.alignment = {
-          horizontal: cellData.align as any,
-          vertical: 'middle',
+          horizontal: cellStyle.align as any,
+          vertical: cellStyle.verticalAlign as any || 'middle',
+          wrapText: cellStyle.wrapText,
         }
       }
 
-      cell.value = cellValue
+      if (formulas[r]?.[c]) {
+        cell.value = { formula: formulas[r][c].replace('=', '') }
+      } else {
+        cell.value = cellValue
+      }
     }
   }
 
   for (let c = 0; c < maxCol; c++) {
-    worksheet.getColumn(c + 1).width = 15
+    worksheet.getColumn(c + 1).width = (colWidths[c] || 150) / 10
   }
+
+  mergedCells.forEach((merge: any) => {
+    worksheet.mergeCells(
+      merge.row + 1,
+      merge.col + 1,
+      merge.row + merge.rowspan,
+      merge.col + merge.colspan
+    )
+  })
 
   const firstRecord = records[0]
   const firstData = firstRecord?.data as Record<string, any> || {}
@@ -543,6 +558,7 @@ async function exportTemplateExcel(
           const targetRowIdx = maxRow + offset + (r - dataStartRow) + 1
           const sourceRowIdx = r + 1
           const targetRow = worksheet.getRow(targetRowIdx)
+          targetRow.height = rowHeights[r] || 20
 
           for (let c = 0; c < maxCol; c++) {
             const sourceCell = worksheet.getCell(sourceRowIdx, c + 1)

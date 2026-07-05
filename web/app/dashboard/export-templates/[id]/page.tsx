@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { ExcelTemplateDesigner } from './excel-designer'
+import { EmbeddedTemplateDesigner } from './embedded-designer'
 import { TemplateDesigner } from './template-designer'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -40,11 +40,8 @@ export default async function TemplateDetailPage({
     redirect('/dashboard/export-templates')
   }
 
-  const config = template.config as any
-  const isExcelTemplate = template.format === 'EXCEL' && config?.type === 'EXCEL_TEMPLATE'
-
   if (template.format === 'EXCEL') {
-    return <ExcelTemplateDesigner template={template as any} />
+    return <EmbeddedTemplateDesigner template={template as any} />
   }
 
   return <TemplateDesigner template={template as any} />
