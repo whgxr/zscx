@@ -153,7 +153,13 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
           setRowHeights(newRowHeights)
           notifyChange(data, styles, colWidths, newRowHeights, mergedCells, formulas)
         },
-        afterMergeCells: (merged: any[]) => {
+        afterMergeCells: (cellRange: any, mergeParent: any, auto: boolean) => {
+          const merged = hot.getPlugin('mergeCells').mergedCellsCollection.mergedCells
+          setMergedCells(merged)
+          notifyChange(data, styles, colWidths, rowHeights, merged, formulas)
+        },
+        afterUnmergeCells: (cellRange: any, auto: boolean) => {
+          const merged = hot.getPlugin('mergeCells').mergedCellsCollection.mergedCells
           setMergedCells(merged)
           notifyChange(data, styles, colWidths, rowHeights, merged, formulas)
         },
@@ -264,7 +270,10 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
       if (!selection || selection.length < 4) return
       
       const [startRow, startCol, endRow, endCol] = selection
-      hotRef.current.mergeCells(startRow, startCol, endRow - startRow + 1, endCol - startCol + 1)
+      const mergePlugin = hotRef.current.getPlugin('mergeCells')
+      if (mergePlugin) {
+        mergePlugin.merge(startRow, startCol, endRow, endCol)
+      }
     }, [])
 
     const unmergeSelected = useCallback(() => {
@@ -272,8 +281,11 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
       const selection = hotRef.current.getSelected()
       if (!selection || selection.length < 4) return
       
-      const [row, col] = [selection[0], selection[1]]
-      hotRef.current.unmergeCell(row, col)
+      const [startRow, startCol, endRow, endCol] = selection
+      const mergePlugin = hotRef.current.getPlugin('mergeCells')
+      if (mergePlugin) {
+        mergePlugin.unmerge(startRow, startCol, endRow, endCol)
+      }
     }, [])
 
     const importFromExcel = useCallback(async (file: File) => {
