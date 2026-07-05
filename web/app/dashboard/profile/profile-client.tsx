@@ -128,7 +128,7 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
               <h3 className="text-lg font-semibold">{user.realName}</h3>
               <p className="text-sm text-gray-500">@{user.username}</p>
               <Badge className="mt-2">
-                {roleLabels[user.role] || user.role}
+                {roleLabels[user.role?.name] || user.role?.label || '未知'}
               </Badge>
             </div>
             <div className="mt-6 space-y-3 text-sm">
@@ -181,7 +181,7 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
                   </div>
                   <div className="space-y-2">
                     <Label>角色</Label>
-                    <Input value={roleLabels[user.role] || user.role} disabled />
+                    <Input value={roleLabels[user.role?.name] || user.role?.label || '未知'} disabled />
                   </div>
                 </div>
                 <div className="space-y-2">
