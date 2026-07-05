@@ -18,7 +18,7 @@ export default async function PermissionsPage({
     redirect('/login')
   }
 
-  if (user.role !== 'ADMIN') {
+  if (user.role?.name !== 'ADMIN') {
     redirect('/dashboard')
   }
 

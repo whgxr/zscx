@@ -1,7 +1,11 @@
 "use client"
 
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Database,
   Users,
@@ -11,11 +15,13 @@ import {
   Activity,
   Server,
   Shield,
+  Settings2,
+  Clock,
 } from 'lucide-react'
 import { Role } from '@prisma/client'
 
 interface SettingsClientProps {
-  userRole: Role
+  userRole: { name: string } | null
   stats: {
     tables: number
     users: number
@@ -27,6 +33,47 @@ interface SettingsClientProps {
 }
 
 export function SettingsClient({ userRole, stats }: SettingsClientProps) {
+  const [sessionTimeout, setSessionTimeout] = useState(30)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    fetchSettings()
+  }, [])
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch('/api/settings')
+      if (res.ok) {
+        const data = await res.json()
+        const timeout = parseInt(data.settings?.sessionTimeout || '30')
+        setSessionTimeout(timeout)
+      }
+    } catch (err) {
+      console.error('Fetch settings error:', err)
+    }
+  }
+
+  const saveSettings = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: { sessionTimeout: sessionTimeout.toString() } }),
+      })
+      if (res.ok) {
+        alert('设置保存成功')
+      } else {
+        const data = await res.json()
+        alert(data.message || '保存失败')
+      }
+    } catch (err) {
+      alert('保存失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const statItems = [
     { label: '数据表', value: stats.tables, icon: Database, color: 'text-blue-500' },
     { label: '用户数', value: stats.users, icon: Users, color: 'text-green-500' },
@@ -57,6 +104,13 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
       href: '/dashboard/permissions',
       icon: Shield,
       adminOnly: false,
+    },
+    {
+      title: '角色管理',
+      description: '自定义角色和角色权限配置',
+      href: '/dashboard/roles',
+      icon: Settings2,
+      adminOnly: true,
     },
     {
       title: '导出模板设计',
@@ -129,6 +183,46 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
         </CardContent>
       </Card>
 
+      {/* 安全设置 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Clock className="w-5 h-5" />
+            安全设置
+          </CardTitle>
+          <CardDescription>配置系统安全相关参数</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                自动退出时间（分钟）
+              </Label>
+              <div className="flex items-center gap-4">
+                <Input
+                  type="number"
+                  value={sessionTimeout}
+                  onChange={(e) => setSessionTimeout(Math.max(1, parseInt(e.target.value) || 30))}
+                  className="w-32"
+                  min="1"
+                  max="1440"
+                />
+                <span className="text-gray-500">分钟</span>
+                <p className="text-sm text-gray-500 flex-1">
+                  用户在指定时间内不进行任何操作将自动退出登录，默认30分钟
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={saveSettings} disabled={loading}>
+                {loading ? '保存中...' : '保存设置'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 管理功能入口 */}
       <Card>
         <CardHeader>
@@ -139,7 +233,7 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {modules.map(module => {
               const Icon = module.icon
-              const isDisabled = module.adminOnly && userRole !== 'ADMIN'
+              const isDisabled = module.adminOnly && userRole?.name !== 'ADMIN'
               return (
                 <a
                   key={module.href}

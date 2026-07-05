@@ -32,7 +32,7 @@ export async function GET(
       return NextResponse.json({ message: '数据表不存在' }, { status: 404 })
     }
 
-    if (user.role === 'USER' || user.role === 'VIEWER') {
+    if (user.role?.name === 'USER' || user.role?.name === 'VIEWER') {
       const permission = await prisma.tablePermission.findUnique({
         where: { userId_tableId: { userId: user.id, tableId: table.id } },
       })
@@ -44,7 +44,6 @@ export async function GET(
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
     const status = searchParams.get('status') || ''
-    const type = (searchParams.get('type') as ExportType) || ExportType.STANDARD
     const templateId = searchParams.get('templateId')
     const fieldsParam = searchParams.get('fields')
     const recordId = searchParams.get('recordId')
@@ -82,8 +81,10 @@ export async function GET(
       }
     }
 
+    const type = templateConfig?.type || ExportType.STANDARD
+
     let doc: jsPDF
-    const orientation = selectedFields.length > 6 ? 'landscape' : 'portrait'
+    const orientation = templateConfig?.orientation === 'landscape' ? 'landscape' : (selectedFields.length > 6 ? 'landscape' : 'portrait')
 
     switch (type) {
       case ExportType.STANDARD:

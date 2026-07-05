@@ -7,7 +7,7 @@ const updateUserSchema = z.object({
   realName: z.string().min(1, '真实姓名不能为空').optional(),
   phone: z.string().nullable().optional(),
   email: z.string().email('邮箱格式不正确').nullable().optional(),
-  role: z.enum(['ADMIN', 'MANAGER', 'USER', 'VIEWER']).optional(),
+  roleName: z.string().optional(),
   status: z.enum(['ACTIVE', 'DISABLED']).optional(),
   password: z.string().min(6, '密码至少6个字符').optional(),
 })
@@ -21,7 +21,7 @@ export async function GET(
     if (!currentUser) {
       return NextResponse.json({ message: '未登录' }, { status: 401 })
     }
-    if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER') {
+    if (currentUser.role?.name !== 'ADMIN' && currentUser.role?.name !== 'MANAGER') {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -57,7 +57,7 @@ export async function PUT(
 ) {
   try {
     const currentUser = await getCurrentUser()
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    if (!currentUser || currentUser.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -69,7 +69,12 @@ export async function PUT(
     if (data.realName !== undefined) updateData.realName = data.realName
     if (data.phone !== undefined) updateData.phone = data.phone
     if (data.email !== undefined) updateData.email = data.email
-    if (data.role) updateData.role = data.role
+    if (data.roleName) {
+      const role = await prisma.role.findUnique({ where: { name: data.roleName } })
+      if (role) {
+        updateData.roleId = role.id
+      }
+    }
     if (data.status) updateData.status = data.status
     if (data.password) updateData.passwordHash = await hashPassword(data.password)
 
@@ -112,7 +117,7 @@ export async function DELETE(
 ) {
   try {
     const currentUser = await getCurrentUser()
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    if (!currentUser || currentUser.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -122,13 +127,13 @@ export async function DELETE(
       return NextResponse.json({ message: '不能删除自己' }, { status: 400 })
     }
 
-    const user = await prisma.user.findUnique({ where: { id } })
+    const user = await prisma.user.findUnique({ where: { id }, include: { role: true } })
     if (!user) {
       return NextResponse.json({ message: '用户不存在' }, { status: 404 })
     }
 
-    if (user.role === 'ADMIN') {
-      const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } })
+    if (user.role?.name === 'ADMIN') {
+      const adminCount = await prisma.user.count({ where: { role: { name: 'ADMIN' } } })
       if (adminCount <= 1) {
         return NextResponse.json({ message: '至少保留一个管理员' }, { status: 400 })
       }

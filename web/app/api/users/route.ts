@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser, hashPassword } from '@/lib/auth'
 import { z } from 'zod'
-import { Role, UserStatus } from '@prisma/client'
+import { UserStatus } from '@prisma/client'
 
 const createUserSchema = z.object({
   username: z.string().min(3, '用户名至少3个字符'),
@@ -10,7 +10,7 @@ const createUserSchema = z.object({
   realName: z.string().min(1, '真实姓名不能为空'),
   phone: z.string().nullable().optional(),
   email: z.string().email('邮箱格式不正确').nullable().optional(),
-  role: z.nativeEnum(Role).default(Role.USER),
+  roleName: z.string().default('USER'),
 })
 
 export async function GET(req: NextRequest) {
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ message: '未登录' }, { status: 401 })
     }
-    if (user.role !== 'ADMIN' && user.role !== 'MANAGER') {
+    if (user.role?.name !== 'ADMIN' && user.role?.name !== 'MANAGER') {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const currentUser = await getCurrentUser()
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    if (!currentUser || currentUser.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 
@@ -82,6 +82,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: '用户名已存在' }, { status: 400 })
     }
 
+    const role = await prisma.role.findUnique({ where: { name: data.roleName } })
+    if (!role) {
+      return NextResponse.json({ message: '角色不存在' }, { status: 400 })
+    }
+
     const passwordHash = await hashPassword(data.password)
 
     const user = await prisma.user.create({
@@ -91,7 +96,7 @@ export async function POST(req: NextRequest) {
         realName: data.realName,
         phone: data.phone,
         email: data.email,
-        role: data.role,
+        roleId: role.id,
         createdBy: currentUser.id,
       },
       select: {
@@ -107,7 +112,7 @@ export async function POST(req: NextRequest) {
         userId: currentUser.id,
         action: 'CREATE_USER',
         module: 'USER',
-        detail: { username: data.username, realName: data.realName, role: data.role },
+        detail: { username: data.username, realName: data.realName, role: data.roleName },
       },
     })
 
@@ -123,3 +128,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: '创建用户失败' }, { status: 500 })
   }
 }
+

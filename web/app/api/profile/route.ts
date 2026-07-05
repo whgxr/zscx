@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser, hashPassword, comparePassword } from '@/lib/auth'
 import { z } from 'zod'
@@ -143,3 +143,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: '修改密码失败' }, { status: 500 })
   }
 }
+

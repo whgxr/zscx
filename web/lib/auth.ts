@@ -10,7 +10,7 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 export interface JwtPayload {
   userId: number
   username: string
-  role: Role
+  roleId: number
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -44,15 +44,8 @@ export async function getCurrentUser() {
 
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: {
-      id: true,
-      username: true,
-      realName: true,
+    include: {
       role: true,
-      status: true,
-      avatar: true,
-      phone: true,
-      email: true,
     },
   })
 

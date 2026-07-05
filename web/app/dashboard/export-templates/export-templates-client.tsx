@@ -265,33 +265,19 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>导出格式</Label>
-                  <Select value={formData.format} onValueChange={(v: ExportFormat) => setFormData({ ...formData, format: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="EXCEL">Excel (.xlsx)</SelectItem>
-                      <SelectItem value="PDF">PDF (.pdf)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>导出类型</Label>
-                  <Select value={formData.type} onValueChange={(v: ExportType) => setFormData({ ...formData, type: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="STANDARD">标准列表</SelectItem>
-                      <SelectItem value="CARD">卡片式</SelectItem>
-                      <SelectItem value="GROUPED">分组汇总</SelectItem>
-                      <SelectItem value="FORM">表单式</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <Label>导出类型</Label>
+                <Select value={formData.type} onValueChange={(v: ExportType) => setFormData({ ...formData, type: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="STANDARD">标准列表</SelectItem>
+                    <SelectItem value="CARD">卡片式</SelectItem>
+                    <SelectItem value="GROUPED">分组汇总</SelectItem>
+                    <SelectItem value="FORM">表单式</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="description">描述（可选）</Label>
@@ -325,7 +311,6 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
               <TableRow>
                 <TableHead>模板名称</TableHead>
                 <TableHead>所属表</TableHead>
-                <TableHead>格式</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>创建者</TableHead>
                 <TableHead>默认</TableHead>
@@ -360,16 +345,6 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                             </Badge>
                           )}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="gap-1">
-                          {template.format === 'EXCEL' ? (
-                            <FileSpreadsheet className="w-3 h-3" />
-                          ) : (
-                            <FileText className="w-3 h-3" />
-                          )}
-                          {formatLabels[template.format]}
-                        </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1 text-sm">

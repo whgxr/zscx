@@ -54,7 +54,7 @@ interface TableItem {
 
 interface TablesClientProps {
   initialTables: TableItem[]
-  userRole: Role
+  userRole: { name: string } | null
 }
 
 export function TablesClient({ initialTables, userRole }: TablesClientProps) {
@@ -372,7 +372,7 @@ export function TablesClient({ initialTables, userRole }: TablesClientProps) {
                         >
                           <Copy className="w-4 h-4" />
                         </Button>
-                        {userRole === 'ADMIN' && (
+                        {userRole?.name === 'ADMIN' && (
                           <Button
                             variant="ghost"
                             size="sm"

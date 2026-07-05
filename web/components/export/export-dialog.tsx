@@ -60,19 +60,19 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
   useEffect(() => {
     if (open) {
       setFormat(initialFormat)
-      fetchTemplates(initialFormat)
+      fetchTemplates()
     }
-  }, [open, initialFormat])
+  }, [open])
 
   useEffect(() => {
     if (open) {
-      fetchTemplates(format)
+      fetchTemplates()
     }
-  }, [format, open])
+  }, [open])
 
-  const fetchTemplates = async (fmt: 'EXCEL' | 'PDF') => {
+  const fetchTemplates = async () => {
     try {
-      const res = await fetch(`/api/export-templates?tableId=${table.id}&format=${fmt}`)
+      const res = await fetch(`/api/export-templates?tableId=${table.id}&format=EXCEL`)
       if (res.ok) {
         const data = await res.json()
         setTemplates(data.templates || [])

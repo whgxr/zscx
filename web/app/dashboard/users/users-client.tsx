@@ -45,7 +45,13 @@ import {
   Search,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
-import { Role, UserStatus } from '@prisma/client'
+import { UserStatus } from '@prisma/client'
+
+interface RoleInfo {
+  id: number
+  name: string
+  label: string
+}
 
 interface UserItem {
   id: number
@@ -53,17 +59,17 @@ interface UserItem {
   realName: string
   phone: string | null
   email: string | null
-  role: Role
+  role: RoleInfo
   status: UserStatus
   createdAt: Date
 }
 
 interface UsersClientProps {
   initialUsers: UserItem[]
-  currentUserRole: Role
+  currentUserRole: { name: string } | null
 }
 
-const roleLabels: Record<Role, string> = {
+const roleLabels: Record<string, string> = {
   ADMIN: '超级管理员',
   MANAGER: '管理员',
   USER: '录入员',
@@ -78,26 +84,27 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
+
   const [formData, setFormData] = useState({
     username: '',
     password: '',
     realName: '',
     phone: '',
     email: '',
-    role: 'USER' as Role,
+    roleName: 'USER',
   })
 
   const roleTabConfigs = [
-    { value: 'all', label: '全部', role: null as Role | null },
-    { value: 'ADMIN', label: '超级管理员', role: Role.ADMIN },
-    { value: 'MANAGER', label: '管理员', role: Role.MANAGER },
-    { value: 'USER', label: '录入员', role: Role.USER },
-    { value: 'VIEWER', label: '查看员', role: Role.VIEWER },
+    { value: 'all', label: '全部' },
+    { value: 'ADMIN', label: '超级管理员' },
+    { value: 'MANAGER', label: '管理员' },
+    { value: 'USER', label: '录入员' },
+    { value: 'VIEWER', label: '查看员' },
   ]
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
-      const matchRole = activeTab === 'all' || user.role === activeTab
+      const matchRole = activeTab === 'all' || user.role?.name === activeTab
       const matchSearch = !searchTerm || 
         user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.realName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -109,7 +116,8 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
   const roleCounts = useMemo(() => {
     const counts: Record<string, number> = { all: users.length }
     users.forEach(u => {
-      counts[u.role] = (counts[u.role] || 0) + 1
+      const roleName = u.role?.name || 'other'
+      counts[roleName] = (counts[roleName] || 0) + 1
     })
     return counts
   }, [users])
@@ -122,7 +130,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
       realName: '',
       phone: '',
       email: '',
-      role: 'USER',
+      roleName: 'USER',
     })
     setDialogOpen(true)
   }
@@ -135,7 +143,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
       realName: user.realName,
       phone: user.phone || '',
       email: user.email || '',
-      role: user.role,
+      roleName: user.role?.name || 'USER',
     })
     setDialogOpen(true)
   }
@@ -213,7 +221,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
           <h1 className="text-2xl font-bold text-gray-900">用户管理</h1>
           <p className="text-gray-500 mt-1">管理系统用户和角色</p>
         </div>
-        {currentUserRole === 'ADMIN' && (
+        {currentUserRole?.name === 'ADMIN' && (
           <>
             <Button onClick={openCreateDialog}>
               <Plus className="w-4 h-4 mr-2" />
@@ -280,8 +288,8 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                 <div className="space-y-2">
                   <Label htmlFor="role">角色</Label>
                   <Select
-                    value={formData.role}
-                    onValueChange={(v) => setFormData({ ...formData, role: v as Role })}
+                    value={formData.roleName}
+                    onValueChange={(v) => setFormData({ ...formData, roleName: v })}
                   >
                     <SelectTrigger id="role">
                       <SelectValue />
@@ -356,8 +364,8 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                     <TableCell className="font-medium">{user.username}</TableCell>
                     <TableCell>{user.realName}</TableCell>
                     <TableCell>
-                      <Badge variant={user.role === 'ADMIN' ? 'default' : 'outline'}>
-                        {roleLabels[user.role]}
+                      <Badge variant={user.role?.name === 'ADMIN' ? 'default' : 'outline'}>
+                        {roleLabels[user.role?.name] || user.role?.label || '未知'}
                       </Badge>
                     </TableCell>
                     <TableCell>{user.phone || '-'}</TableCell>
@@ -365,7 +373,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                       <Badge
                         variant={user.status === 'ACTIVE' ? 'success' : 'destructive'}
                         className="cursor-pointer"
-                        onClick={() => currentUserRole === 'ADMIN' && toggleStatus(user)}
+                        onClick={() => currentUserRole?.name === 'ADMIN' && toggleStatus(user)}
                       >
                         {user.status === 'ACTIVE' ? '启用' : '禁用'}
                       </Badge>
@@ -381,12 +389,12 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                         >
                           <Shield className="w-4 h-4" />
                         </Button>
-                        {currentUserRole === 'ADMIN' && (
+                        {currentUserRole?.name === 'ADMIN' && (
                           <>
                             <Button
                               variant="ghost"
                               size="sm"
-                              title="编辑用户"
+                              title="编辑"
                               onClick={() => openEditDialog(user)}
                             >
                               <Edit className="w-4 h-4" />
@@ -395,7 +403,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                               variant="ghost"
                               size="sm"
                               className="text-red-500 hover:text-red-600"
-                              title="删除用户"
+                              title="删除"
                               onClick={() => handleDelete(user.id)}
                             >
                               <Trash2 className="w-4 h-4" />
@@ -408,9 +416,9 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12 text-gray-500">
-                    <Users className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>暂无用户</p>
+                  <TableCell colSpan={7} className="text-center py-8">
+                    <Users className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500">暂无用户数据</p>
                   </TableCell>
                 </TableRow>
               )}

@@ -63,7 +63,7 @@ interface FieldDesignerProps {
   table: DataTable & {
     fields: TableField[]
   }
-  userRole: Role
+  userRole: { name: string } | null
 }
 
 const fieldTypeConfig: Record<FieldType, { label: string; icon: any }> = {
@@ -538,7 +538,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
           <h1 className="text-2xl font-bold text-gray-900">字段设计 - {table.label}</h1>
           <p className="text-gray-500 mt-1">项目名: {table.name}</p>
         </div>
-        {userRole === 'ADMIN' && (
+        {userRole?.name === 'ADMIN' && (
           <Dialog open={tableEditOpen} onOpenChange={setTableEditOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">

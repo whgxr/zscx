@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { prisma } from '@/lib/prisma'
@@ -82,3 +82,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: '上传失败' }, { status: 500 })
   }
 }
+

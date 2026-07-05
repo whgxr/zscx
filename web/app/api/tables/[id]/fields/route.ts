@@ -62,7 +62,7 @@ export async function POST(
 ) {
   try {
     const user = await getCurrentUser()
-    if (!user || (user.role !== 'ADMIN' && user.role !== 'MANAGER')) {
+    if (!user || (user.role?.name !== 'ADMIN' && user.role?.name !== 'MANAGER')) {
       return NextResponse.json({ message: '无权限' }, { status: 403 })
     }
 

@@ -27,8 +27,9 @@ export default async function DataListPage({
     redirect('/dashboard')
   }
 
-  if (user.role === 'USER' || user.role === 'VIEWER') {
-    const permission = await prisma.tablePermission.findUnique({
+  let permission: any = null
+  if (user.role?.name === 'USER' || user.role?.name === 'VIEWER') {
+    permission = await prisma.tablePermission.findUnique({
       where: { userId_tableId: { userId: user.id, tableId: table.id } },
     })
     if (!permission || !permission.canView) {
@@ -36,5 +37,5 @@ export default async function DataListPage({
     }
   }
 
-  return <DataListClient table={table} user={user} />
+  return <DataListClient table={table} user={user} permission={permission} />
 }
