@@ -200,39 +200,44 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
     const setCellStyle = useCallback((row: number, col: number, style: Partial<CellStyle>) => {
       if (!hotRef.current) return
       const hot = hotRef.current
-      const cellMeta = hot.getCellMeta(row, col)
+      const cellMeta = hot.getCellMeta(row, col) as any
+      
+      const ensureStyle = () => {
+        if (!cellMeta.style) cellMeta.style = {}
+        return cellMeta.style as Record<string, any>
+      }
       
       if (style.bold !== undefined) {
-        if (!cellMeta.style) cellMeta.style = {}
-        cellMeta.style.fontWeight = style.bold ? 'bold' : 'normal'
+        const s = ensureStyle()
+        s.fontWeight = style.bold ? 'bold' : 'normal'
       }
       if (style.italic !== undefined) {
-        if (!cellMeta.style) cellMeta.style = {}
-        cellMeta.style.fontStyle = style.italic ? 'italic' : 'normal'
+        const s = ensureStyle()
+        s.fontStyle = style.italic ? 'italic' : 'normal'
       }
       if (style.underline !== undefined) {
-        if (!cellMeta.style) cellMeta.style = {}
-        cellMeta.style.textDecoration = style.underline ? 'underline' : 'none'
+        const s = ensureStyle()
+        s.textDecoration = style.underline ? 'underline' : 'none'
       }
       if (style.align) {
-        if (!cellMeta.style) cellMeta.style = {}
-        cellMeta.style.textAlign = style.align
+        const s = ensureStyle()
+        s.textAlign = style.align
       }
       if (style.verticalAlign) {
-        if (!cellMeta.style) cellMeta.style = {}
-        cellMeta.style.verticalAlign = style.verticalAlign
+        const s = ensureStyle()
+        s.verticalAlign = style.verticalAlign
       }
       if (style.bgColor) {
-        if (!cellMeta.style) cellMeta.style = {}
-        cellMeta.style.backgroundColor = style.bgColor
+        const s = ensureStyle()
+        s.backgroundColor = style.bgColor
       }
       if (style.textColor) {
-        if (!cellMeta.style) cellMeta.style = {}
-        cellMeta.style.color = style.textColor
+        const s = ensureStyle()
+        s.color = style.textColor
       }
       if (style.fontSize) {
-        if (!cellMeta.style) cellMeta.style = {}
-        cellMeta.style.fontSize = style.fontSize + 'px'
+        const s = ensureStyle()
+        s.fontSize = style.fontSize + 'px'
       }
       if (style.wrapText !== undefined) {
         cellMeta.wrap = style.wrapText
