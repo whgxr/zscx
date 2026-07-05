@@ -29,4 +29,7 @@ miniprogram/project.private.config.json
 # Docker
 docker/.env
 
+# GitHub Actions workflow (需要 workflow scope 权限，暂不提交)
+.github/workflows/
+
 .sync_temp_dir/
