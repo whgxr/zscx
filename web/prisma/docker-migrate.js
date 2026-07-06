@@ -117,6 +117,7 @@ async function main() {
     ['SystemSetting', createSystemSetting],
     ['UserDashboardConfig', createUserDashboardConfig],
     ['VersionLog', createVersionLog],
+    ['UserSession', createUserSession],
     ['_SharedTemplates', createSharedTemplates],
   ]
 
@@ -475,6 +476,26 @@ async function createVersionLog(prisma) {
       \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
       INDEX \`VersionLog_version_idx\` (\`version\`),
       INDEX \`VersionLog_releaseDate_idx\` (\`releaseDate\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `)
+}
+
+async function createUserSession(prisma) {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS \`UserSession\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`userId\` INT NOT NULL,
+      \`token\` TEXT NOT NULL,
+      \`ipAddress\` VARCHAR(191) NULL,
+      \`userAgent\` TEXT NULL,
+      \`deviceInfo\` JSON NULL,
+      \`isActive\` TINYINT(1) NOT NULL DEFAULT 1,
+      \`lastActiveAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      \`expiresAt\` DATETIME(3) NULL,
+      INDEX \`UserSession_userId_idx\` (\`userId\`),
+      INDEX \`UserSession_isActive_idx\` (\`isActive\`),
+      CONSTRAINT \`UserSession_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `)
 }

@@ -7,6 +7,28 @@ import { Role } from '@prisma/client'
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-me'
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 
+let cachedSessionTimeout: number | null = null
+let cachedSessionTimeoutAt = 0
+const CACHE_TTL = 60 * 1000
+
+async function getSessionTimeoutMinutes(): Promise<number> {
+  const now = Date.now()
+  if (cachedSessionTimeout !== null && now - cachedSessionTimeoutAt < CACHE_TTL) {
+    return cachedSessionTimeout
+  }
+  try {
+    const setting = await prisma.systemSetting.findUnique({
+      where: { key: 'sessionTimeout' },
+    })
+    const timeout = parseInt(setting?.value || '30', 10)
+    cachedSessionTimeout = timeout
+    cachedSessionTimeoutAt = now
+    return timeout
+  } catch {
+    return 30
+  }
+}
+
 export interface JwtPayload {
   userId: number
   username: string
@@ -33,6 +55,84 @@ export function verifyToken(token: string): JwtPayload | null {
   }
 }
 
+export async function createUserSession(
+  userId: number,
+  username: string,
+  roleId: number,
+  ipAddress?: string,
+  userAgent?: string
+): Promise<{ token: string; sessionId: number }> {
+  await prisma.userSession.updateMany({
+    where: {
+      userId,
+      isActive: true,
+    },
+    data: {
+      isActive: false,
+    },
+  })
+
+  const token = generateToken({
+    userId,
+    username,
+    roleId,
+  })
+
+  const session = await prisma.userSession.create({
+    data: {
+      userId,
+      token,
+      ipAddress,
+      userAgent,
+      isActive: true,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  })
+
+  return { token, sessionId: session.id }
+}
+
+export async function validateSession(token: string): Promise<boolean> {
+  const payload = verifyToken(token)
+  if (!payload) return false
+
+  const session = await prisma.userSession.findFirst({
+    where: { token },
+  })
+
+  if (!session || !session.isActive) return false
+
+  if (session.expiresAt && new Date() > session.expiresAt) {
+    return false
+  }
+
+  const timeoutMinutes = await getSessionTimeoutMinutes()
+  const lastActive = new Date(session.lastActiveAt).getTime()
+  const now = Date.now()
+  if (now - lastActive > timeoutMinutes * 60 * 1000) {
+    return false
+  }
+
+  await prisma.userSession.update({
+    where: { id: session.id },
+    data: { lastActiveAt: new Date() },
+  })
+
+  return true
+}
+
+export async function invalidateUserSessions(userId: number): Promise<void> {
+  await prisma.userSession.updateMany({
+    where: {
+      userId,
+      isActive: true,
+    },
+    data: {
+      isActive: false,
+    },
+  })
+}
+
 export async function getCurrentUser() {
   const cookieStore = cookies()
   const token = cookieStore.get('token')?.value
@@ -41,6 +141,11 @@ export async function getCurrentUser() {
 
   const payload = verifyToken(token)
   if (!payload) return null
+
+  const sessionValid = await validateSession(token)
+  if (!sessionValid) {
+    return null
+  }
 
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },

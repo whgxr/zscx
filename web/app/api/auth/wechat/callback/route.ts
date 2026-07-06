@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { generateToken, setTokenCookie } from '@/lib/auth'
+import { createUserSession, setTokenCookie } from '@/lib/auth'
 
 declare global {
   var weChatLoginStates: Map<string, {
@@ -103,11 +103,13 @@ async function handleMockLogin(state: string) {
       return null
     }
 
-    const token = generateToken({
-      userId: user.id,
-      username: user.username,
-      roleId: user.roleId,
-    })
+    const { token } = await createUserSession(
+      user.id,
+      user.username,
+      user.roleId,
+      undefined,
+      undefined
+    )
 
     await prisma.operationLog.create({
       data: {
@@ -150,11 +152,13 @@ async function handleWeChatUser(wechatData: any) {
     })
   }
 
-  const token = generateToken({
-    userId: user.id,
-    username: user.username,
-    roleId: user.roleId,
-  })
+  const { token } = await createUserSession(
+    user.id,
+    user.username,
+    user.roleId,
+    undefined,
+    undefined
+  )
 
   await prisma.operationLog.create({
     data: {

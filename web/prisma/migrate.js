@@ -457,6 +457,31 @@ async function main() {
     console.log('   VersionLog 表已存在')
   }
   
+  // ==================== 15. UserSession 用户会话表 ====================
+  console.log('\n15. 检查 UserSession 表...')
+  if (!tableNames.includes('UserSession')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`UserSession\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`userId\` INT NOT NULL,
+        \`token\` TEXT NOT NULL,
+        \`ipAddress\` VARCHAR(191) NULL,
+        \`userAgent\` TEXT NULL,
+        \`deviceInfo\` LONGTEXT NULL,
+        \`isActive\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`lastActiveAt\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`expiresAt\` DATETIME NULL,
+        INDEX \`UserSession_userId_idx\` (\`userId\`),
+        INDEX \`UserSession_isActive_idx\` (\`isActive\`),
+        CONSTRAINT \`UserSession_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ UserSession 表创建完成')
+  } else {
+    console.log('   UserSession 表已存在')
+  }
+
   await conn.execute(`INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`, \`updatedAt\`) VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）', NOW()) ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`), \`updatedAt\`=NOW()`)
   
   // ==================== 验证 ====================

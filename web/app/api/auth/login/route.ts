@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { comparePassword, generateToken, setTokenCookie } from '@/lib/auth'
+import { comparePassword, createUserSession, setTokenCookie } from '@/lib/auth'
 import { z } from 'zod'
 
 const loginSchema = z.object({
@@ -50,11 +50,16 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const token = generateToken({
-      userId: user.id,
-      username: user.username,
-      roleId: user.roleId,
-    })
+    const ipAddress = req.ip || req.headers.get('x-forwarded-for') || undefined
+    const userAgent = req.headers.get('user-agent') || undefined
+
+    const { token } = await createUserSession(
+      user.id,
+      user.username,
+      user.roleId,
+      ipAddress,
+      userAgent
+    )
 
     setTokenCookie(token)
 
@@ -63,8 +68,8 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         action: 'LOGIN',
         module: 'AUTH',
-        ipAddress: req.ip || req.headers.get('x-forwarded-for') || undefined,
-        userAgent: req.headers.get('user-agent') || undefined,
+        ipAddress,
+        userAgent,
       },
     })
 
