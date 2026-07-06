@@ -23,9 +23,14 @@ export default async function NewRecordPage({
     },
   })
 
-  if (!table) {
+  const tableWithLayout = table ? {
+    ...table,
+    formLayoutConfig: (table as any).formLayoutConfig,
+  } : null
+
+  if (!tableWithLayout) {
     redirect('/dashboard')
   }
 
-  return <NewRecordClient table={table} />
+  return <NewRecordClient table={tableWithLayout} />
 }

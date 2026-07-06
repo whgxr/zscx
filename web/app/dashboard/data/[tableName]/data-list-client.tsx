@@ -43,6 +43,7 @@ import {
   Trash2, 
   Eye,
   Download,
+  Upload,
   FileSpreadsheet,
   FileText,
   ArrowLeft,
@@ -57,6 +58,7 @@ import {
   Printer,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
+import { ImportDialog } from '@/components/import/import-dialog'
 import { formatDateTime } from '@/lib/utils'
 import { DataTable, TableField, RecordStatus, Role, FieldType } from '@prisma/client'
 import JSZip from 'jszip'
@@ -74,8 +76,10 @@ interface DataListClientProps {
     canCreate: boolean
     canEdit: boolean
     canDelete: boolean
-    canExport: boolean
+    canExportExcel: boolean
+    canExportPdf: boolean
     canPrint: boolean
+    canImport: boolean
   }
 }
 
@@ -118,6 +122,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const [status, setStatus] = useState('')
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportFormat, setExportFormat] = useState<'EXCEL' | 'PDF'>('EXCEL')
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [imageGallery, setImageGallery] = useState<{ open: boolean; images: string[]; fieldLabel: string }>({
     open: false,
     images: [],
@@ -131,7 +136,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<string>('')
   const [printPreviewUrl, setPrintPreviewUrl] = useState<string | null>(null)
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false)
-  const [pathKey, setPathKey] = useState(Date.now())
+  const [refreshKey, setRefreshKey] = useState(Date.now())
 
   const defaultListFields = table.fields.filter((f: any) => f.showInList)
 
@@ -196,10 +201,10 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
 
   useEffect(() => {
     fetchRecords()
-  }, [page, status, pathKey])
+  }, [page, status, refreshKey])
 
   useEffect(() => {
-    setPathKey(Date.now())
+    setRefreshKey(Date.now())
   }, [pathname])
 
   const handleSearch = (e: React.FormEvent) => {
@@ -360,6 +365,10 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const totalPages = Math.ceil(total / pageSize)
   const canCreate = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canCreate
   const canPrint = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canPrint
+  const canExportExcel = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canExportExcel
+  const canExportPdf = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canExportPdf
+  const canImport = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canImport
+  const canExportAny = canExportExcel || canExportPdf
 
   return (
     <div className="space-y-6">
@@ -390,25 +399,37 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                   ))}
                 </SelectContent>
               </Select>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
-                    <Download className="w-4 h-4 mr-2" />
-                    导出
-                    <ChevronDown className="w-4 h-4 ml-2" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleExport('excel')}>
-                    <FileSpreadsheet className="w-4 h-4 mr-2" />
-                    导出 Excel
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport('pdf')}>
-                    <FileText className="w-4 h-4 mr-2" />
-                    导出 PDF
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {canExportAny && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline">
+                      <Download className="w-4 h-4 mr-2" />
+                      导出
+                      <ChevronDown className="w-4 h-4 ml-2" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {canExportExcel && (
+                      <DropdownMenuItem onClick={() => handleExport('excel')}>
+                        <FileSpreadsheet className="w-4 h-4 mr-2" />
+                        导出 Excel
+                      </DropdownMenuItem>
+                    )}
+                    {canExportPdf && (
+                      <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                        <FileText className="w-4 h-4 mr-2" />
+                        导出 PDF
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              {canImport && (
+                <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  导入
+                </Button>
+              )}
               <Button variant="outline" onClick={() => setColumnSettingOpen(true)} title="列设置">
                 <Settings2 className="w-4 h-4 mr-2" />
                 列设置
@@ -605,6 +626,13 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
         search={search}
         status={status}
         initialFormat={exportFormat}
+      />
+
+      <ImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        table={table}
+        onImportSuccess={fetchRecords}
       />
 
       <Dialog open={columnSettingOpen} onOpenChange={setColumnSettingOpen}>

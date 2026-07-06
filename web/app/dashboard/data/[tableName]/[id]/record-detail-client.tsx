@@ -21,6 +21,7 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
 interface RecordDetailClientProps {
   table: DataTable & {
     fields: TableField[]
+    formLayoutConfig?: any
   }
   record: DataRecord & {
     creator?: {
@@ -109,14 +110,13 @@ export function RecordDetailClient({ table, record, initialEditMode = false }: R
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <DynamicForm
-              fields={table.fields}
-              values={formData}
-              onChange={setFormData}
-              disabled={!isEditing}
-            />
-          </div>
+          <DynamicForm
+            fields={table.fields}
+            values={formData}
+            onChange={setFormData}
+            disabled={!isEditing}
+            layoutConfig={table.formLayoutConfig}
+          />
         </CardContent>
       </Card>
 

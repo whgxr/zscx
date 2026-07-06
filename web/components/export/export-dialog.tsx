@@ -56,6 +56,8 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
   const [exporting, setExporting] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewData, setPreviewData] = useState<{ headers: string[]; rows: any[]; tableName?: string; total?: number } | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   useEffect(() => {
     if (open) {
@@ -133,25 +135,55 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
       alert('请选择导出模板')
       return
     }
+    setPreviewLoading(true)
     try {
-      const res = await fetch(buildExportUrl())
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = window.URL.createObjectURL(blob)
-        setPreviewUrl(url)
-        setPreviewOpen(true)
-      } else {
-        let errorMsg = '预览失败'
-        try {
-          const json = await res.json()
-          if (json.message) errorMsg = json.message
-        } catch (e) {
-          errorMsg = `预览失败 (${res.status})`
+      const url = buildExportUrl() + '&preview=true'
+      if (format === 'EXCEL') {
+        const previewApiUrl = `/api/export/${table.name}/preview?${new URLSearchParams({
+          templateId: selectedTemplate,
+          useTemplate: 'true',
+          search: search || '',
+          status: status || '',
+        })}`
+        const res = await fetch(previewApiUrl)
+        if (res.ok) {
+          const data = await res.json()
+          setPreviewData(data)
+          setPreviewUrl(null)
+          setPreviewOpen(true)
+        } else {
+          let errorMsg = '预览失败'
+          try {
+            const json = await res.json()
+            if (json.message) errorMsg = json.message
+          } catch (e) {
+            errorMsg = `预览失败 (${res.status})`
+          }
+          alert(errorMsg)
         }
-        alert(errorMsg)
+      } else {
+        const res = await fetch(url)
+        if (res.ok) {
+          const blob = await res.blob()
+          const blobUrl = window.URL.createObjectURL(blob)
+          setPreviewUrl(blobUrl)
+          setPreviewData(null)
+          setPreviewOpen(true)
+        } else {
+          let errorMsg = '预览失败'
+          try {
+            const json = await res.json()
+            if (json.message) errorMsg = json.message
+          } catch (e) {
+            errorMsg = `预览失败 (${res.status})`
+          }
+          alert(errorMsg)
+        }
       }
     } catch (err: any) {
       alert(`预览失败: ${err.message || err}`)
+    } finally {
+      setPreviewLoading(false)
     }
   }
 
@@ -260,12 +292,14 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
         <DialogContent className="max-w-5xl h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
-              <span>预览</span>
+              <span>{format === 'EXCEL' ? 'Excel 预览' : 'PDF 预览'}{previewData?.tableName ? ` - ${previewData.tableName}` : ''}</span>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handlePrint}>
-                  <Printer className="w-4 h-4 mr-2" />
-                  打印
-                </Button>
+                {format === 'PDF' && (
+                  <Button variant="outline" size="sm" onClick={handlePrint}>
+                    <Printer className="w-4 h-4 mr-2" />
+                    打印
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" onClick={handleExport}>
                   <Download className="w-4 h-4 mr-2" />
                   下载
@@ -273,8 +307,44 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
               </div>
             </DialogTitle>
           </DialogHeader>
-          <div className="flex-1 overflow-hidden">
-            {previewUrl && (
+          <div className="flex-1 overflow-auto">
+            {previewLoading && (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                加载中...
+              </div>
+            )}
+            {!previewLoading && format === 'EXCEL' && previewData && (
+              <div className="p-2">
+                <div className="text-sm text-gray-500 mb-2">
+                  共 {previewData.total} 条记录（预览前20条）
+                </div>
+                <div className="overflow-auto border rounded">
+                  <table className="w-full text-sm">
+                    <thead className="bg-blue-500 text-white sticky top-0">
+                      <tr>
+                        {previewData.headers.map((h, i) => (
+                          <th key={i} className="px-3 py-2 text-left font-medium whitespace-nowrap border-r border-blue-400 last:border-r-0">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewData.rows.map((row, ri) => (
+                        <tr key={ri} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          {row.map((cell: string, ci: number) => (
+                            <td key={ci} className="px-3 py-2 border-b border-gray-200 whitespace-nowrap max-w-xs truncate">
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {!previewLoading && format === 'PDF' && previewUrl && (
               <iframe
                 src={previewUrl}
                 className="w-full h-full border rounded"

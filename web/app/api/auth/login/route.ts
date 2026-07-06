@@ -1,10 +1,10 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { comparePassword, generateToken, setTokenCookie } from '@/lib/auth'
 import { z } from 'zod'
 
 const loginSchema = z.object({
-  username: z.string().min(1, '用户名不能为空'),
+  username: z.string().min(1, '用户名或手机号不能为空'),
   password: z.string().min(1, '密码不能为空'),
 })
 
@@ -13,10 +13,20 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { username, password } = loginSchema.parse(body)
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { username },
       include: { role: true },
     })
+
+    if (!user) {
+      const isPhone = /^1[3-9]\d{9}$/.test(username)
+      if (isPhone) {
+        user = await prisma.user.findFirst({
+          where: { phone: username },
+          include: { role: true },
+        })
+      }
+    }
 
     if (!user) {
       return NextResponse.json(

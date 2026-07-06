@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { z } from 'zod'
@@ -8,6 +8,7 @@ const createTableSchema = z.object({
   label: z.string().min(1, '显示名称不能为空'),
   description: z.string().optional(),
   icon: z.string().optional(),
+  categoryId: z.number().nullable().optional(),
   sortOrder: z.number().optional().default(0),
 })
 
@@ -20,14 +21,26 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const status = searchParams.get('status')
+    const categoryId = searchParams.get('categoryId')
+    const uncategorized = searchParams.get('uncategorized')
 
     const where: any = {}
     if (status) where.status = status
+
+    if (uncategorized === 'true') {
+      where.categoryId = null
+    } else if (categoryId) {
+      const catId = parseInt(categoryId)
+      if (!isNaN(catId)) {
+        where.categoryId = catId
+      }
+    }
 
     const tables = await prisma.dataTable.findMany({
       where,
       orderBy: { sortOrder: 'asc' },
       include: {
+        category: true,
         _count: {
           select: { fields: true, records: true },
         },

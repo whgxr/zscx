@@ -11,6 +11,7 @@ import { DataTable, TableField, RecordStatus } from '@prisma/client'
 interface NewRecordClientProps {
   table: DataTable & {
     fields: TableField[]
+    formLayoutConfig?: any
   }
 }
 
@@ -62,13 +63,12 @@ export function NewRecordClient({ table }: NewRecordClientProps) {
           <CardTitle className="text-lg">基本信息</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <DynamicForm
-              fields={table.fields}
-              values={formData}
-              onChange={setFormData}
-            />
-          </div>
+          <DynamicForm
+            fields={table.fields}
+            values={formData}
+            onChange={setFormData}
+            layoutConfig={table.formLayoutConfig}
+          />
         </CardContent>
         <CardFooter className="flex justify-end gap-3 border-t pt-6">
           <Button variant="outline" onClick={() => router.back()}>

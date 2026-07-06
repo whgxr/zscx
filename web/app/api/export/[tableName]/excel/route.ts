@@ -41,8 +41,8 @@ export async function GET(
       const permission = await prisma.tablePermission.findUnique({
         where: { userId_tableId: { userId: user.id, tableId: table.id } },
       })
-      if (!permission || !permission.canExport) {
-        return NextResponse.json({ message: '无权限导出' }, { status: 403 })
+      if (!permission || !permission.canExportExcel) {
+        return NextResponse.json({ message: '无权限导出Excel' }, { status: 403 })
       }
     }
 
@@ -54,6 +54,7 @@ export async function GET(
     const fieldsParam = searchParams.get('fields')
     useTemplate = searchParams.get('useTemplate') === 'true'
     const recordId = searchParams.get('recordId')
+    const isPreview = searchParams.get('preview') === 'true'
 
     const where: any = { tableId: table.id }
     if (status) where.status = status
@@ -142,11 +143,12 @@ export async function GET(
       console.error('Failed to log export:', logError)
     }
 
+    const disposition = isPreview ? 'inline' : 'attachment'
     return new NextResponse(buffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       },
     })
   } catch (error: any) {

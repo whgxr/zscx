@@ -146,16 +146,25 @@ async function main() {
         \`label\` VARCHAR(191) NOT NULL,
         \`description\` TEXT NULL,
         \`icon\` VARCHAR(191) NULL,
+        \`categoryId\` INT NULL,
         \`status\` ENUM('ACTIVE','ARCHIVED','DRAFT') NOT NULL DEFAULT 'ACTIVE',
         \`sortOrder\` INT NOT NULL DEFAULT 0,
         \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         \`updatedAt\` DATETIME NULL,
         \`createdBy\` INT NULL,
         INDEX \`DataTable_status_idx\` (\`status\`),
-        INDEX \`DataTable_sortOrder_idx\` (\`sortOrder\`)
+        INDEX \`DataTable_sortOrder_idx\` (\`sortOrder\`),
+        INDEX \`DataTable_categoryId_idx\` (\`categoryId\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `)
     await createUpdateTrigger('DataTable')
+  } else {
+    const [dtCols] = await conn.execute('DESCRIBE `DataTable`')
+    const dtColNames = dtCols.map(c => c.Field)
+    if (!dtColNames.includes('categoryId')) {
+      await conn.execute('ALTER TABLE `DataTable` ADD COLUMN `categoryId` INT NULL')
+      await conn.execute('ALTER TABLE `DataTable` ADD INDEX `DataTable_categoryId_idx` (`categoryId`)')
+    }
   }
   
   // ==================== 4. TableField ====================
@@ -203,8 +212,10 @@ async function main() {
         \`canCreate\` TINYINT(1) NOT NULL DEFAULT 0,
         \`canEdit\` TINYINT(1) NOT NULL DEFAULT 0,
         \`canDelete\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`canExport\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`canExportExcel\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`canExportPdf\` TINYINT(1) NOT NULL DEFAULT 0,
         \`canPrint\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`canImport\` TINYINT(1) NOT NULL DEFAULT 0,
         \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE INDEX \`TablePermission_userId_tableId_key\` (\`userId\`, \`tableId\`),
         INDEX \`TablePermission_tableId_idx\` (\`tableId\`),
@@ -214,8 +225,24 @@ async function main() {
     `)
   } else {
     const [permCols] = await conn.execute('DESCRIBE `TablePermission`')
-    if (!permCols.some(c => c.Field === 'canPrint')) {
+    const permColNames = permCols.map(c => c.Field)
+    if (!permColNames.includes('canPrint')) {
       await conn.execute('ALTER TABLE `TablePermission` ADD COLUMN `canPrint` TINYINT(1) NOT NULL DEFAULT 0')
+    }
+    if (!permColNames.includes('canExportExcel')) {
+      await conn.execute('ALTER TABLE `TablePermission` ADD COLUMN `canExportExcel` TINYINT(1) NOT NULL DEFAULT 0')
+      if (permColNames.includes('canExport')) {
+        await conn.execute('UPDATE `TablePermission` SET `canExportExcel` = `canExport`')
+      }
+    }
+    if (!permColNames.includes('canExportPdf')) {
+      await conn.execute('ALTER TABLE `TablePermission` ADD COLUMN `canExportPdf` TINYINT(1) NOT NULL DEFAULT 0')
+      if (permColNames.includes('canExport')) {
+        await conn.execute('UPDATE `TablePermission` SET `canExportPdf` = `canExport`')
+      }
+    }
+    if (!permColNames.includes('canImport')) {
+      await conn.execute('ALTER TABLE `TablePermission` ADD COLUMN `canImport` TINYINT(1) NOT NULL DEFAULT 0')
     }
   }
   
@@ -359,6 +386,75 @@ async function main() {
     console.log('   ✅ _SharedTemplates 表完成')
   } catch (e) {
     console.log('   _SharedTemplates 表跳过:', e.message)
+  }
+  
+  // ==================== 12. TableCategory 分类表 ====================
+  console.log('\n12. 检查 TableCategory 表...')
+  if (!tableNames.includes('TableCategory')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`TableCategory\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`name\` VARCHAR(191) NOT NULL,
+        \`parentId\` INT NULL,
+        \`level\` INT NOT NULL DEFAULT 1,
+        \`sortOrder\` INT NOT NULL DEFAULT 0,
+        \`icon\` VARCHAR(191) NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updatedAt\` DATETIME NULL,
+        INDEX \`TableCategory_parentId_idx\` (\`parentId\`),
+        INDEX \`TableCategory_sortOrder_idx\` (\`sortOrder\`),
+        INDEX \`TableCategory_level_idx\` (\`level\`),
+        CONSTRAINT \`TableCategory_parentId_fkey\` FOREIGN KEY (\`parentId\`) REFERENCES \`TableCategory\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    await createUpdateTrigger('TableCategory')
+    console.log('   ✅ TableCategory 表创建完成')
+  } else {
+    console.log('   TableCategory 表已存在')
+  }
+  
+  // ==================== 13. UserDashboardConfig 用户仪表盘配置 ====================
+  console.log('\n13. 检查 UserDashboardConfig 表...')
+  if (!tableNames.includes('UserDashboardConfig')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`UserDashboardConfig\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`userId\` INT NOT NULL UNIQUE,
+        \`config\` LONGTEXT NOT NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updatedAt\` DATETIME NULL,
+        INDEX \`UserDashboardConfig_userId_idx\` (\`userId\`),
+        CONSTRAINT \`UserDashboardConfig_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    await createUpdateTrigger('UserDashboardConfig')
+    console.log('   ✅ UserDashboardConfig 表创建完成')
+  } else {
+    console.log('   UserDashboardConfig 表已存在')
+  }
+  
+  // ==================== 14. VersionLog 版本变更记录 ====================
+  console.log('\n14. 检查 VersionLog 表...')
+  if (!tableNames.includes('VersionLog')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`VersionLog\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`version\` VARCHAR(191) NOT NULL,
+        \`title\` VARCHAR(191) NOT NULL,
+        \`description\` TEXT NULL,
+        \`changes\` LONGTEXT NULL,
+        \`releaseDate\` DATETIME NULL,
+        \`createdBy\` INT NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updatedAt\` DATETIME NULL,
+        INDEX \`VersionLog_version_idx\` (\`version\`),
+        INDEX \`VersionLog_releaseDate_idx\` (\`releaseDate\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    await createUpdateTrigger('VersionLog')
+    console.log('   ✅ VersionLog 表创建完成')
+  } else {
+    console.log('   VersionLog 表已存在')
   }
   
   await conn.execute(`INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`, \`updatedAt\`) VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）', NOW()) ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`), \`updatedAt\`=NOW()`)

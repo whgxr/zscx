@@ -32,6 +32,7 @@ model User {
   tablePermissions TablePermission[]
   dataRecords      DataRecord[]      @relation("CreatedRecords")
   uploadedFiles    UploadedFile[]
+  versionLogs      VersionLog[]      @relation("VersionLogCreator")
 
   @@index([username])
   @@index([roleId])
@@ -72,19 +73,21 @@ enum UserStatus {
 
 // 按数据表分配的权限
 model TablePermission {
-  id         Int           @id @default(autoincrement())
-  userId     Int
-  tableId    Int
-  canView    Boolean       @default(true)
-  canCreate  Boolean       @default(false)
-  canEdit    Boolean       @default(false)
-  canDelete  Boolean       @default(false)
-  canExport  Boolean       @default(false)
-  canPrint   Boolean       @default(false)
-  createdAt  DateTime      @default(now())
+  id              Int           @id @default(autoincrement())
+  userId          Int
+  tableId         Int
+  canView         Boolean       @default(true)
+  canCreate       Boolean       @default(false)
+  canEdit         Boolean       @default(false)
+  canDelete       Boolean       @default(false)
+  canExportExcel  Boolean       @default(false)
+  canExportPdf    Boolean       @default(false)
+  canPrint        Boolean       @default(false)
+  canImport       Boolean       @default(false)
+  createdAt       DateTime      @default(now())
 
-  user       User          @relation(fields: [userId], references: [id])
-  table      DataTable     @relation(fields: [tableId], references: [id])
+  user            User          @relation(fields: [userId], references: [id])
+  table           DataTable     @relation(fields: [tableId], references: [id])
 
   @@unique([userId, tableId])
   @@index([tableId])
@@ -103,17 +106,70 @@ model SystemSetting {
   @@index([key])
 }
 
-model DataTable {
-  id          Int              @id @default(autoincrement())
-  name        String           // 表名（英文标识）
-  label       String           // 显示名称
-  description String?
-  icon        String?          // 图标名
-  status      TableStatus      @default(ACTIVE)
-  sortOrder   Int              @default(0)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+// 项目分类（3级分类）
+model TableCategory {
+  id        Int           @id @default(autoincrement())
+  name      String        // 分类名称
+  parentId  Int?          // 父分类ID
+  level     Int           @default(1) // 层级：1,2,3
+  sortOrder Int           @default(0)
+  icon      String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  parent    TableCategory? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  TableCategory[] @relation("CategoryHierarchy")
+  tables    DataTable[]
+
+  @@index([parentId])
+  @@index([sortOrder])
+  @@index([level])
+}
+
+// 用户仪表盘配置
+model UserDashboardConfig {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @unique
+  config    Json      // 仪表盘配置（小组件、布局等）
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+// 版本变更记录
+model VersionLog {
+  id          Int       @id @default(autoincrement())
+  version     String    // 版本号，如 1.1.1
+  title       String    // 版本标题
+  description String?   // 版本描述
+  changes     Json      // 变更详情：{ features: [], fixes: [], improvements: [] }
+  releaseDate DateTime? // 发布日期
   createdBy   Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // 关系
+  creator     User?     @relation("VersionLogCreator", fields: [createdBy], references: [id])
+
+  @@index([version])
+  @@index([releaseDate])
+  @@index([createdBy])
+}
+
+model DataTable {
+  id                Int              @id @default(autoincrement())
+  name              String           // 表名（英文标识）
+  label             String           // 显示名称
+  description       String?
+  icon              String?          // 图标名
+  categoryId        Int?             // 分类ID
+  status            TableStatus      @default(ACTIVE)
+  sortOrder         Int              @default(0)
+  formLayoutConfig  Json?            // 表单布局配置（分组、列宽等）
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  createdBy         Int?
 
   // 关系
   fields         TableField[]
@@ -122,10 +178,12 @@ model DataTable {
   files          UploadedFile[]
   exportTemplates ExportTemplate[]
   sharedExportTemplates ExportTemplate[] @relation("SharedTemplates")
+  category       TableCategory?  @relation(fields: [categoryId], references: [id])
 
   @@unique([name])
   @@index([status])
   @@index([sortOrder])
+  @@index([categoryId])
 }
 
 enum TableStatus {

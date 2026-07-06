@@ -4,6 +4,8 @@ import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { FormLayoutDesigner, FormLayoutConfig } from '@/components/form-layout-designer'
 import {
   Dialog,
   DialogContent,
@@ -65,6 +67,7 @@ import * as ExcelJS from 'exceljs'
 interface FieldDesignerProps {
   table: DataTable & {
     fields: TableField[]
+    formLayoutConfig?: any
   }
   userRole: { name: string } | null
 }
@@ -239,8 +242,13 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       })
 
       if (res.ok) {
+        const data = await res.json()
+        if (editingField) {
+          setFields(prev => prev.map(f => f.id === editingField.id ? data.field : f))
+        } else {
+          setFields(prev => [...prev, data.field])
+        }
         setDialogOpen(false)
-        router.refresh()
       } else {
         const data = await res.json()
         alert(data.message || '操作失败')
@@ -261,7 +269,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       })
 
       if (res.ok) {
-        router.refresh()
+        setFields(prev => prev.filter(f => f.id !== fieldId))
       } else {
         const data = await res.json()
         alert(data.message || '删除失败')
@@ -282,7 +290,6 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
 
       if (res.ok) {
         setTableEditOpen(false)
-        router.refresh()
       } else {
         const data = await res.json()
         alert(data.message || '修改失败')
@@ -588,6 +595,26 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const typeInfo = fieldTypeConfig[formData.type]
   const TypeIcon = typeInfo?.icon || Type
 
+  const handleSaveFormLayout = async (config: FormLayoutConfig) => {
+    try {
+      const res = await fetch(`/api/tables/${table.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ formLayoutConfig: config }),
+      })
+
+      if (res.ok) {
+        alert('表单布局保存成功')
+        router.refresh()
+      } else {
+        const data = await res.json()
+        alert(data.message || '保存失败')
+      }
+    } catch (err) {
+      alert('保存失败')
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -653,534 +680,552 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">字段列表（拖拽可排序）</CardTitle>
-              <div className="flex items-center gap-2">
-                <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" onClick={openImportDialog}>
-                      <Upload className="w-4 h-4 mr-2" />
-                      批量导入
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle>批量导入字段</DialogTitle>
-                      <DialogDescription>
-                        通过文本或 Excel 批量导入字段
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div className="flex gap-2">
-                        <Button
-                          variant={importMethod === 'text' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setImportMethod('text')}
-                        >
-                          文本导入
-                        </Button>
-                        <Button
-                          variant={importMethod === 'excel' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setImportMethod('excel')}
-                        >
-                          Excel 导入
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={downloadTemplate}>
-                          <Download className="w-4 h-4 mr-2" />
-                          下载模板
-                        </Button>
-                      </div>
+      <Tabs defaultValue="fields" className="w-full">
+        <TabsList>
+          <TabsTrigger value="fields">字段设计</TabsTrigger>
+          <TabsTrigger value="layout">表单布局</TabsTrigger>
+        </TabsList>
 
-                      {importMethod === 'text' && (
-                        <div className="space-y-2">
-                          <Label>输入字段信息（每行一个，用逗号分隔）</Label>
-                          <Textarea
-                            placeholder="字段名,显示名称,类型,必填,列表显示,表单显示,可搜索&#10;name,姓名,TEXT,是,是,是,是&#10;age,年龄,INTEGER,否,是,是,否"
-                            value={importText}
-                            onChange={(e) => setImportText(e.target.value)}
-                            rows={6}
-                          />
-                          <p className="text-xs text-gray-500">
-                            格式：字段名,显示名称,类型,必填(是/否),列表显示(是/否),表单显示(是/否),可搜索(是/否)
-                          </p>
-                          <Button onClick={parseImportText} size="sm">
-                            解析
-                          </Button>
-                        </div>
-                      )}
-
-                      {importMethod === 'excel' && (
-                        <div className="space-y-2">
-                          <Label>上传 Excel 文件</Label>
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept=".xlsx,.xls"
-                            onChange={handleFileUpload}
-                            className="hidden"
-                          />
-                          <Button onClick={() => fileInputRef.current?.click()} variant="outline">
-                            <Upload className="w-4 h-4 mr-2" />
-                            选择文件
-                          </Button>
-                          <p className="text-xs text-gray-500">
-                            支持 .xlsx 格式，第一行为表头，从第二行开始为数据
-                          </p>
-                        </div>
-                      )}
-
-                      {importFields.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label>已解析字段 ({importFields.length} 个)</Label>
+        <TabsContent value="fields" className="mt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-lg">字段列表（拖拽可排序）</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline" onClick={openImportDialog}>
+                          <Upload className="w-4 h-4 mr-2" />
+                          批量导入
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle>批量导入字段</DialogTitle>
+                          <DialogDescription>
+                            通过文本或 Excel 批量导入字段
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                          <div className="flex gap-2">
+                            <Button
+                              variant={importMethod === 'text' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setImportMethod('text')}
+                            >
+                              文本导入
+                            </Button>
+                            <Button
+                              variant={importMethod === 'excel' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setImportMethod('excel')}
+                            >
+                              Excel 导入
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={downloadTemplate}>
+                              <Download className="w-4 h-4 mr-2" />
+                              下载模板
+                            </Button>
                           </div>
-                          <div className="border rounded-lg overflow-hidden max-h-60 overflow-y-auto">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="w-10">#</TableHead>
-                                  <TableHead>字段名</TableHead>
-                                  <TableHead>显示名称</TableHead>
-                                  <TableHead>类型</TableHead>
-                                  <TableHead>必填</TableHead>
-                                  <TableHead className="w-10"></TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {importFields.map((field, index) => (
-                                  <TableRow key={index}>
-                                    <TableCell className="text-gray-500">{index + 1}</TableCell>
-                                    <TableCell className="font-medium">{field.name}</TableCell>
-                                    <TableCell>{field.label}</TableCell>
-                                    <TableCell>
-                                      <span className="text-sm">
-                                        {fieldTypeConfig[field.type]?.label || field.type}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell>
-                                      {field.required && (
-                                        <Badge variant="destructive" className="text-xs">是</Badge>
-                                      )}
-                                      {!field.required && (
-                                        <Badge variant="outline" className="text-xs">否</Badge>
-                                      )}
-                                    </TableCell>
-                                    <TableCell>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="text-red-500 hover:text-red-600"
-                                        title="移除"
-                                        onClick={() => removeImportField(index)}
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </Button>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
-                        取消
-                      </Button>
-                      <Button
-                        onClick={handleImport}
-                        disabled={importLoading || importFields.length === 0}
-                      >
-                        {importLoading ? '导入中...' : `导入 ${importFields.length} 个字段`}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
 
-                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button onClick={openCreateDialog}>
-                      <Plus className="w-4 h-4 mr-2" />
-                      添加字段
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                      <DialogTitle>
-                        {editingField ? '编辑字段' : '添加字段'}
-                      </DialogTitle>
-                      <DialogDescription>
-                        配置字段的基本信息和显示选项
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid grid-cols-2 gap-4 py-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="field-name">字段名（英文标识）</Label>
-                        <Input
-                          id="field-name"
-                          placeholder="如：name"
-                          value={formData.name}
-                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                          disabled={!!editingField?.isSystem}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="field-label">显示名称</Label>
-                        <Input
-                          id="field-label"
-                          placeholder="如：姓名"
-                          value={formData.label}
-                          onChange={(e) => setFormData({ ...formData, label: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="field-type">字段类型</Label>
-                        <Select
-                          value={formData.type}
-                          onValueChange={(v) => setFormData({ ...formData, type: v as FieldType })}
-                        >
-                          <SelectTrigger id="field-type">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(fieldTypeConfig).map(([key, config]) => {
-                              const Icon = config.icon
-                              return (
-                                <SelectItem key={key} value={key}>
-                                  <div className="flex items-center gap-2">
-                                    <Icon className="w-4 h-4" />
-                                    {config.label}
-                                  </div>
-                                </SelectItem>
-                              )
-                            })}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="field-placeholder">输入提示（可选）</Label>
-                        <Input
-                          id="field-placeholder"
-                          placeholder="请输入..."
-                          value={formData.placeholder}
-                          onChange={(e) => setFormData({ ...formData, placeholder: e.target.value })}
-                        />
-                      </div>
-                      {hasOptions(formData.type) && (
-                        <div className="col-span-2 space-y-3 pt-2 border-t">
-                          <div
-                            className="flex items-center justify-between cursor-pointer"
-                            onClick={() => setShowOptions(!showOptions)}
-                          >
-                            <div className="flex items-center gap-2">
-                              <Settings className="w-4 h-4 text-gray-500" />
-                              <span className="font-medium text-sm">选项管理</span>
-                              <Badge variant="secondary" className="text-xs">
-                                {formData.options.length} 个选项
-                              </Badge>
+                          {importMethod === 'text' && (
+                            <div className="space-y-2">
+                              <Label>输入字段信息（每行一个，用逗号分隔）</Label>
+                              <Textarea
+                                placeholder="字段名,显示名称,类型,必填,列表显示,表单显示,可搜索&#10;name,姓名,TEXT,是,是,是,是&#10;age,年龄,INTEGER,否,是,是,否"
+                                value={importText}
+                                onChange={(e) => setImportText(e.target.value)}
+                                rows={6}
+                              />
+                              <p className="text-xs text-gray-500">
+                                格式：字段名,显示名称,类型,必填(是/否),列表显示(是/否),表单显示(是/否),可搜索(是/否)
+                              </p>
+                              <Button onClick={parseImportText} size="sm">
+                                解析
+                              </Button>
                             </div>
-                            {showOptions ? (
-                              <ChevronUp className="w-4 h-4 text-gray-500" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4 text-gray-500" />
-                            )}
-                          </div>
-                          {showOptions && (
-                            <div className="space-y-3">
-                              <div className="flex gap-2">
-                                <Input
-                                  placeholder="选项显示名称"
-                                  value={newOptionLabel}
-                                  onChange={(e) => setNewOptionLabel(e.target.value)}
-                                  onKeyDown={(e) => e.key === 'Enter' && addOption()}
-                                  className="flex-1"
-                                />
-                                <Input
-                                  placeholder="选项值（留空则同名称）"
-                                  value={newOptionValue}
-                                  onChange={(e) => setNewOptionValue(e.target.value)}
-                                  onKeyDown={(e) => e.key === 'Enter' && addOption()}
-                                  className="flex-1"
-                                />
-                                <Button onClick={addOption} size="sm">
-                                  <Plus className="w-4 h-4 mr-1" />
-                                  添加
-                                </Button>
+                          )}
+
+                          {importMethod === 'excel' && (
+                            <div className="space-y-2">
+                              <Label>上传 Excel 文件</Label>
+                              <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".xlsx,.xls"
+                                onChange={handleFileUpload}
+                                className="hidden"
+                              />
+                              <Button onClick={() => fileInputRef.current?.click()} variant="outline">
+                                <Upload className="w-4 h-4 mr-2" />
+                                选择文件
+                              </Button>
+                              <p className="text-xs text-gray-500">
+                                支持 .xlsx 格式，第一行为表头，从第二行开始为数据
+                              </p>
+                            </div>
+                          )}
+
+                          {importFields.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label>已解析字段 ({importFields.length} 个)</Label>
                               </div>
-                              {formData.options.length > 0 && (
-                                <div className="border rounded-md overflow-hidden">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableHead className="w-12">序号</TableHead>
-                                        <TableHead>显示名称</TableHead>
-                                        <TableHead>选项值</TableHead>
-                                        <TableHead className="w-28 text-right">操作</TableHead>
+                              <div className="border rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="w-10">#</TableHead>
+                                      <TableHead>字段名</TableHead>
+                                      <TableHead>显示名称</TableHead>
+                                      <TableHead>类型</TableHead>
+                                      <TableHead>必填</TableHead>
+                                      <TableHead className="w-10"></TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {importFields.map((field, index) => (
+                                      <TableRow key={index}>
+                                        <TableCell className="text-gray-500">{index + 1}</TableCell>
+                                        <TableCell className="font-medium">{field.name}</TableCell>
+                                        <TableCell>{field.label}</TableCell>
+                                        <TableCell>
+                                          <span className="text-sm">
+                                            {fieldTypeConfig[field.type]?.label || field.type}
+                                          </span>
+                                        </TableCell>
+                                        <TableCell>
+                                          {field.required && (
+                                            <Badge variant="destructive" className="text-xs">是</Badge>
+                                          )}
+                                          {!field.required && (
+                                            <Badge variant="outline" className="text-xs">否</Badge>
+                                          )}
+                                        </TableCell>
+                                        <TableCell>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-red-500 hover:text-red-600"
+                                            title="移除"
+                                            onClick={() => removeImportField(index)}
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                        </TableCell>
                                       </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {formData.options.map((opt, index) => (
-                                        <TableRow key={index}>
-                                          <TableCell className="text-gray-500 text-sm">{index + 1}</TableCell>
-                                          <TableCell>
-                                            <Input
-                                              value={opt.label}
-                                              onChange={(e) => updateOption(index, 'label', e.target.value)}
-                                              className="h-8 text-sm"
-                                            />
-                                          </TableCell>
-                                          <TableCell>
-                                            <Input
-                                              value={opt.value}
-                                              onChange={(e) => updateOption(index, 'value', e.target.value)}
-                                              className="h-8 text-sm"
-                                            />
-                                          </TableCell>
-                                          <TableCell className="text-right">
-                                            <div className="flex items-center justify-end gap-1">
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-7 w-7 p-0"
-                                                onClick={() => moveOption(index, 'up')}
-                                                disabled={index === 0}
-                                              >
-                                                <ChevronUp className="w-4 h-4" />
-                                              </Button>
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-7 w-7 p-0"
-                                                onClick={() => moveOption(index, 'down')}
-                                                disabled={index === formData.options.length - 1}
-                                              >
-                                                <ChevronDown className="w-4 h-4" />
-                                              </Button>
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-7 w-7 p-0 text-red-500 hover:text-red-600"
-                                                onClick={() => removeOption(index)}
-                                              >
-                                                <Trash2 className="w-4 h-4" />
-                                              </Button>
-                                            </div>
-                                          </TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+                            取消
+                          </Button>
+                          <Button
+                            onClick={handleImport}
+                            disabled={importLoading || importFields.length === 0}
+                          >
+                            {importLoading ? '导入中...' : `导入 ${importFields.length} 个字段`}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+
+                    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button onClick={openCreateDialog}>
+                          <Plus className="w-4 h-4 mr-2" />
+                          添加字段
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-2xl">
+                        <DialogHeader>
+                          <DialogTitle>
+                            {editingField ? '编辑字段' : '添加字段'}
+                          </DialogTitle>
+                          <DialogDescription>
+                            配置字段的基本信息和显示选项
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid grid-cols-2 gap-4 py-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="field-name">字段名（英文标识）</Label>
+                            <Input
+                              id="field-name"
+                              placeholder="如：name"
+                              value={formData.name}
+                              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                              disabled={!!editingField?.isSystem}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="field-label">显示名称</Label>
+                            <Input
+                              id="field-label"
+                              placeholder="如：姓名"
+                              value={formData.label}
+                              onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="field-type">字段类型</Label>
+                            <Select
+                              value={formData.type}
+                              onValueChange={(v) => setFormData({ ...formData, type: v as FieldType })}
+                            >
+                              <SelectTrigger id="field-type">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(fieldTypeConfig).map(([key, config]) => {
+                                  const Icon = config.icon
+                                  return (
+                                    <SelectItem key={key} value={key}>
+                                      <div className="flex items-center gap-2">
+                                        <Icon className="w-4 h-4" />
+                                        {config.label}
+                                      </div>
+                                    </SelectItem>
+                                  )
+                                })}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="field-placeholder">输入提示（可选）</Label>
+                            <Input
+                              id="field-placeholder"
+                              placeholder="请输入..."
+                              value={formData.placeholder}
+                              onChange={(e) => setFormData({ ...formData, placeholder: e.target.value })}
+                            />
+                          </div>
+                          {hasOptions(formData.type) && (
+                            <div className="col-span-2 space-y-3 pt-2 border-t">
+                              <div
+                                className="flex items-center justify-between cursor-pointer"
+                                onClick={() => setShowOptions(!showOptions)}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Settings className="w-4 h-4 text-gray-500" />
+                                  <span className="font-medium text-sm">选项管理</span>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {formData.options.length} 个选项
+                                  </Badge>
                                 </div>
-                              )}
-                              {formData.options.length === 0 && (
-                                <div className="text-center py-6 text-gray-400 text-sm border border-dashed rounded-md">
-                                  暂无选项，请在上方添加
+                                {showOptions ? (
+                                  <ChevronUp className="w-4 h-4 text-gray-500" />
+                                ) : (
+                                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                                )}
+                              </div>
+                              {showOptions && (
+                                <div className="space-y-3">
+                                  <div className="flex gap-2">
+                                    <Input
+                                      placeholder="选项显示名称"
+                                      value={newOptionLabel}
+                                      onChange={(e) => setNewOptionLabel(e.target.value)}
+                                      onKeyDown={(e) => e.key === 'Enter' && addOption()}
+                                      className="flex-1"
+                                    />
+                                    <Input
+                                      placeholder="选项值（留空则同名称）"
+                                      value={newOptionValue}
+                                      onChange={(e) => setNewOptionValue(e.target.value)}
+                                      onKeyDown={(e) => e.key === 'Enter' && addOption()}
+                                      className="flex-1"
+                                    />
+                                    <Button onClick={addOption} size="sm">
+                                      <Plus className="w-4 h-4 mr-1" />
+                                      添加
+                                    </Button>
+                                  </div>
+                                  {formData.options.length > 0 && (
+                                    <div className="border rounded-md overflow-hidden">
+                                      <Table>
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead className="w-12">序号</TableHead>
+                                            <TableHead>显示名称</TableHead>
+                                            <TableHead>选项值</TableHead>
+                                            <TableHead className="w-28 text-right">操作</TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {formData.options.map((opt, index) => (
+                                            <TableRow key={index}>
+                                              <TableCell className="text-gray-500 text-sm">{index + 1}</TableCell>
+                                              <TableCell>
+                                                <Input
+                                                  value={opt.label}
+                                                  onChange={(e) => updateOption(index, 'label', e.target.value)}
+                                                  className="h-8 text-sm"
+                                                />
+                                              </TableCell>
+                                              <TableCell>
+                                                <Input
+                                                  value={opt.value}
+                                                  onChange={(e) => updateOption(index, 'value', e.target.value)}
+                                                  className="h-8 text-sm"
+                                                />
+                                              </TableCell>
+                                              <TableCell className="text-right">
+                                                <div className="flex items-center justify-end gap-1">
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 w-7 p-0"
+                                                    onClick={() => moveOption(index, 'up')}
+                                                    disabled={index === 0}
+                                                  >
+                                                    <ChevronUp className="w-4 h-4" />
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 w-7 p-0"
+                                                    onClick={() => moveOption(index, 'down')}
+                                                    disabled={index === formData.options.length - 1}
+                                                  >
+                                                    <ChevronDown className="w-4 h-4" />
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 w-7 p-0 text-red-500 hover:text-red-600"
+                                                    onClick={() => removeOption(index)}
+                                                  >
+                                                    <Trash2 className="w-4 h-4" />
+                                                  </Button>
+                                                </div>
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </div>
+                                  )}
+                                  {formData.options.length === 0 && (
+                                    <div className="text-center py-6 text-gray-400 text-sm border border-dashed rounded-md">
+                                      暂无选项，请在上方添加
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
                           )}
-                        </div>
-                      )}
-                      <div className="col-span-2 space-y-4 pt-2">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium text-sm">必填字段</p>
-                            <p className="text-xs text-gray-500">表单中是否必须填写</p>
-                          </div>
-                          <Switch
-                            checked={formData.required}
-                            onCheckedChange={(v) => setFormData({ ...formData, required: v })}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium text-sm">列表显示</p>
-                            <p className="text-xs text-gray-500">是否在数据列表中显示</p>
-                          </div>
-                          <Switch
-                            checked={formData.showInList}
-                            onCheckedChange={(v) => setFormData({ ...formData, showInList: v })}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium text-sm">表单显示</p>
-                            <p className="text-xs text-gray-500">是否在录入表单中显示</p>
-                          </div>
-                          <Switch
-                            checked={formData.showInForm}
-                            onCheckedChange={(v) => setFormData({ ...formData, showInForm: v })}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium text-sm">可搜索</p>
-                            <p className="text-xs text-gray-500">是否可以作为搜索条件</p>
-                          </div>
-                          <Switch
-                            checked={formData.showInSearch}
-                            onCheckedChange={(v) => setFormData({ ...formData, showInSearch: v })}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                        取消
-                      </Button>
-                      <Button onClick={handleSubmit} disabled={loading}>
-                        {loading ? '保存中...' : '保存'}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10"></TableHead>
-                    <TableHead>字段名</TableHead>
-                    <TableHead>显示名称</TableHead>
-                    <TableHead>类型</TableHead>
-                    <TableHead>必填</TableHead>
-                    <TableHead>显示设置</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {fields.length > 0 ? (
-                    fields.map((field, index) => {
-                      const ft = fieldTypeConfig[field.type]
-                      const FIcon = ft?.icon || Type
-                      const isDragging = draggedIndex === index
-                      const isDragOver = dragOverIndex === index
-                      return (
-                        <TableRow
-                          key={field.id}
-                          draggable={!field.isSystem}
-                          onDragStart={(e) => !field.isSystem && handleDragStart(e, index)}
-                          onDragOver={(e) => handleDragOver(e, index)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, index)}
-                          onDragEnd={handleDragEnd}
-                          className={
-                            (isDragging ? 'opacity-50 ' : '') +
-                            (isDragOver ? 'border-t-2 border-t-primary ' : '') +
-                            'cursor-move'
-                          }
-                        >
-                          <TableCell>
-                            <GripVertical className={"w-4 h-4 " + (field.isSystem ? 'text-gray-300' : 'text-gray-400 cursor-grab')} />
-                          </TableCell>
-                          <TableCell className="font-medium">{field.name}</TableCell>
-                          <TableCell>{field.label}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1.5">
-                              <FIcon className="w-4 h-4 text-gray-400" />
-                              <span className="text-sm">{ft?.label}</span>
-                              {hasOptions(field.type) && (
-                                <Badge variant="outline" className="text-xs ml-1">
-                                  {((field.options as { label: string; value: string }[]) || []).length} 选项
-                                </Badge>
-                              )}
+                          <div className="col-span-2 space-y-4 pt-2">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-sm">必填字段</p>
+                                <p className="text-xs text-gray-500">表单中是否必须填写</p>
+                              </div>
+                              <Switch
+                                checked={formData.required}
+                                onCheckedChange={(v) => setFormData({ ...formData, required: v })}
+                              />
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            {field.required && (
-                              <Badge variant="destructive" className="text-xs">必填</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              {field.showInList && <Badge variant="outline" className="text-xs">列表</Badge>}
-                              {field.showInForm && <Badge variant="outline" className="text-xs">表单</Badge>}
-                              {field.showInSearch && <Badge variant="outline" className="text-xs">搜索</Badge>}
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-sm">列表显示</p>
+                                <p className="text-xs text-gray-500">是否在数据列表中显示</p>
+                              </div>
+                              <Switch
+                                checked={formData.showInList}
+                                onCheckedChange={(v) => setFormData({ ...formData, showInList: v })}
+                              />
                             </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEditDialog(field)}
-                                disabled={field.isSystem}
-                                title="编辑字段"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-red-500 hover:text-red-600"
-                                onClick={() => handleDelete(field.id)}
-                                disabled={field.isSystem}
-                                title="删除字段"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-sm">表单显示</p>
+                                <p className="text-xs text-gray-500">是否在录入表单中显示</p>
+                              </div>
+                              <Switch
+                                checked={formData.showInForm}
+                                onCheckedChange={(v) => setFormData({ ...formData, showInForm: v })}
+                              />
                             </div>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-sm">可搜索</p>
+                                <p className="text-xs text-gray-500">是否可以作为搜索条件</p>
+                              </div>
+                              <Switch
+                                checked={formData.showInSearch}
+                                onCheckedChange={(v) => setFormData({ ...formData, showInSearch: v })}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                            取消
+                          </Button>
+                          <Button onClick={handleSubmit} disabled={loading}>
+                            {loading ? '保存中...' : '保存'}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-10"></TableHead>
+                        <TableHead>字段名</TableHead>
+                        <TableHead>显示名称</TableHead>
+                        <TableHead>类型</TableHead>
+                        <TableHead>必填</TableHead>
+                        <TableHead>显示设置</TableHead>
+                        <TableHead className="text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {fields.length > 0 ? (
+                        fields.map((field, index) => {
+                          const ft = fieldTypeConfig[field.type]
+                          const FIcon = ft?.icon || Type
+                          const isDragging = draggedIndex === index
+                          const isDragOver = dragOverIndex === index
+                          return (
+                            <TableRow
+                              key={field.id}
+                              draggable={!field.isSystem}
+                              onDragStart={(e) => !field.isSystem && handleDragStart(e, index)}
+                              onDragOver={(e) => handleDragOver(e, index)}
+                              onDragLeave={handleDragLeave}
+                              onDrop={(e) => handleDrop(e, index)}
+                              onDragEnd={handleDragEnd}
+                              className={
+                                (isDragging ? 'opacity-50 ' : '') +
+                                (isDragOver ? 'border-t-2 border-t-primary ' : '') +
+                                'cursor-move'
+                              }
+                            >
+                              <TableCell>
+                                <GripVertical className={"w-4 h-4 " + (field.isSystem ? 'text-gray-300' : 'text-gray-400 cursor-grab')} />
+                              </TableCell>
+                              <TableCell className="font-medium">{field.name}</TableCell>
+                              <TableCell>{field.label}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-1.5">
+                                  <FIcon className="w-4 h-4 text-gray-400" />
+                                  <span className="text-sm">{ft?.label}</span>
+                                  {hasOptions(field.type) && (
+                                    <Badge variant="outline" className="text-xs ml-1">
+                                      {((field.options as { label: string; value: string }[]) || []).length} 选项
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {field.required && (
+                                  <Badge variant="destructive" className="text-xs">必填</Badge>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex gap-1">
+                                  {field.showInList && <Badge variant="outline" className="text-xs">列表</Badge>}
+                                  {field.showInForm && <Badge variant="outline" className="text-xs">表单</Badge>}
+                                  {field.showInSearch && <Badge variant="outline" className="text-xs">搜索</Badge>}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openEditDialog(field)}
+                                    disabled={field.isSystem}
+                                    title="编辑字段"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-red-500 hover:text-red-600"
+                                    onClick={() => handleDelete(field.id)}
+                                    disabled={field.isSystem}
+                                    title="删除字段"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-12 text-gray-500">
+                            <Type className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                            <p>暂无字段，点击上方添加字段</p>
                           </TableCell>
                         </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">字段类型说明</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {Object.entries(fieldTypeConfig).slice(0, 10).map(([key, config]) => {
+                      const Icon = config.icon
+                      return (
+                        <div key={key} className="flex items-center gap-2 text-sm">
+                          <Icon className="w-4 h-4 text-gray-400" />
+                          <span>{config.label}</span>
+                        </div>
                       )
-                    })
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12 text-gray-500">
-                        <Type className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                        <p>暂无字段，点击上方添加字段</p>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </div>
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">字段类型说明</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {Object.entries(fieldTypeConfig).slice(0, 10).map(([key, config]) => {
-                  const Icon = config.icon
-                  return (
-                    <div key={key} className="flex items-center gap-2 text-sm">
-                      <Icon className="w-4 h-4 text-gray-400" />
-                      <span>{config.label}</span>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">预览</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <TypeIcon className="w-5 h-5 text-primary" />
+                      <span className="font-medium">{formData.label || '字段名称'}</span>
+                      {formData.required && <span className="text-red-500">*</span>}
                     </div>
-                  )
-                })}
-              </div>
-            </CardContent>
-          </Card>
+                    <Input placeholder={formData.placeholder || '请输入...'} />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">预览</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <TypeIcon className="w-5 h-5 text-primary" />
-                  <span className="font-medium">{formData.label || '字段名称'}</span>
-                  {formData.required && <span className="text-red-500">*</span>}
-                </div>
-                <Input placeholder={formData.placeholder || '请输入...'} />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+        <TabsContent value="layout" className="mt-6">
+          <FormLayoutDesigner
+            tableId={table.id}
+            fields={fields}
+            initialConfig={table.formLayoutConfig as FormLayoutConfig | null}
+            onSave={handleSaveFormLayout}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

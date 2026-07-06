@@ -105,6 +105,7 @@ async function main() {
 
   // ==================== 3. 创建其他缺失的表 ====================
   const tableChecks = [
+    ['TableCategory', createTableCategory],
     ['DataTable', createDataTable],
     ['TableField', createTableField],
     ['TablePermission', createTablePermission],
@@ -114,6 +115,8 @@ async function main() {
     ['ErrorLog', createErrorLog],
     ['ExportTemplate', createExportTemplate],
     ['SystemSetting', createSystemSetting],
+    ['UserDashboardConfig', createUserDashboardConfig],
+    ['VersionLog', createVersionLog],
     ['_SharedTemplates', createSharedTemplates],
   ]
 
@@ -127,23 +130,58 @@ async function main() {
   // ==================== 4. 检查并添加缺失的列 ====================
   console.log('4. 检查字段...')
   
-  // TablePermission 添加 canPrint
+  // TablePermission 添加新字段
   if (tableNames.includes('tablepermission')) {
     const permCols = await prisma.$queryRaw`DESCRIBE \`TablePermission\``
-    if (!permCols.some(c => c.Field === 'canPrint')) {
+    const permColNames = permCols.map(c => c.Field)
+    if (!permColNames.includes('canPrint')) {
       console.log('   给 TablePermission 添加 canPrint 字段')
       await prisma.$executeRawUnsafe('ALTER TABLE `TablePermission` ADD COLUMN `canPrint` TINYINT(1) NOT NULL DEFAULT 0')
+    }
+    if (!permColNames.includes('canExportExcel')) {
+      console.log('   给 TablePermission 添加 canExportExcel 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `TablePermission` ADD COLUMN `canExportExcel` TINYINT(1) NOT NULL DEFAULT 0')
+      if (permColNames.includes('canExport')) {
+        await prisma.$executeRawUnsafe('UPDATE `TablePermission` SET `canExportExcel` = `canExport`')
+      }
+    }
+    if (!permColNames.includes('canExportPdf')) {
+      console.log('   给 TablePermission 添加 canExportPdf 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `TablePermission` ADD COLUMN `canExportPdf` TINYINT(1) NOT NULL DEFAULT 0')
+      if (permColNames.includes('canExport')) {
+        await prisma.$executeRawUnsafe('UPDATE `TablePermission` SET `canExportPdf` = `canExport`')
+      }
+    }
+    if (!permColNames.includes('canImport')) {
+      console.log('   给 TablePermission 添加 canImport 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `TablePermission` ADD COLUMN `canImport` TINYINT(1) NOT NULL DEFAULT 0')
+    }
+  }
+
+  // DataTable 添加 categoryId 和 formLayoutConfig 字段
+  if (tableNames.includes('datatable')) {
+    const dtCols = await prisma.$queryRaw`DESCRIBE \`DataTable\``
+    const dtColNames = dtCols.map(c => c.Field)
+    if (!dtColNames.includes('categoryId')) {
+      console.log('   给 DataTable 添加 categoryId 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `DataTable` ADD COLUMN `categoryId` INT NULL')
+      await prisma.$executeRawUnsafe('ALTER TABLE `DataTable` ADD INDEX `DataTable_categoryId_idx` (`categoryId`)')
+    }
+    if (!dtColNames.includes('formLayoutConfig')) {
+      console.log('   给 DataTable 添加 formLayoutConfig 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `DataTable` ADD COLUMN `formLayoutConfig` JSON NULL')
     }
   }
 
   // ExportTemplate 添加 category 字段（替换 format）
   if (tableNames.includes('exporttemplate')) {
     const etCols = await prisma.$queryRaw`DESCRIBE \`ExportTemplate\``
-    if (!etCols.some(c => c.Field === 'isShared')) {
+    const etColNames = etCols.map(c => c.Field)
+    if (!etColNames.includes('isShared')) {
       console.log('   给 ExportTemplate 添加 isShared 字段')
       await prisma.$executeRawUnsafe('ALTER TABLE `ExportTemplate` ADD COLUMN `isShared` TINYINT(1) NOT NULL DEFAULT 0')
     }
-    if (!etCols.some(c => c.Field === 'category')) {
+    if (!etColNames.includes('category')) {
       console.log('   给 ExportTemplate 添加 category 字段')
       await prisma.$executeRawUnsafe("ALTER TABLE `ExportTemplate` ADD COLUMN `category` ENUM('EXPORT','PRINT') NOT NULL DEFAULT 'EXPORT'")
       await prisma.$executeRawUnsafe("ALTER TABLE `ExportTemplate` ADD INDEX `ExportTemplate_category_idx` (`category`)")
@@ -178,6 +216,25 @@ async function main() {
   console.log('\n✅ 数据库迁移完成！')
 }
 
+async function createTableCategory(prisma) {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS \`TableCategory\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`name\` VARCHAR(191) NOT NULL,
+      \`parentId\` INT NULL,
+      \`level\` INT NOT NULL DEFAULT 1,
+      \`sortOrder\` INT NOT NULL DEFAULT 0,
+      \`icon\` VARCHAR(191) NULL,
+      \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+      INDEX \`TableCategory_parentId_idx\` (\`parentId\`),
+      INDEX \`TableCategory_sortOrder_idx\` (\`sortOrder\`),
+      INDEX \`TableCategory_level_idx\` (\`level\`),
+      CONSTRAINT \`TableCategory_parentId_fkey\` FOREIGN KEY (\`parentId\`) REFERENCES \`TableCategory\`(\`id\`) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `)
+}
+
 async function createDataTable(prisma) {
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS \`DataTable\` (
@@ -186,13 +243,15 @@ async function createDataTable(prisma) {
       \`label\` VARCHAR(191) NOT NULL,
       \`description\` TEXT NULL,
       \`icon\` VARCHAR(191) NULL,
+      \`categoryId\` INT NULL,
       \`status\` ENUM('ACTIVE','ARCHIVED','DRAFT') NOT NULL DEFAULT 'ACTIVE',
       \`sortOrder\` INT NOT NULL DEFAULT 0,
       \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
       \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
       \`createdBy\` INT NULL,
       INDEX \`DataTable_status_idx\` (\`status\`),
-      INDEX \`DataTable_sortOrder_idx\` (\`sortOrder\`)
+      INDEX \`DataTable_sortOrder_idx\` (\`sortOrder\`),
+      INDEX \`DataTable_categoryId_idx\` (\`categoryId\`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `)
 }
@@ -237,8 +296,10 @@ async function createTablePermission(prisma) {
       \`canCreate\` TINYINT(1) NOT NULL DEFAULT 0,
       \`canEdit\` TINYINT(1) NOT NULL DEFAULT 0,
       \`canDelete\` TINYINT(1) NOT NULL DEFAULT 0,
-      \`canExport\` TINYINT(1) NOT NULL DEFAULT 0,
+      \`canExportExcel\` TINYINT(1) NOT NULL DEFAULT 0,
+      \`canExportPdf\` TINYINT(1) NOT NULL DEFAULT 0,
       \`canPrint\` TINYINT(1) NOT NULL DEFAULT 0,
+      \`canImport\` TINYINT(1) NOT NULL DEFAULT 0,
       \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
       UNIQUE INDEX \`TablePermission_userId_tableId_key\` (\`userId\`, \`tableId\`),
       INDEX \`TablePermission_tableId_idx\` (\`tableId\`),
@@ -383,6 +444,38 @@ async function createSystemSetting(prisma) {
     INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`)
     VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）')
     ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`)
+  `)
+}
+
+async function createUserDashboardConfig(prisma) {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS \`UserDashboardConfig\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`userId\` INT NOT NULL UNIQUE,
+      \`config\` JSON NOT NULL,
+      \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+      INDEX \`UserDashboardConfig_userId_idx\` (\`userId\`),
+      CONSTRAINT \`UserDashboardConfig_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `)
+}
+
+async function createVersionLog(prisma) {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS \`VersionLog\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`version\` VARCHAR(191) NOT NULL,
+      \`title\` VARCHAR(191) NOT NULL,
+      \`description\` TEXT NULL,
+      \`changes\` JSON NULL,
+      \`releaseDate\` DATETIME(3) NULL,
+      \`createdBy\` INT NULL,
+      \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+      INDEX \`VersionLog_version_idx\` (\`version\`),
+      INDEX \`VersionLog_releaseDate_idx\` (\`releaseDate\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `)
 }
 

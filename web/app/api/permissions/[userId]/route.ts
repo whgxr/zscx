@@ -34,8 +34,10 @@ export async function GET(
         canCreate: perm?.canCreate ?? false,
         canEdit: perm?.canEdit ?? false,
         canDelete: perm?.canDelete ?? false,
-        canExport: perm?.canExport ?? false,
+        canExportExcel: perm?.canExportExcel ?? false,
+        canExportPdf: perm?.canExportPdf ?? false,
         canPrint: perm?.canPrint ?? false,
+        canImport: perm?.canImport ?? false,
       }
     })
 
@@ -73,11 +75,13 @@ export async function PUT(
             canCreate: perm.canCreate,
             canEdit: perm.canEdit,
             canDelete: perm.canDelete,
-            canExport: perm.canExport,
+            canExportExcel: perm.canExportExcel,
+            canExportPdf: perm.canExportPdf,
             canPrint: perm.canPrint,
+            canImport: perm.canImport,
           },
         })
-      } else if (perm.canView || perm.canCreate || perm.canEdit || perm.canDelete || perm.canExport || perm.canPrint) {
+      } else if (perm.canView || perm.canCreate || perm.canEdit || perm.canDelete || perm.canExportExcel || perm.canExportPdf || perm.canPrint || perm.canImport) {
         await prisma.tablePermission.create({
           data: {
             userId,
@@ -86,8 +90,10 @@ export async function PUT(
             canCreate: perm.canCreate,
             canEdit: perm.canEdit,
             canDelete: perm.canDelete,
-            canExport: perm.canExport,
+            canExportExcel: perm.canExportExcel,
+            canExportPdf: perm.canExportPdf,
             canPrint: perm.canPrint,
+            canImport: perm.canImport,
           },
         })
       }

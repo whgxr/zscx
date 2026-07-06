@@ -15,16 +15,44 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  const tables = await prisma.dataTable.findMany({
-    where: { status: 'ACTIVE' },
-    orderBy: { sortOrder: 'asc' },
-    select: {
-      id: true,
-      name: true,
-      label: true,
-      icon: true,
-    },
-  })
+  const isAdmin = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER'
+
+  let tables
+
+  if (isAdmin) {
+    tables = await prisma.dataTable.findMany({
+      where: { status: 'ACTIVE' },
+      orderBy: { sortOrder: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        label: true,
+        icon: true,
+      },
+    })
+  } else {
+    const permissions = await prisma.tablePermission.findMany({
+      where: {
+        userId: user.id,
+        canView: true,
+      },
+      include: {
+        table: {
+          select: {
+            id: true,
+            name: true,
+            label: true,
+            icon: true,
+            status: true,
+          },
+        },
+      },
+    })
+
+    tables = permissions
+      .filter(p => p.table.status === 'ACTIVE')
+      .map(p => p.table)
+  }
 
   return (
     <div className="flex h-screen bg-gray-50">
