@@ -342,6 +342,24 @@ async function main() {
     `)
     await createUpdateTrigger('SystemSetting')
   }
+
+  // ==================== 11. _SharedTemplates 多对多连接表 ====================
+  console.log('\n11. 检查 _SharedTemplates 表...')
+  try {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`_SharedTemplates\` (
+        \`A\` INT NOT NULL,
+        \`B\` INT NOT NULL,
+        UNIQUE INDEX \`_SharedTemplates_AB_unique\` (\`A\`, \`B\`),
+        INDEX \`_SharedTemplates_B_index\` (\`B\`),
+        CONSTRAINT \`_SharedTemplates_A_fkey\` FOREIGN KEY (\`A\`) REFERENCES \`ExportTemplate\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`_SharedTemplates_B_fkey\` FOREIGN KEY (\`B\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ _SharedTemplates 表完成')
+  } catch (e) {
+    console.log('   _SharedTemplates 表跳过:', e.message)
+  }
   
   await conn.execute(`INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`, \`updatedAt\`) VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）', NOW()) ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`), \`updatedAt\`=NOW()`)
   

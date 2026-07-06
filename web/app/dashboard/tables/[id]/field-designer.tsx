@@ -55,6 +55,9 @@ import {
   Pencil,
   Upload,
   Download,
+  ChevronDown,
+  ChevronUp,
+  Settings,
 } from 'lucide-react'
 import { FieldType, DataTable, TableField, Role } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
@@ -129,7 +132,15 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
     showInList: true,
     showInForm: true,
     showInSearch: true,
+    options: [] as { label: string; value: string }[],
   })
+  const [showOptions, setShowOptions] = useState(false)
+  const [newOptionLabel, setNewOptionLabel] = useState('')
+  const [newOptionValue, setNewOptionValue] = useState('')
+
+  const hasOptions = (type: FieldType) => {
+    return ['SELECT', 'MULTISELECT', 'CHECKBOX', 'RADIO'].includes(type)
+  }
 
   const openCreateDialog = () => {
     setEditingField(null)
@@ -142,12 +153,17 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       showInList: true,
       showInForm: true,
       showInSearch: true,
+      options: [],
     })
+    setShowOptions(false)
+    setNewOptionLabel('')
+    setNewOptionValue('')
     setDialogOpen(true)
   }
 
   const openEditDialog = (field: TableField) => {
     setEditingField(field)
+    const fieldOptions = (field.options as { label: string; value: string }[]) || []
     setFormData({
       name: field.name,
       label: field.label,
@@ -157,8 +173,48 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       showInList: field.showInList,
       showInForm: field.showInForm,
       showInSearch: field.showInSearch,
+      options: fieldOptions,
     })
+    setShowOptions(hasOptions(field.type) && fieldOptions.length > 0)
+    setNewOptionLabel('')
+    setNewOptionValue('')
     setDialogOpen(true)
+  }
+
+  const addOption = () => {
+    if (!newOptionLabel.trim()) return
+    const value = newOptionValue.trim() || newOptionLabel.trim()
+    if (formData.options.some(o => o.value === value)) {
+      alert('选项值已存在')
+      return
+    }
+    setFormData({
+      ...formData,
+      options: [...formData.options, { label: newOptionLabel.trim(), value }],
+    })
+    setNewOptionLabel('')
+    setNewOptionValue('')
+  }
+
+  const removeOption = (index: number) => {
+    setFormData({
+      ...formData,
+      options: formData.options.filter((_, i) => i !== index),
+    })
+  }
+
+  const moveOption = (index: number, direction: 'up' | 'down') => {
+    const newOptions = [...formData.options]
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (targetIndex < 0 || targetIndex >= newOptions.length) return
+    ;[newOptions[index], newOptions[targetIndex]] = [newOptions[targetIndex], newOptions[index]]
+    setFormData({ ...formData, options: newOptions })
+  }
+
+  const updateOption = (index: number, field: 'label' | 'value', value: string) => {
+    const newOptions = [...formData.options]
+    newOptions[index] = { ...newOptions[index], [field]: value }
+    setFormData({ ...formData, options: newOptions })
   }
 
   const handleSubmit = async () => {
@@ -171,10 +227,15 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
         : `/api/tables/${table.id}/fields`
       const method = editingField ? 'PUT' : 'POST'
 
+      const submitData = { ...formData }
+      if (!hasOptions(formData.type)) {
+        submitData.options = []
+      }
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(submitData),
       })
 
       if (res.ok) {
@@ -810,6 +871,121 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                           onChange={(e) => setFormData({ ...formData, placeholder: e.target.value })}
                         />
                       </div>
+                      {hasOptions(formData.type) && (
+                        <div className="col-span-2 space-y-3 pt-2 border-t">
+                          <div
+                            className="flex items-center justify-between cursor-pointer"
+                            onClick={() => setShowOptions(!showOptions)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Settings className="w-4 h-4 text-gray-500" />
+                              <span className="font-medium text-sm">选项管理</span>
+                              <Badge variant="secondary" className="text-xs">
+                                {formData.options.length} 个选项
+                              </Badge>
+                            </div>
+                            {showOptions ? (
+                              <ChevronUp className="w-4 h-4 text-gray-500" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 text-gray-500" />
+                            )}
+                          </div>
+                          {showOptions && (
+                            <div className="space-y-3">
+                              <div className="flex gap-2">
+                                <Input
+                                  placeholder="选项显示名称"
+                                  value={newOptionLabel}
+                                  onChange={(e) => setNewOptionLabel(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && addOption()}
+                                  className="flex-1"
+                                />
+                                <Input
+                                  placeholder="选项值（留空则同名称）"
+                                  value={newOptionValue}
+                                  onChange={(e) => setNewOptionValue(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && addOption()}
+                                  className="flex-1"
+                                />
+                                <Button onClick={addOption} size="sm">
+                                  <Plus className="w-4 h-4 mr-1" />
+                                  添加
+                                </Button>
+                              </div>
+                              {formData.options.length > 0 && (
+                                <div className="border rounded-md overflow-hidden">
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead className="w-12">序号</TableHead>
+                                        <TableHead>显示名称</TableHead>
+                                        <TableHead>选项值</TableHead>
+                                        <TableHead className="w-28 text-right">操作</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {formData.options.map((opt, index) => (
+                                        <TableRow key={index}>
+                                          <TableCell className="text-gray-500 text-sm">{index + 1}</TableCell>
+                                          <TableCell>
+                                            <Input
+                                              value={opt.label}
+                                              onChange={(e) => updateOption(index, 'label', e.target.value)}
+                                              className="h-8 text-sm"
+                                            />
+                                          </TableCell>
+                                          <TableCell>
+                                            <Input
+                                              value={opt.value}
+                                              onChange={(e) => updateOption(index, 'value', e.target.value)}
+                                              className="h-8 text-sm"
+                                            />
+                                          </TableCell>
+                                          <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 w-7 p-0"
+                                                onClick={() => moveOption(index, 'up')}
+                                                disabled={index === 0}
+                                              >
+                                                <ChevronUp className="w-4 h-4" />
+                                              </Button>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 w-7 p-0"
+                                                onClick={() => moveOption(index, 'down')}
+                                                disabled={index === formData.options.length - 1}
+                                              >
+                                                <ChevronDown className="w-4 h-4" />
+                                              </Button>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 w-7 p-0 text-red-500 hover:text-red-600"
+                                                onClick={() => removeOption(index)}
+                                              >
+                                                <Trash2 className="w-4 h-4" />
+                                              </Button>
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              )}
+                              {formData.options.length === 0 && (
+                                <div className="text-center py-6 text-gray-400 text-sm border border-dashed rounded-md">
+                                  暂无选项，请在上方添加
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="col-span-2 space-y-4 pt-2">
                         <div className="flex items-center justify-between">
                           <div>
@@ -909,6 +1085,11 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                             <div className="flex items-center gap-1.5">
                               <FIcon className="w-4 h-4 text-gray-400" />
                               <span className="text-sm">{ft?.label}</span>
+                              {hasOptions(field.type) && (
+                                <Badge variant="outline" className="text-xs ml-1">
+                                  {((field.options as { label: string; value: string }[]) || []).length} 选项
+                                </Badge>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>

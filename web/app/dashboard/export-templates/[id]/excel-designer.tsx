@@ -712,24 +712,33 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                 <table className="text-xs w-full border-collapse">
                   <tbody>
                     {grid.map((row, rIdx) => (
-                      <tr key={rIdx}>
-                        {row.map((cell, cIdx) => (
-                          <td
-                            key={cIdx}
-                            className="border border-gray-200 px-2 py-1 min-w-[80px]"
-                            style={{
-                              fontWeight: cell.bold ? 'bold' : 'normal',
-                              fontStyle: cell.italic ? 'italic' : 'normal',
-                              textDecoration: cell.underline ? 'underline' : 'none',
-                              textAlign: cell.align || 'left',
-                              backgroundColor: cell.bgColor,
-                              color: cell.textColor,
-                              fontSize: cell.fontSize ? cell.fontSize + 'px' : undefined,
-                            }}
-                          >
-                            {cell.value || '\u00A0'}
-                          </td>
-                        ))}
+                      <tr key={rIdx} style={{ height: rowHeights[rIdx] || 24 }}>
+                        {row.map((cell, cIdx) => {
+                          if (cell.mergeHidden) return null
+                          const rowSpan = cell.rowSpan || 1
+                          const colSpan = cell.colSpan || 1
+                          return (
+                            <td
+                              key={cIdx}
+                              rowSpan={rowSpan}
+                              colSpan={colSpan}
+                              className="border border-gray-200 px-2 py-1 min-w-[80px]"
+                              style={{
+                                fontWeight: cell.bold ? 'bold' : 'normal',
+                                fontStyle: cell.italic ? 'italic' : 'normal',
+                                textDecoration: cell.underline ? 'underline' : 'none',
+                                textAlign: cell.align || 'left',
+                                verticalAlign: cell.verticalAlign || 'middle',
+                                backgroundColor: cell.bgColor,
+                                color: cell.textColor,
+                                fontSize: cell.fontSize ? cell.fontSize + 'px' : undefined,
+                                width: colWidths[cIdx] || 100,
+                              }}
+                            >
+                              {cell.value || '\u00A0'}
+                            </td>
+                          )
+                        })}
                       </tr>
                     ))}
                   </tbody>
@@ -1197,6 +1206,16 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                 disabled={!selection}
               >
                 <Trash2 className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-red-500"
+                title="删除列"
+                onClick={deleteCol}
+                disabled={!selection}
+              >
+                <Trash2 className="w-4 h-4 rotate-[-90deg]" />
               </Button>
             </div>
           </div>

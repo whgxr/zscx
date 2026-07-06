@@ -271,6 +271,31 @@ model OperationLog {
   @@index([createdAt])
 }
 
+// ==================== 错误日志 ====================
+
+model ErrorLog {
+  id            Int              @id @default(autoincrement())
+  userId        Int?
+  level         String           // ERROR, WARN, INFO
+  module        String
+  action        String
+  message       String
+  stackTrace    String?
+  requestUrl    String?
+  requestMethod String?
+  requestParams Json?
+  tableId       Int?
+  recordId      Int?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime         @default(now())
+
+  @@index([userId])
+  @@index([level])
+  @@index([module])
+  @@index([createdAt])
+}
+
 // ==================== 导出模板 ====================
 
 model ExportTemplate {
@@ -278,7 +303,7 @@ model ExportTemplate {
   tableId      Int
   name         String           // 模板名称
   type         ExportType       // 导出类型
-  format       ExportFormat     // 导出格式（excel/pdf）
+  category     TemplateCategory @default(EXPORT) // 模板分类：导出/打印
   description  String?
   config       Json             // 导出配置（字段、样式等）
   isDefault    Boolean          @default(false)
@@ -292,7 +317,7 @@ model ExportTemplate {
   sharedTables DataTable[]      @relation("SharedTemplates")
 
   @@index([tableId])
-  @@index([format])
+  @@index([category])
   @@index([createdBy])
   @@index([isShared])
 }
@@ -304,7 +329,7 @@ enum ExportType {
   FORM         // 表单式（单条记录详情）
 }
 
-enum ExportFormat {
-  EXCEL
-  PDF
+enum TemplateCategory {
+  EXPORT  // 导出模板
+  PRINT   // 打印模板
 }

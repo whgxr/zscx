@@ -46,7 +46,7 @@ export async function PUT(
       await prisma.exportTemplate.updateMany({
         where: {
           tableId: template.tableId,
-          format: template.format,
+          category: template.category,
           createdBy: user.id,
           isDefault: true,
           id: { not: templateId },

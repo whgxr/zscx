@@ -111,8 +111,10 @@ async function main() {
     ['DataRecord', createDataRecord],
     ['UploadedFile', createUploadedFile],
     ['OperationLog', createOperationLog],
+    ['ErrorLog', createErrorLog],
     ['ExportTemplate', createExportTemplate],
     ['SystemSetting', createSystemSetting],
+    ['_SharedTemplates', createSharedTemplates],
   ]
 
   for (const [name, createFn] of tableChecks) {
@@ -134,12 +136,17 @@ async function main() {
     }
   }
 
-  // ExportTemplate 添加 isShared
+  // ExportTemplate 添加 category 字段（替换 format）
   if (tableNames.includes('exporttemplate')) {
     const etCols = await prisma.$queryRaw`DESCRIBE \`ExportTemplate\``
     if (!etCols.some(c => c.Field === 'isShared')) {
       console.log('   给 ExportTemplate 添加 isShared 字段')
       await prisma.$executeRawUnsafe('ALTER TABLE `ExportTemplate` ADD COLUMN `isShared` TINYINT(1) NOT NULL DEFAULT 0')
+    }
+    if (!etCols.some(c => c.Field === 'category')) {
+      console.log('   给 ExportTemplate 添加 category 字段')
+      await prisma.$executeRawUnsafe("ALTER TABLE `ExportTemplate` ADD COLUMN `category` ENUM('EXPORT','PRINT') NOT NULL DEFAULT 'EXPORT'")
+      await prisma.$executeRawUnsafe("ALTER TABLE `ExportTemplate` ADD INDEX `ExportTemplate_category_idx` (`category`)")
     }
   }
 
@@ -308,6 +315,32 @@ async function createOperationLog(prisma) {
   `)
 }
 
+async function createErrorLog(prisma) {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS \`ErrorLog\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`userId\` INT NULL,
+      \`level\` VARCHAR(191) NOT NULL,
+      \`module\` VARCHAR(191) NOT NULL,
+      \`action\` VARCHAR(191) NOT NULL,
+      \`message\` TEXT NOT NULL,
+      \`stackTrace\` TEXT NULL,
+      \`requestUrl\` TEXT NULL,
+      \`requestMethod\` VARCHAR(191) NULL,
+      \`requestParams\` JSON NULL,
+      \`tableId\` INT NULL,
+      \`recordId\` INT NULL,
+      \`ipAddress\` VARCHAR(191) NULL,
+      \`userAgent\` TEXT NULL,
+      \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      INDEX \`ErrorLog_userId_idx\` (\`userId\`),
+      INDEX \`ErrorLog_level_idx\` (\`level\`),
+      INDEX \`ErrorLog_module_idx\` (\`module\`),
+      INDEX \`ErrorLog_createdAt_idx\` (\`createdAt\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `)
+}
+
 async function createExportTemplate(prisma) {
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS \`ExportTemplate\` (
@@ -315,7 +348,7 @@ async function createExportTemplate(prisma) {
       \`tableId\` INT NOT NULL,
       \`name\` VARCHAR(191) NOT NULL,
       \`type\` ENUM('STANDARD','CARD','GROUPED','FORM') NOT NULL,
-      \`format\` ENUM('EXCEL','PDF') NOT NULL,
+      \`category\` ENUM('EXPORT','PRINT') NOT NULL DEFAULT 'EXPORT',
       \`description\` TEXT NULL,
       \`config\` JSON NOT NULL,
       \`isDefault\` TINYINT(1) NOT NULL DEFAULT 0,
@@ -325,7 +358,7 @@ async function createExportTemplate(prisma) {
       \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
       \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
       INDEX \`ExportTemplate_tableId_idx\` (\`tableId\`),
-      INDEX \`ExportTemplate_format_idx\` (\`format\`),
+      INDEX \`ExportTemplate_category_idx\` (\`category\`),
       INDEX \`ExportTemplate_createdBy_idx\` (\`createdBy\`),
       INDEX \`ExportTemplate_isShared_idx\` (\`isShared\`),
       CONSTRAINT \`ExportTemplate_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE
@@ -351,6 +384,23 @@ async function createSystemSetting(prisma) {
     VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）')
     ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`)
   `)
+}
+
+async function createSharedTemplates(prisma) {
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`_SharedTemplates\` (
+        \`A\` INT NOT NULL,
+        \`B\` INT NOT NULL,
+        UNIQUE INDEX \`_SharedTemplates_AB_unique\` (\`A\`, \`B\`),
+        INDEX \`_SharedTemplates_B_index\` (\`B\`),
+        CONSTRAINT \`_SharedTemplates_A_fkey\` FOREIGN KEY (\`A\`) REFERENCES \`ExportTemplate\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`_SharedTemplates_B_fkey\` FOREIGN KEY (\`B\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+  } catch (e) {
+    console.log('   _SharedTemplates 表跳过:', e.message)
+  }
 }
 
 main()

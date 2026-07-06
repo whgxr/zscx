@@ -1,14 +1,14 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { z } from 'zod'
-import { ExportFormat, ExportType } from '@prisma/client'
+import { ExportType, TemplateCategory } from '@prisma/client'
 
 const createTemplateSchema = z.object({
   tableId: z.number(),
   name: z.string().min(1, '模板名称不能为空'),
   type: z.nativeEnum(ExportType),
-  format: z.nativeEnum(ExportFormat),
+  category: z.nativeEnum(TemplateCategory).optional(),
   description: z.string().optional().nullable(),
   config: z.record(z.any()),
   isDefault: z.boolean().optional(),
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const tableId = searchParams.get('tableId')
-    const format = searchParams.get('format')
+    const category = searchParams.get('category')
 
     const where: any = {
       OR: [
@@ -47,8 +47,8 @@ export async function GET(req: NextRequest) {
       ]
     }
 
-    if (format) {
-      where.format = format as ExportFormat
+    if (category) {
+      where.category = category as TemplateCategory
     }
 
     const templates = await prisma.exportTemplate.findMany({
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
       await prisma.exportTemplate.updateMany({
         where: {
           tableId: data.tableId,
-          format: data.format,
+          category: data.category || 'EXPORT',
           createdBy: user.id,
           isDefault: true,
         },
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
         tableId: data.tableId,
         name: data.name,
         type: data.type,
-        format: data.format,
+        category: data.category || 'EXPORT',
         description: data.description || null,
         config: data.config as any,
         isDefault: data.isDefault || false,
@@ -133,4 +133,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: '创建导出模板失败' }, { status: 500 })
   }
 }
-

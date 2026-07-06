@@ -30,6 +30,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { 
   Plus, 
   Search, 
@@ -40,6 +46,7 @@ import {
   FileSpreadsheet,
   FileText,
   ArrowLeft,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
@@ -120,7 +127,6 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const [visibleFields, setVisibleFields] = useState<string[]>([])
   const [recordPrintDialogOpen, setRecordPrintDialogOpen] = useState(false)
   const [selectedRecord, setSelectedRecord] = useState<any>(null)
-  const [printFormat, setPrintFormat] = useState<'EXCEL' | 'PDF'>('PDF')
   const [printTemplates, setPrintTemplates] = useState<any[]>([])
   const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<string>('')
   const [printPreviewUrl, setPrintPreviewUrl] = useState<string | null>(null)
@@ -296,10 +302,9 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
 
   const handleRecordPrint = async (record: any) => {
     setSelectedRecord(record)
-    setPrintFormat('PDF')
     setRecordPrintDialogOpen(true)
     try {
-      const res = await fetch(`/api/export-templates?tableId=${table.id}&format=PDF`)
+      const res = await fetch(`/api/export-templates?tableId=${table.id}&category=PRINT`)
       if (res.ok) {
         const data = await res.json()
         setPrintTemplates(data.templates || [])
@@ -307,24 +312,6 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
         if (defaultTemplate) {
           setSelectedPrintTemplate(defaultTemplate.id.toString())
         } else if (data.templates?.length > 0) {
-          setSelectedPrintTemplate(data.templates[0].id.toString())
-        } else {
-          setSelectedPrintTemplate('')
-        }
-      }
-    } catch (err) {
-      console.error('Fetch templates error:', err)
-    }
-  }
-
-  const handlePrintFormatChange = async (fmt: 'EXCEL' | 'PDF') => {
-    setPrintFormat(fmt)
-    try {
-      const res = await fetch(`/api/export-templates?tableId=${table.id}&format=${fmt}`)
-      if (res.ok) {
-        const data = await res.json()
-        setPrintTemplates(data.templates || [])
-        if (data.templates?.length > 0) {
           setSelectedPrintTemplate(data.templates[0].id.toString())
         } else {
           setSelectedPrintTemplate('')
@@ -345,7 +332,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
       params.set('templateId', selectedPrintTemplate)
       params.set('useTemplate', 'true')
       params.set('recordId', selectedRecord.id.toString())
-      const res = await fetch(`/api/export/${table.name}/${printFormat === 'EXCEL' ? 'excel' : 'pdf'}?${params}`)
+      const res = await fetch(`/api/export/${table.name}/pdf?${params}`)
       if (res.ok) {
         const blob = await res.blob()
         const url = window.URL.createObjectURL(blob)
@@ -403,14 +390,25 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="outline" onClick={() => handleExport('excel')}>
-                <FileSpreadsheet className="w-4 h-4 mr-2" />
-                Excel
-              </Button>
-              <Button variant="outline" onClick={() => handleExport('pdf')}>
-                <FileText className="w-4 h-4 mr-2" />
-                PDF
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <Download className="w-4 h-4 mr-2" />
+                    导出
+                    <ChevronDown className="w-4 h-4 ml-2" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleExport('excel')}>
+                    <FileSpreadsheet className="w-4 h-4 mr-2" />
+                    导出 Excel
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                    <FileText className="w-4 h-4 mr-2" />
+                    导出 PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="outline" onClick={() => setColumnSettingOpen(true)} title="列设置">
                 <Settings2 className="w-4 h-4 mr-2" />
                 列设置
@@ -715,31 +713,10 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
           <DialogHeader>
             <DialogTitle>打印/预览</DialogTitle>
             <DialogDescription>
-              选择打印格式和模板
+              选择打印模板
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
-            <div>
-              <Label>打印格式</Label>
-              <div className="flex gap-2 mt-2">
-                <Button
-                  variant={printFormat === 'EXCEL' ? 'default' : 'outline'}
-                  className="flex-1"
-                  onClick={() => handlePrintFormatChange('EXCEL')}
-                >
-                  <FileSpreadsheet className="w-4 h-4 mr-2" />
-                  Excel
-                </Button>
-                <Button
-                  variant={printFormat === 'PDF' ? 'default' : 'outline'}
-                  className="flex-1"
-                  onClick={() => handlePrintFormatChange('PDF')}
-                >
-                  <FileText className="w-4 h-4 mr-2" />
-                  PDF
-                </Button>
-              </div>
-            </div>
             <div>
               <Label>选择模板</Label>
               <div className="flex gap-2 mt-2">
@@ -760,7 +737,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                       ))
                     ) : (
                       <SelectItem value="__empty__" disabled>
-                        暂无模板，请先创建导出模板
+                        暂无打印模板
                       </SelectItem>
                     )}
                   </SelectContent>
@@ -768,7 +745,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
               </div>
               {printTemplates.length === 0 && (
                 <p className="text-xs text-amber-600 mt-2">
-                  暂无该格式的模板，请先在"导出模板设计"中创建模板
+                  暂无打印模板，请先在"模板管理"中创建打印模板
                 </p>
               )}
             </div>
@@ -805,7 +782,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                     if (printPreviewUrl && selectedRecord) {
                       const a = document.createElement('a')
                       a.href = printPreviewUrl
-                      a.download = `${table.label}_记录${selectedRecord.id}.${printFormat === 'EXCEL' ? 'xlsx' : 'pdf'}`
+                      a.download = `${table.label}_记录${selectedRecord.id}.pdf`
                       a.click()
                     }
                   }}
