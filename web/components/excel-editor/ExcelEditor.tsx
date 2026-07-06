@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
-import Handsontable from 'handsontable'
+import { useState, useRef, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react'
+import { HotTable } from '@handsontable/react-wrapper'
+import type { HotTableRef } from '@handsontable/react-wrapper'
 import 'handsontable/styles/handsontable.min.css'
 import { TableField } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
@@ -55,158 +56,68 @@ const DEFAULT_COLS = 15
 const DEFAULT_COL_WIDTH = 100
 const DEFAULT_ROW_HEIGHT = 24
 
+function createDefaultData(): EditorConfig {
+  const data: any[][] = []
+  const styles: CellStyle[][] = []
+  const colWidths: number[] = []
+  const rowHeights: number[] = []
+
+  for (let i = 0; i < DEFAULT_ROWS; i++) {
+    data.push(new Array(DEFAULT_COLS).fill(''))
+    styles.push(new Array(DEFAULT_COLS).fill({}))
+    rowHeights.push(DEFAULT_ROW_HEIGHT)
+  }
+  for (let i = 0; i < DEFAULT_COLS; i++) {
+    colWidths.push(DEFAULT_COL_WIDTH)
+  }
+
+  return {
+    rows: DEFAULT_ROWS,
+    cols: DEFAULT_COLS,
+    data,
+    styles,
+    colWidths,
+    rowHeights,
+    mergedCells: [],
+    formulas: [],
+  }
+}
+
 export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
   ({ initialData, fields, onDataChange }, ref) => {
-    const containerRef = useRef<HTMLDivElement>(null)
-    const hotRef = useRef<Handsontable | null>(null)
-    const [data, setData] = useState<any[][]>([])
-    const [styles, setStyles] = useState<CellStyle[][]>([])
-    const [colWidths, setColWidths] = useState<number[]>([])
-    const [rowHeights, setRowHeights] = useState<number[]>([])
-    const [mergedCells, setMergedCells] = useState<any[]>([])
-    const [formulas, setFormulas] = useState<string[][]>([])
+    const hotTableRef = useRef<HotTableRef>(null)
+    const [config, setConfig] = useState<EditorConfig>(() => {
+      if (initialData && initialData.data && initialData.data.length > 0) {
+        return initialData
+      }
+      return createDefaultData()
+    })
+    const [isMounted, setIsMounted] = useState(false)
 
     useEffect(() => {
-      if (initialData) {
-        setData(initialData.data || [])
-        setStyles(initialData.styles || [])
-        setColWidths(initialData.colWidths || [])
-        setRowHeights(initialData.rowHeights || [])
-        setMergedCells(initialData.mergedCells || [])
-        setFormulas(initialData.formulas || [])
-      } else {
-        const newData: any[][] = []
-        const newStyles: CellStyle[][] = []
-        const newColWidths: number[] = []
-        const newRowHeights: number[] = []
-
-        for (let i = 0; i < DEFAULT_ROWS; i++) {
-          newData.push(new Array(DEFAULT_COLS).fill(''))
-          newStyles.push(new Array(DEFAULT_COLS).fill({}))
-          newRowHeights.push(DEFAULT_ROW_HEIGHT)
-        }
-        for (let i = 0; i < DEFAULT_COLS; i++) {
-          newColWidths.push(DEFAULT_COL_WIDTH)
-        }
-
-        setData(newData)
-        setStyles(newStyles)
-        setColWidths(newColWidths)
-        setRowHeights(newRowHeights)
-      }
-    }, [initialData])
-
-    useEffect(() => {
-      if (!containerRef.current) return
-
-      const hot = new Handsontable(containerRef.current, {
-        data: data,
-        colWidths: colWidths,
-        rowHeights: rowHeights,
-        mergedCells: mergedCells,
-        rowHeaders: true,
-        colHeaders: true,
-        contextMenu: true,
-        mergeCells: true,
-        autoRowSize: false,
-        autoColSize: false,
-        allowInsertRow: true,
-        allowInsertCol: true,
-        allowDeleteRow: true,
-        allowDeleteCol: true,
-        allowUndo: true,
-        allowRedo: true,
-        manualRowResize: true,
-        manualColumnResize: true,
-        manualRowMove: true,
-        manualColumnMove: true,
-        formulas: true,
-        licenseKey: 'non-commercial-and-evaluation',
-        afterChange: (changes: any) => {
-          if (!changes) return
-          const newData = JSON.parse(JSON.stringify(data))
-          const newFormulas = JSON.parse(JSON.stringify(formulas))
-          changes.forEach(([row, col, oldVal, newVal]: [number, number, any, any]) => {
-            if (row >= 0 && col >= 0 && row < newData.length && col < newData[0].length) {
-              newData[row][col] = newVal
-              if (typeof newVal === 'string' && newVal.startsWith('=')) {
-                if (!newFormulas[row]) newFormulas[row] = []
-                newFormulas[row][col] = newVal
-              } else if (newFormulas[row] && newFormulas[row][col]) {
-                delete newFormulas[row][col]
-              }
-            }
-          })
-          setData(newData)
-          setFormulas(newFormulas)
-          notifyChange(newData, styles, colWidths, rowHeights, mergedCells, newFormulas)
-        },
-        afterColumnResize: (column: number, width: number) => {
-          const newColWidths = [...colWidths]
-          newColWidths[column] = width
-          setColWidths(newColWidths)
-          notifyChange(data, styles, newColWidths, rowHeights, mergedCells, formulas)
-        },
-        afterRowResize: (row: number, height: number) => {
-          const newRowHeights = [...rowHeights]
-          newRowHeights[row] = height
-          setRowHeights(newRowHeights)
-          notifyChange(data, styles, colWidths, newRowHeights, mergedCells, formulas)
-        },
-        afterMergeCells: (cellRange: any, mergeParent: any, auto: boolean) => {
-          const merged = hot.getPlugin('mergeCells').mergedCellsCollection.mergedCells
-          setMergedCells(merged)
-          notifyChange(data, styles, colWidths, rowHeights, merged, formulas)
-        },
-        afterUnmergeCells: (cellRange: any, auto: boolean) => {
-          const merged = hot.getPlugin('mergeCells').mergedCellsCollection.mergedCells
-          setMergedCells(merged)
-          notifyChange(data, styles, colWidths, rowHeights, merged, formulas)
-        },
-        afterRemoveCellMeta: () => {
-          notifyChange(data, styles, colWidths, rowHeights, mergedCells, formulas)
-        },
-      })
-
-      hotRef.current = hot
-
-      return () => {
-        hot.destroy()
-      }
+      setIsMounted(true)
     }, [])
 
-    const notifyChange = useCallback((
-      newData: any[][],
-      newStyles: CellStyle[][],
-      newColWidths: number[],
-      newRowHeights: number[],
-      newMergedCells: any[],
-      newFormulas: string[][]
-    ) => {
+    const notifyChange = useCallback((newConfig: EditorConfig) => {
       if (onDataChange) {
-        onDataChange({
-          rows: newData.length,
-          cols: newData[0]?.length || DEFAULT_COLS,
-          data: newData,
-          styles: newStyles,
-          colWidths: newColWidths,
-          rowHeights: newRowHeights,
-          mergedCells: newMergedCells,
-          formulas: newFormulas,
-        })
+        onDataChange(newConfig)
       }
     }, [onDataChange])
 
+    const getHotInstance = useCallback(() => {
+      return hotTableRef.current?.hotInstance || null
+    }, [])
+
     const setCellStyle = useCallback((row: number, col: number, style: Partial<CellStyle>) => {
-      if (!hotRef.current) return
-      const hot = hotRef.current
+      const hot = getHotInstance()
+      if (!hot) return
+
       const cellMeta = hot.getCellMeta(row, col) as any
-      
       const ensureStyle = () => {
         if (!cellMeta.style) cellMeta.style = {}
         return cellMeta.style as Record<string, any>
       }
-      
+
       if (style.bold !== undefined) {
         const s = ensureStyle()
         s.fontWeight = style.bold ? 'bold' : 'normal'
@@ -245,74 +156,81 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
 
       hot.render()
 
-      const newStyles = JSON.parse(JSON.stringify(styles))
-      if (!newStyles[row]) newStyles[row] = []
-      newStyles[row][col] = { ...newStyles[row][col], ...style }
-      setStyles(newStyles)
-      notifyChange(data, newStyles, colWidths, rowHeights, mergedCells, formulas)
-    }, [styles, data, colWidths, rowHeights, mergedCells, formulas, notifyChange])
+      setConfig(prev => {
+        const newStyles = JSON.parse(JSON.stringify(prev.styles))
+        if (!newStyles[row]) newStyles[row] = []
+        newStyles[row][col] = { ...newStyles[row][col], ...style }
+        const newConfig = { ...prev, styles: newStyles }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [getHotInstance, notifyChange])
 
     const insertField = useCallback((fieldName: string, fieldLabel: string) => {
-      if (!hotRef.current) return
-      const selection = hotRef.current.getSelected() as unknown as number[]
+      const hot = getHotInstance()
+      if (!hot) return
+      const selection = hot.getSelected() as unknown as number[]
       if (!selection || selection.length < 4) return
-      
+
       const row = selection[0]
       const col = selection[1]
       const newValue = `{{${fieldName}}}`
-      hotRef.current.setDataAtCell(row, col, newValue)
-    }, [])
+      hot.setDataAtCell(row, col, newValue)
+    }, [getHotInstance])
 
     const getSelectedCell = useCallback(() => {
-      if (!hotRef.current) return null
-      const selection = hotRef.current.getSelected() as unknown as number[]
+      const hot = getHotInstance()
+      if (!hot) return null
+      const selection = hot.getSelected() as unknown as number[]
       if (!selection || selection.length < 4) return null
       return { row: selection[0], col: selection[1] }
-    }, [])
+    }, [getHotInstance])
 
     const mergeSelected = useCallback(() => {
-      if (!hotRef.current) return
-      const selection = hotRef.current.getSelected() as unknown as number[]
+      const hot = getHotInstance()
+      if (!hot) return
+      const selection = hot.getSelected() as unknown as number[]
       if (!selection || selection.length < 4) return
-      
+
       const startRow = selection[0]
       const startCol = selection[1]
       const endRow = selection[2]
       const endCol = selection[3]
-      const mergePlugin = hotRef.current.getPlugin('mergeCells')
+      const mergePlugin = hot.getPlugin('mergeCells') as any
       if (mergePlugin) {
         mergePlugin.merge(startRow, startCol, endRow, endCol)
       }
-    }, [])
+    }, [getHotInstance])
 
     const unmergeSelected = useCallback(() => {
-      if (!hotRef.current) return
-      const selection = hotRef.current.getSelected() as unknown as number[]
+      const hot = getHotInstance()
+      if (!hot) return
+      const selection = hot.getSelected() as unknown as number[]
       if (!selection || selection.length < 4) return
-      
+
       const startRow = selection[0]
       const startCol = selection[1]
       const endRow = selection[2]
       const endCol = selection[3]
-      const mergePlugin = hotRef.current.getPlugin('mergeCells')
+      const mergePlugin = hot.getPlugin('mergeCells') as any
       if (mergePlugin) {
         mergePlugin.unmerge(startRow, startCol, endRow, endCol)
       }
-    }, [])
+    }, [getHotInstance])
 
-    const importFromExcel = useCallback(async (file: File) => {
+    const importFromExcel = useCallback(async (file: File): Promise<boolean> => {
       try {
         const arrayBuffer = await file.arrayBuffer()
         const workbook = new ExcelJS.Workbook()
         await workbook.xlsx.load(arrayBuffer as ArrayBuffer)
-        
+
         const worksheet = workbook.worksheets[0]
         if (!worksheet) {
           throw new Error('Excel文件中没有工作表')
         }
 
-        const rowCount = worksheet.rowCount || DEFAULT_ROWS
-        const colCount = worksheet.columnCount || DEFAULT_COLS
+        const rowCount = Math.max(worksheet.rowCount || DEFAULT_ROWS, DEFAULT_ROWS)
+        const colCount = Math.max(worksheet.columnCount || DEFAULT_COLS, DEFAULT_COLS)
         const newData: any[][] = []
         const newStyles: CellStyle[][] = []
         const newColWidths: number[] = []
@@ -323,7 +241,7 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
           const cellStyles: CellStyle[] = []
           const rowData = worksheet.getRow(r)
           newRowHeights.push(rowData.height || DEFAULT_ROW_HEIGHT)
-          
+
           for (let c = 1; c <= colCount; c++) {
             const cellData = rowData.getCell(c)
             row.push(cellData.value?.toString() || '')
@@ -347,44 +265,41 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
           newColWidths.push((worksheet.getColumn(c).width || DEFAULT_COL_WIDTH) * 10)
         }
 
-        setData(newData)
-        setStyles(newStyles)
-        setColWidths(newColWidths)
-        setRowHeights(newRowHeights)
-        setMergedCells([])
-
-        if (hotRef.current) {
-          hotRef.current.loadData(newData)
-          hotRef.current.updateSettings({
-            colWidths: newColWidths,
-            rowHeights: newRowHeights,
-            mergedCells: [],
-          })
+        const newConfig: EditorConfig = {
+          rows: rowCount,
+          cols: colCount,
+          data: newData,
+          styles: newStyles,
+          colWidths: newColWidths,
+          rowHeights: newRowHeights,
+          mergedCells: [],
+          formulas: config.formulas,
         }
 
-        notifyChange(newData, newStyles, newColWidths, newRowHeights, [], formulas)
+        setConfig(newConfig)
+        notifyChange(newConfig)
         return true
       } catch (error) {
         console.error('Import Excel error:', error)
         return false
       }
-    }, [formulas, notifyChange])
+    }, [config.formulas, notifyChange])
 
     const exportToExcel = useCallback(async (): Promise<Blob | null> => {
       try {
         const workbook = new ExcelJS.Workbook()
         const worksheet = workbook.addWorksheet('模板')
 
-        data.forEach((rowData, rowIndex) => {
+        config.data.forEach((rowData, rowIndex) => {
           const row = worksheet.addRow(rowData)
-          if (rowHeights[rowIndex]) {
-            row.height = rowHeights[rowIndex]
+          if (config.rowHeights[rowIndex]) {
+            row.height = config.rowHeights[rowIndex]
           }
-          
+
           rowData.forEach((cellData, colIndex) => {
             const cell = row.getCell(colIndex + 1)
-            const cellStyle = styles[rowIndex]?.[colIndex]
-            
+            const cellStyle = config.styles[rowIndex]?.[colIndex]
+
             if (cellStyle) {
               if (cellStyle.bold || cellStyle.italic || cellStyle.underline || cellStyle.fontSize || cellStyle.textColor) {
                 cell.font = {
@@ -411,17 +326,17 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
               }
             }
 
-            if (formulas[rowIndex]?.[colIndex]) {
-              cell.value = { formula: formulas[rowIndex][colIndex].replace('=', '') }
+            if (config.formulas[rowIndex]?.[colIndex]) {
+              cell.value = { formula: config.formulas[rowIndex][colIndex].replace('=', '') }
             }
           })
         })
 
-        colWidths.forEach((width, index) => {
+        config.colWidths.forEach((width, index) => {
           worksheet.getColumn(index + 1).width = width / 10
         })
 
-        mergedCells.forEach((merge: any) => {
+        config.mergedCells.forEach((merge: any) => {
           worksheet.mergeCells(
             merge.row + 1,
             merge.col + 1,
@@ -436,56 +351,151 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
         console.error('Export Excel error:', error)
         return null
       }
-    }, [data, styles, colWidths, rowHeights, mergedCells, formulas])
+    }, [config])
 
     const addRow = useCallback(() => {
-      if (!hotRef.current) return
-      hotRef.current.alter('insert_row', hotRef.current.countRows())
-      const newRowHeights = [...rowHeights]
-      newRowHeights.push(DEFAULT_ROW_HEIGHT)
-      setRowHeights(newRowHeights)
-    }, [rowHeights])
+      const hot = getHotInstance()
+      if (!hot) return
+      hot.alter('insert_row', hot.countRows())
+      setConfig(prev => {
+        const newRowHeights = [...prev.rowHeights, DEFAULT_ROW_HEIGHT]
+        const newData = [...prev.data, new Array(prev.cols).fill('')]
+        const newStyles = [...prev.styles, new Array(prev.cols).fill({})]
+        const newConfig = { ...prev, rows: prev.rows + 1, data: newData, styles: newStyles, rowHeights: newRowHeights }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [getHotInstance, notifyChange])
 
     const addCol = useCallback(() => {
-      if (!hotRef.current) return
-      hotRef.current.alter('insert_col', hotRef.current.countCols())
-      const newColWidths = [...colWidths]
-      newColWidths.push(DEFAULT_COL_WIDTH)
-      setColWidths(newColWidths)
-    }, [colWidths])
+      const hot = getHotInstance()
+      if (!hot) return
+      hot.alter('insert_col', hot.countCols())
+      setConfig(prev => {
+        const newColWidths = [...prev.colWidths, DEFAULT_COL_WIDTH]
+        const newData = prev.data.map(row => [...row, ''])
+        const newStyles = prev.styles.map(row => [...row, {}])
+        const newConfig = { ...prev, cols: prev.cols + 1, data: newData, styles: newStyles, colWidths: newColWidths }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [getHotInstance, notifyChange])
 
     const deleteRow = useCallback(() => {
-      if (!hotRef.current) return
-      const selection = hotRef.current.getSelected() as unknown as number[]
+      const hot = getHotInstance()
+      if (!hot) return
+      const selection = hot.getSelected() as unknown as number[]
       if (!selection) return
-      hotRef.current.alter('remove_row', selection[0])
-      const newRowHeights = [...rowHeights]
-      newRowHeights.splice(selection[0], 1)
-      setRowHeights(newRowHeights)
-    }, [rowHeights])
+      hot.alter('remove_row', selection[0])
+      setConfig(prev => {
+        const newRowHeights = [...prev.rowHeights]
+        newRowHeights.splice(selection[0], 1)
+        const newData = [...prev.data]
+        newData.splice(selection[0], 1)
+        const newStyles = [...prev.styles]
+        newStyles.splice(selection[0], 1)
+        const newConfig = { ...prev, rows: prev.rows - 1, data: newData, styles: newStyles, rowHeights: newRowHeights }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [getHotInstance, notifyChange])
 
     const deleteCol = useCallback(() => {
-      if (!hotRef.current) return
-      const selection = hotRef.current.getSelected() as unknown as number[]
+      const hot = getHotInstance()
+      if (!hot) return
+      const selection = hot.getSelected() as unknown as number[]
       if (!selection) return
-      hotRef.current.alter('remove_col', selection[1])
-      const newColWidths = [...colWidths]
-      newColWidths.splice(selection[1], 1)
-      setColWidths(newColWidths)
-    }, [colWidths])
+      hot.alter('remove_col', selection[1])
+      setConfig(prev => {
+        const newColWidths = [...prev.colWidths]
+        newColWidths.splice(selection[1], 1)
+        const newData = prev.data.map(row => {
+          const newRow = [...row]
+          newRow.splice(selection[1], 1)
+          return newRow
+        })
+        const newStyles = prev.styles.map(row => {
+          const newRow = [...row]
+          newRow.splice(selection[1], 1)
+          return newRow
+        })
+        const newConfig = { ...prev, cols: prev.cols - 1, data: newData, styles: newStyles, colWidths: newColWidths }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [getHotInstance, notifyChange])
 
     const getData = useCallback((): EditorConfig => {
-      return {
-        rows: data.length,
-        cols: data[0]?.length || DEFAULT_COLS,
-        data: data,
-        styles: styles,
-        colWidths: colWidths,
-        rowHeights: rowHeights,
-        mergedCells: mergedCells,
-        formulas: formulas,
-      }
-    }, [data, styles, colWidths, rowHeights, mergedCells, formulas])
+      return config
+    }, [config])
+
+    const handleAfterChange = useCallback((changes: any, source: string) => {
+      if (!changes || source === 'loadData') return
+      setConfig(prev => {
+        const newData = JSON.parse(JSON.stringify(prev.data))
+        const newFormulas = JSON.parse(JSON.stringify(prev.formulas || []))
+        changes.forEach(([row, col, oldVal, newVal]: [number, number, any, any]) => {
+          if (row >= 0 && col >= 0 && row < newData.length && col < newData[0].length) {
+            newData[row][col] = newVal
+            if (typeof newVal === 'string' && newVal.startsWith('=')) {
+              if (!newFormulas[row]) newFormulas[row] = []
+              newFormulas[row][col] = newVal
+            } else if (newFormulas[row] && newFormulas[row][col]) {
+              delete newFormulas[row][col]
+            }
+          }
+        })
+        const newConfig = { ...prev, data: newData, formulas: newFormulas }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [notifyChange])
+
+    const handleAfterColumnResize = useCallback((column: number, width: number) => {
+      setConfig(prev => {
+        const newColWidths = [...prev.colWidths]
+        newColWidths[column] = width
+        const newConfig = { ...prev, colWidths: newColWidths }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [notifyChange])
+
+    const handleAfterRowResize = useCallback((row: number, height: number) => {
+      setConfig(prev => {
+        const newRowHeights = [...prev.rowHeights]
+        newRowHeights[row] = height
+        const newConfig = { ...prev, rowHeights: newRowHeights }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [notifyChange])
+
+    const handleAfterMergeCells = useCallback(() => {
+      const hot = getHotInstance()
+      if (!hot) return
+      const mergePlugin = hot.getPlugin('mergeCells') as any
+      if (!mergePlugin) return
+      const merged = mergePlugin.mergedCellsCollection.mergedCells
+      setConfig(prev => {
+        const newConfig = { ...prev, mergedCells: merged }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [getHotInstance, notifyChange])
+
+    const handleAfterUnmergeCells = useCallback(() => {
+      const hot = getHotInstance()
+      if (!hot) return
+      const mergePlugin = hot.getPlugin('mergeCells') as any
+      if (!mergePlugin) return
+      const merged = mergePlugin.mergedCellsCollection.mergedCells
+      setConfig(prev => {
+        const newConfig = { ...prev, mergedCells: merged }
+        notifyChange(newConfig)
+        return newConfig
+      })
+    }, [getHotInstance, notifyChange])
 
     useImperativeHandle(ref, () => ({
       setCellStyle,
@@ -502,8 +512,45 @@ export const ExcelEditor = forwardRef<ExcelEditorHandle, ExcelEditorProps>(
       getData,
     }))
 
+    if (!isMounted) {
+      return <div className="w-full" style={{ height: '500px' }} />
+    }
+
     return (
-      <div ref={containerRef} className="w-full" style={{ height: '500px' }} />
+      <div style={{ width: '100%', height: '500px', overflow: 'hidden' }}>
+        <HotTable
+          ref={hotTableRef}
+          data={config.data}
+          colWidths={config.colWidths}
+          rowHeights={config.rowHeights}
+          mergedCells={config.mergedCells}
+          rowHeaders={true}
+          colHeaders={true}
+          contextMenu={true}
+          mergeCells={true}
+          autoRowSize={false}
+          autoColSize={false}
+          allowInsertRow={true}
+          allowInsertCol={true}
+          allowDeleteRow={true}
+          allowDeleteCol={true}
+          allowUndo={true}
+          allowRedo={true}
+          manualRowResize={true}
+          manualColumnResize={true}
+          manualRowMove={true}
+          manualColumnMove={true}
+          formulas={false}
+          licenseKey="non-commercial-and-evaluation"
+          width="100%"
+          height="100%"
+          afterChange={handleAfterChange}
+          afterColumnResize={handleAfterColumnResize}
+          afterRowResize={handleAfterRowResize}
+          afterMergeCells={handleAfterMergeCells}
+          afterUnmergeCells={handleAfterUnmergeCells}
+        />
+      </div>
     )
   }
 )

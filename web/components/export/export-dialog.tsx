@@ -25,7 +25,7 @@ import {
   Eye,
   Printer,
 } from 'lucide-react'
-import { DataTable, TableField, ExportType, ExportFormat } from '@prisma/client'
+import { DataTable, TableField, ExportType, TemplateCategory } from '@prisma/client'
 
 interface ExportDialogProps {
   open: boolean
@@ -42,7 +42,7 @@ interface ExportTemplate {
   id: number
   name: string
   type: ExportType
-  format: ExportFormat
+  category: TemplateCategory
   description: string | null
   config: any
   isDefault: boolean
@@ -64,15 +64,9 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
     }
   }, [open])
 
-  useEffect(() => {
-    if (open) {
-      fetchTemplates()
-    }
-  }, [open])
-
   const fetchTemplates = async () => {
     try {
-      const res = await fetch(`/api/export-templates?tableId=${table.id}&format=EXCEL`)
+      const res = await fetch(`/api/export-templates?tableId=${table.id}&category=EXPORT`)
       if (res.ok) {
         const data = await res.json()
         setTemplates(data.templates || [])
@@ -118,10 +112,17 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
         window.URL.revokeObjectURL(url)
         onOpenChange(false)
       } else {
-        alert('导出失败')
+        let errorMsg = '导出失败'
+        try {
+          const json = await res.json()
+          if (json.message) errorMsg = json.message
+        } catch (e) {
+          errorMsg = `导出失败 (${res.status})`
+        }
+        alert(errorMsg)
       }
-    } catch (err) {
-      alert('导出失败')
+    } catch (err: any) {
+      alert(`导出失败: ${err.message || err}`)
     } finally {
       setExporting(false)
     }
@@ -140,10 +141,17 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
         setPreviewUrl(url)
         setPreviewOpen(true)
       } else {
-        alert('预览失败')
+        let errorMsg = '预览失败'
+        try {
+          const json = await res.json()
+          if (json.message) errorMsg = json.message
+        } catch (e) {
+          errorMsg = `预览失败 (${res.status})`
+        }
+        alert(errorMsg)
       }
-    } catch (err) {
-      alert('预览失败')
+    } catch (err: any) {
+      alert(`预览失败: ${err.message || err}`)
     }
   }
 
@@ -220,7 +228,7 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
               </div>
               {templates.length === 0 && (
                 <p className="text-xs text-amber-600 mt-2">
-                  暂无该格式的模板，请先在"导出模板设计"中创建模板
+                  暂无导出模板，请先在"模板管理"中创建导出模板
                 </p>
               )}
             </div>

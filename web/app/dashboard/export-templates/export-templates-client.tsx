@@ -46,9 +46,11 @@ import {
   FileCheck,
   Share2,
   Check,
+  Printer,
+  Download,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
-import { ExportType, ExportFormat, DataTable, TableField, ExportTemplate } from '@prisma/client'
+import { ExportType, TemplateCategory, DataTable, TableField, ExportTemplate } from '@prisma/client'
 
 interface TemplateWithTable extends ExportTemplate {
   table: {
@@ -81,14 +83,20 @@ const typeLabels: Record<string, string> = {
   FORM: '表单式',
 }
 
-const formatLabels: Record<string, string> = {
-  EXCEL: 'Excel',
-  PDF: 'PDF',
+const categoryLabels: Record<string, string> = {
+  EXPORT: '导出模板',
+  PRINT: '打印模板',
+}
+
+const categoryIcons: Record<string, any> = {
+  EXPORT: Download,
+  PRINT: Printer,
 }
 
 export function ExportTemplatesClient({ initialTemplates, tables }: ExportTemplatesClientProps) {
   const router = useRouter()
   const [templates, setTemplates] = useState<TemplateWithTable[]>(initialTemplates)
+  const [activeCategory, setActiveCategory] = useState<TemplateCategory>('EXPORT')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
@@ -98,7 +106,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
     name: '',
     tableId: '',
     type: 'STANDARD' as ExportType,
-    format: 'EXCEL' as ExportFormat,
+    category: 'EXPORT' as TemplateCategory,
     description: '',
   })
 
@@ -132,7 +140,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
       if (res.ok) {
         const data = await res.json()
         setDialogOpen(false)
-        setFormData({ name: '', tableId: '', type: 'STANDARD', format: 'EXCEL', description: '' })
+        setFormData({ name: '', tableId: '', type: 'STANDARD', category: activeCategory, description: '' })
         router.push(`/dashboard/export-templates/${data.template.id}`)
       } else {
         const data = await res.json()
@@ -223,21 +231,21 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">导出模板管理</h1>
-          <p className="text-gray-500 mt-1">可视化设计 Excel 和 PDF 导出模板</p>
+          <h1 className="text-2xl font-bold text-gray-900">模板管理</h1>
+          <p className="text-gray-500 mt-1">可视化设计导出和打印模板</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button onClick={() => setFormData({ ...formData, category: activeCategory })}>
               <Plus className="w-4 h-4 mr-2" />
               新建模板
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>新建导出模板</DialogTitle>
+              <DialogTitle>新建模板</DialogTitle>
               <DialogDescription>
-                创建一个新的导出模板，之后可以在设计器中自定义样式和字段。
+                创建一个新的模板，之后可以在设计器中自定义样式和字段。
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -249,6 +257,18 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>模板分类</Label>
+                <Select value={formData.category} onValueChange={(v: TemplateCategory) => setFormData({ ...formData, category: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="EXPORT">导出模板</SelectItem>
+                    <SelectItem value="PRINT">打印模板</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="tableId">所属数据表</Label>
@@ -266,7 +286,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>导出类型</Label>
+                <Label>模板类型</Label>
                 <Select value={formData.type} onValueChange={(v: ExportType) => setFormData({ ...formData, type: v })}>
                   <SelectTrigger>
                     <SelectValue />
@@ -302,10 +322,34 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">模板列表</CardTitle>
+        <CardHeader className="pb-0">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg">模板列表</CardTitle>
+          </div>
+          <div className="flex gap-1 mt-4 -mb-px border-b">
+            {Object.entries(categoryLabels).map(([key, label]) => {
+              const CatIcon = categoryIcons[key]
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveCategory(key as TemplateCategory)}
+                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeCategory === key
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <CatIcon className="w-4 h-4" />
+                  {label}
+                  <Badge variant="secondary" className="text-xs ml-1">
+                    {templates.filter(t => t.category === key).length}
+                  </Badge>
+                </button>
+              )
+            })}
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4">
           <Table>
             <TableHeader>
               <TableRow>
@@ -319,8 +363,8 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
               </TableRow>
             </TableHeader>
             <TableBody>
-              {templates.length > 0 ? (
-                templates.map((template) => {
+              {templates.filter(t => t.category === activeCategory).length > 0 ? (
+                templates.filter(t => t.category === activeCategory).map((template) => {
                   const TypeIcon = typeIcons[template.type] || TableIcon
                   return (
                     <TableRow key={template.id}>
@@ -405,9 +449,9 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+                  <TableCell colSpan={7} className="text-center py-12 text-gray-500">
                     <Palette className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>暂无导出模板，点击右上角创建</p>
+                    <p>暂无{categoryLabels[activeCategory]}，点击右上角创建</p>
                   </TableCell>
                 </TableRow>
               )}

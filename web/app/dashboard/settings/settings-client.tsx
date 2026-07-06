@@ -17,6 +17,7 @@ import {
   Shield,
   Settings2,
   Clock,
+  AlertCircle,
 } from 'lucide-react'
 import { Role } from '@prisma/client'
 
@@ -124,6 +125,13 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
       description: '查看系统操作记录和审计日志',
       href: '/dashboard/logs',
       icon: Activity,
+      adminOnly: true,
+    },
+    {
+      title: '错误日志',
+      description: '查看系统运行时错误和异常记录',
+      href: '/dashboard/error-logs',
+      icon: AlertCircle,
       adminOnly: true,
     },
   ]

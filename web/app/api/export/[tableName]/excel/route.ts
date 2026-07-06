@@ -16,8 +16,14 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { tableName: string } }
 ) {
+  let user: any = null
+  let table: any = null
+  let templateId: string | null = null
+  let useTemplate: boolean = false
+  let search: string = ''
+  let status: string = ''
   try {
-    const user = await getCurrentUser()
+    user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ message: '未登录' }, { status: 401 })
     }
@@ -41,12 +47,12 @@ export async function GET(
     }
 
     const { searchParams } = new URL(req.url)
-    const search = searchParams.get('search') || ''
-    const status = searchParams.get('status') || ''
+    search = searchParams.get('search') || ''
+    status = searchParams.get('status') || ''
     const type = (searchParams.get('type') as ExportType) || ExportType.STANDARD
-    const templateId = searchParams.get('templateId')
+    templateId = searchParams.get('templateId')
     const fieldsParam = searchParams.get('fields')
-    const useTemplate = searchParams.get('useTemplate') === 'true'
+    useTemplate = searchParams.get('useTemplate') === 'true'
     const recordId = searchParams.get('recordId')
 
     const where: any = { tableId: table.id }
@@ -113,15 +119,64 @@ export async function GET(
       FORM: '表单式',
     }
 
+    const fileName = `${table.label}_${typeNames[type] || '导出'}_${new Date().toISOString().slice(0, 10)}.xlsx`
+
+    try {
+      await prisma.operationLog.create({
+        data: {
+          userId: user.id,
+          action: 'EXPORT_EXCEL',
+          module: 'EXPORT',
+          tableId: table.id,
+          detail: {
+            templateId,
+            useTemplate,
+            recordCount: records.length,
+            fileName,
+          },
+          ipAddress: req.headers.get('x-forwarded-for') || req.headers.get('remote-address') || null,
+          userAgent: req.headers.get('user-agent') || null,
+        },
+      })
+    } catch (logError) {
+      console.error('Failed to log export:', logError)
+    }
+
     return new NextResponse(buffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(table.label)}_${typeNames[type] || '导出'}_${new Date().toISOString().slice(0, 10)}.xlsx"`,
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       },
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Export Excel error:', error)
+    try {
+      await prisma.errorLog.create({
+        data: {
+          userId: user?.id || null,
+          level: 'ERROR',
+          module: 'EXPORT',
+          action: 'EXPORT_EXCEL',
+          message: error.message || '导出Excel失败',
+          stackTrace: error.stack,
+          requestUrl: req.url,
+          requestMethod: req.method,
+          requestParams: {
+            tableName: params.tableName,
+            templateId,
+            useTemplate,
+            search,
+            status,
+          },
+          tableId: table?.id || null,
+          ipAddress: req.headers.get('x-forwarded-for') || req.headers.get('remote-address'),
+          userAgent: req.headers.get('user-agent'),
+        },
+      })
+    } catch (logError) {
+      console.error('Failed to log error:', logError)
+    }
     return NextResponse.json({ message: '导出失败' }, { status: 500 })
   }
 }
@@ -430,16 +485,48 @@ async function exportTemplateExcel(
   templateMeta: any
 ) {
   const grid = config.grid || []
-  const styles = config.styles || []
   const colWidths = config.colWidths || []
   const rowHeights = config.rowHeights || []
-  const mergedCells = config.mergedCells || []
-  const formulas = config.formulas || []
+  const pageSetup = config.pageSetup || {}
   
   const worksheet = workbook.addWorksheet(templateMeta?.name || table.label)
 
+  if (pageSetup.paperSize) {
+    const paperSizeMap: Record<string, any> = { 'A4': 9, 'A3': 8, 'Letter': 1 }
+    worksheet.pageSetup.paperSize = paperSizeMap[pageSetup.paperSize] || 9
+  }
+  if (pageSetup.orientation) {
+    worksheet.pageSetup.orientation = pageSetup.orientation
+  }
+  if (pageSetup.marginTop !== undefined || pageSetup.marginBottom !== undefined || 
+      pageSetup.marginLeft !== undefined || pageSetup.marginRight !== undefined ||
+      pageSetup.headerMargin !== undefined || pageSetup.footerMargin !== undefined) {
+    const pgSetup = worksheet.pageSetup as any
+    pgSetup.margins = pgSetup.margins || {}
+    if (pageSetup.marginTop !== undefined) pgSetup.margins.top = pageSetup.marginTop
+    if (pageSetup.marginBottom !== undefined) pgSetup.margins.bottom = pageSetup.marginBottom
+    if (pageSetup.marginLeft !== undefined) pgSetup.margins.left = pageSetup.marginLeft
+    if (pageSetup.marginRight !== undefined) pgSetup.margins.right = pageSetup.marginRight
+    if (pageSetup.headerMargin !== undefined) pgSetup.margins.header = pageSetup.headerMargin
+    if (pageSetup.footerMargin !== undefined) pgSetup.margins.footer = pageSetup.footerMargin
+  }
+  if (pageSetup.printTitleRows) {
+    const match = pageSetup.printTitleRows.match(/(\d+):(\d+)/)
+    if (match) {
+      const start = parseInt(match[1])
+      const end = parseInt(match[2])
+      try {
+        (worksheet.pageSetup as any).printTitlesRow = `${start}:${end}`
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
   const maxRow = grid.length
   const maxCol = grid[0]?.length || 0
+
+  const mergeCells: { row: number; col: number; rowspan: number; colspan: number }[] = []
 
   for (let r = 0; r < maxRow; r++) {
     const row = worksheet.getRow(r + 1)
@@ -449,56 +536,65 @@ async function exportTemplateExcel(
       const cellData = grid[r]?.[c]
       if (!cellData) continue
 
+      if (cellData.mergeHidden) continue
+
       let cellValue = cellData.value || ''
 
-      const cellStyle = styles[r]?.[c] || {}
-      
-      if (cellStyle.bold || cellStyle.italic || cellStyle.underline || cellStyle.fontSize || cellStyle.textColor) {
+      if (cellData.bold || cellData.italic || cellData.underline || cellData.fontSize || cellData.textColor) {
         cell.font = {
-          bold: cellStyle.bold,
-          italic: cellStyle.italic,
-          underline: cellStyle.underline ? 'single' : undefined,
-          size: cellStyle.fontSize,
-          color: cellStyle.textColor ? { argb: 'FF' + cellStyle.textColor.replace('#', '').toUpperCase() } : undefined,
+          bold: cellData.bold,
+          italic: cellData.italic,
+          underline: cellData.underline ? 'single' : undefined,
+          size: cellData.fontSize,
+          color: cellData.textColor ? { argb: 'FF' + cellData.textColor.replace('#', '').toUpperCase() } : undefined,
         }
       }
 
-      if (cellStyle.bgColor) {
+      if (cellData.bgColor) {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: 'FF' + cellStyle.bgColor.replace('#', '').toUpperCase() },
+          fgColor: { argb: 'FF' + cellData.bgColor.replace('#', '').toUpperCase() },
         }
       }
 
-      if (cellStyle.align || cellStyle.verticalAlign || cellStyle.wrapText) {
+      if (cellData.align || cellData.verticalAlign || cellData.wrapText) {
         cell.alignment = {
-          horizontal: cellStyle.align as any,
-          vertical: cellStyle.verticalAlign as any || 'middle',
-          wrapText: cellStyle.wrapText,
+          horizontal: cellData.align as any,
+          vertical: cellData.verticalAlign as any || 'middle',
+          wrapText: cellData.wrapText,
         }
       }
 
-      if (formulas[r]?.[c]) {
-        cell.value = { formula: formulas[r][c].replace('=', '') }
+      if (cellData.borderTop || cellData.borderBottom || cellData.borderLeft || cellData.borderRight) {
+        cell.border = {
+          top: cellData.borderTop ? { style: 'thin' } : undefined,
+          bottom: cellData.borderBottom ? { style: 'thin' } : undefined,
+          left: cellData.borderLeft ? { style: 'thin' } : undefined,
+          right: cellData.borderRight ? { style: 'thin' } : undefined,
+        }
+      }
+
+      if (cellData.formula) {
+        cell.value = { formula: cellData.formula.replace('=', '') }
       } else {
         cell.value = cellValue
+      }
+
+      if ((cellData.rowSpan && cellData.rowSpan > 1) || (cellData.colSpan && cellData.colSpan > 1)) {
+        mergeCells.push({
+          row: r,
+          col: c,
+          rowspan: cellData.rowSpan || 1,
+          colspan: cellData.colSpan || 1,
+        })
       }
     }
   }
 
   for (let c = 0; c < maxCol; c++) {
-    worksheet.getColumn(c + 1).width = (colWidths[c] || 150) / 10
+    worksheet.getColumn(c + 1).width = (colWidths[c] || 100) / 7
   }
-
-  mergedCells.forEach((merge: any) => {
-    worksheet.mergeCells(
-      merge.row + 1,
-      merge.col + 1,
-      merge.row + merge.rowspan,
-      merge.col + merge.colspan
-    )
-  })
 
   const firstRecord = records[0]
   const firstData = firstRecord?.data as Record<string, any> || {}
@@ -563,6 +659,7 @@ async function exportTemplateExcel(
           for (let c = 0; c < maxCol; c++) {
             const sourceCell = worksheet.getCell(sourceRowIdx, c + 1)
             const targetCell = targetRow.getCell(c + 1)
+            const sourceCellData = grid[r]?.[c]
 
             if (sourceCell.font) {
               targetCell.font = { ...sourceCell.font }
@@ -572,6 +669,9 @@ async function exportTemplateExcel(
             }
             if (sourceCell.alignment) {
               targetCell.alignment = { ...sourceCell.alignment }
+            }
+            if (sourceCell.border) {
+              targetCell.border = { ...sourceCell.border }
             }
 
             let value = sourceCell.value?.toString() || ''
@@ -598,9 +698,29 @@ async function exportTemplateExcel(
             }
 
             targetCell.value = value
+
+            if (sourceCellData && ((sourceCellData.rowSpan && sourceCellData.rowSpan > 1) || (sourceCellData.colSpan && sourceCellData.colSpan > 1))) {
+              const mergeRow = targetRowIdx - 1
+              const mergeCol = c
+              mergeCells.push({
+                row: mergeRow,
+                col: mergeCol,
+                rowspan: sourceCellData.rowSpan || 1,
+                colspan: sourceCellData.colSpan || 1,
+              })
+            }
           }
         }
       }
     }
   }
+
+  mergeCells.forEach((merge) => {
+    worksheet.mergeCells(
+      merge.row + 1,
+      merge.col + 1,
+      merge.row + merge.rowspan,
+      merge.col + merge.colspan
+    )
+  })
 }

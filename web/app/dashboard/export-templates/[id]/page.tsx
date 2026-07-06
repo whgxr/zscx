@@ -1,12 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { EmbeddedTemplateDesigner } from './embedded-designer'
-import { TemplateDesigner } from './template-designer'
-import Link from 'next/link'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { ArrowLeft } from 'lucide-react'
+import { ExcelTemplateDesigner } from './excel-designer'
 
 export default async function TemplateDetailPage({
   params,
@@ -40,9 +35,5 @@ export default async function TemplateDetailPage({
     redirect('/dashboard/export-templates')
   }
 
-  if (template.format === 'EXCEL') {
-    return <EmbeddedTemplateDesigner template={template as any} />
-  }
-
-  return <TemplateDesigner template={template as any} />
+  return <ExcelTemplateDesigner template={template as any} />
 }
