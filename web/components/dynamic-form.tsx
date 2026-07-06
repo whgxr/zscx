@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -16,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Upload, X, Image as ImageIcon, File, Loader2 } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
+import { FormLayoutConfig } from './form-layout-designer'
 
 interface ImageInfo {
   url: string
@@ -157,14 +159,20 @@ interface DynamicFormProps {
   values: Record<string, any>
   onChange: (values: Record<string, any>) => void
   disabled?: boolean
+  layoutConfig?: FormLayoutConfig | null
 }
 
-export function DynamicForm({ fields, values, onChange, disabled }: DynamicFormProps) {
+export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }: DynamicFormProps) {
   const formFields = fields.filter(f => f.showInForm)
 
   const handleChange = (name: string, value: any) => {
     onChange({ ...values, [name]: value })
   }
+
+  const hasValidLayout = layoutConfig && layoutConfig.groups && layoutConfig.groups.length > 0
+
+  const getFieldById = (fieldId: number) => fields.find(f => f.id === fieldId)
+  const getFieldByName = (fieldName: string) => fields.find(f => f.name === fieldName)
 
   const handleFileUpload = async (fieldName: string, file: File) => {
     const formData = new FormData()
@@ -378,6 +386,48 @@ export function DynamicForm({ fields, values, onChange, disabled }: DynamicFormP
           />
         )
     }
+  }
+
+  const renderFieldWithLabel = (field: TableField, span?: 1 | 2) => (
+    <div key={field.id} className={cn(
+      "space-y-2",
+      span === 2 ? "col-span-2" : "",
+      field.type === FieldType.UPLOAD_IMAGE || field.type === FieldType.UPLOAD_FILE ? "col-span-2" : ""
+    )}>
+      <Label className="flex items-center gap-1">
+        {field.label}
+        {field.required && <span className="text-red-500">*</span>}
+      </Label>
+      {renderField(field)}
+      {field.description && (
+        <p className="text-xs text-gray-500">{field.description}</p>
+      )}
+    </div>
+  )
+
+  if (hasValidLayout) {
+    return (
+      <div className="space-y-6">
+        {layoutConfig!.groups.map((group) => (
+          <Card key={group.id}>
+            {group.title && (
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">{group.title}</CardTitle>
+              </CardHeader>
+            )}
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {group.fields.map((fieldConfig) => {
+                  const field = getFieldById(fieldConfig.fieldId) || getFieldByName(fieldConfig.fieldName)
+                  if (!field || !field.showInForm) return null
+                  return renderFieldWithLabel(field, fieldConfig.span)
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    )
   }
 
   return (

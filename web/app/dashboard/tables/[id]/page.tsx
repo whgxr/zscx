@@ -32,9 +32,14 @@ export default async function TableDesignerPage({
     },
   })
 
-  if (!table) {
+  const tableWithConfig = table ? {
+    ...table,
+    formLayoutConfig: (table as any).formLayoutConfig,
+  } : null
+
+  if (!tableWithConfig) {
     redirect('/dashboard/tables')
   }
 
-  return <FieldDesigner table={table} userRole={user.role} />
+  return <FieldDesigner table={tableWithConfig} userRole={user.role} />
 }

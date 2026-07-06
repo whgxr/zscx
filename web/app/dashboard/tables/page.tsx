@@ -17,11 +17,21 @@ export default async function TablesPage() {
   const tables = await prisma.dataTable.findMany({
     orderBy: { sortOrder: 'asc' },
     include: {
+      category: true,
       _count: {
         select: { fields: true, records: true },
       },
     },
   })
 
-  return <TablesClient initialTables={tables} userRole={user.role} />
+  const categories = await prisma.tableCategory.findMany({
+    orderBy: { sortOrder: 'asc' },
+    include: {
+      _count: {
+        select: { tables: true },
+      },
+    },
+  })
+
+  return <TablesClient initialTables={tables} initialCategories={categories} userRole={user.role} />
 }

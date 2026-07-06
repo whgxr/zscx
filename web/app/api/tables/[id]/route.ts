@@ -8,8 +8,10 @@ const updateTableSchema = z.object({
   label: z.string().min(1, '显示名称不能为空').optional(),
   description: z.string().nullable().optional(),
   icon: z.string().nullable().optional(),
+  categoryId: z.number().nullable().optional(),
   sortOrder: z.number().optional(),
   status: z.enum(['ACTIVE', 'ARCHIVED', 'DRAFT']).optional(),
+  formLayoutConfig: z.any().optional(),
 })
 
 export async function GET(
@@ -30,6 +32,7 @@ export async function GET(
     const table = await prisma.dataTable.findUnique({
       where: { id },
       include: {
+        category: true,
         fields: {
           orderBy: { sortOrder: 'asc' },
         },

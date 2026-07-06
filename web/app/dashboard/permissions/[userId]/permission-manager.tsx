@@ -16,8 +16,10 @@ interface Permission {
   canCreate: boolean
   canEdit: boolean
   canDelete: boolean
-  canExport: boolean
+  canExportExcel: boolean
+  canExportPdf: boolean
   canPrint: boolean
+  canImport: boolean
 }
 
 interface PermissionManagerProps {
@@ -46,8 +48,10 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
           updated.canCreate = false
           updated.canEdit = false
           updated.canDelete = false
-          updated.canExport = false
+          updated.canExportExcel = false
+          updated.canExportPdf = false
           updated.canPrint = false
+          updated.canImport = false
         }
         return updated
       }
@@ -129,7 +133,9 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
                   <th className="text-center py-3 px-4 font-medium">新增</th>
                   <th className="text-center py-3 px-4 font-medium">编辑</th>
                   <th className="text-center py-3 px-4 font-medium">删除</th>
-                  <th className="text-center py-3 px-4 font-medium">导出</th>
+                  <th className="text-center py-3 px-4 font-medium">导出Excel</th>
+                  <th className="text-center py-3 px-4 font-medium">导出PDF</th>
+                  <th className="text-center py-3 px-4 font-medium">导入</th>
                   <th className="text-center py-3 px-4 font-medium">打印</th>
                 </tr>
               </thead>
@@ -170,8 +176,22 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
                     </td>
                     <td className="text-center py-3 px-4">
                       <Switch
-                        checked={perm.canExport}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canExport', v)}
+                        checked={perm.canExportExcel}
+                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canExportExcel', v)}
+                        disabled={isAdmin || !perm.canView}
+                      />
+                    </td>
+                    <td className="text-center py-3 px-4">
+                      <Switch
+                        checked={perm.canExportPdf}
+                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canExportPdf', v)}
+                        disabled={isAdmin || !perm.canView}
+                      />
+                    </td>
+                    <td className="text-center py-3 px-4">
+                      <Switch
+                        checked={perm.canImport}
+                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canImport', v)}
                         disabled={isAdmin || !perm.canView}
                       />
                     </td>

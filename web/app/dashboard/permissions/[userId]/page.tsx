@@ -57,7 +57,10 @@ export default async function PermissionsPage({
         canCreate: perm?.canCreate ?? false,
         canEdit: perm?.canEdit ?? false,
         canDelete: perm?.canDelete ?? false,
-        canExport: perm?.canExport ?? false,
+        canExportExcel: perm?.canExportExcel ?? perm?.canExport ?? false,
+        canExportPdf: perm?.canExportPdf ?? perm?.canExport ?? false,
+        canPrint: perm?.canPrint ?? false,
+        canImport: perm?.canImport ?? false,
       }
     })
   } catch (err) {

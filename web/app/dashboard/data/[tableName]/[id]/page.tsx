@@ -25,7 +25,12 @@ export default async function RecordDetailPage({
     },
   })
 
-  if (!table) {
+  const tableWithLayout = table ? {
+    ...table,
+    formLayoutConfig: (table as any).formLayoutConfig,
+  } : null
+
+  if (!tableWithLayout) {
     redirect('/dashboard')
   }
 
@@ -37,9 +42,9 @@ export default async function RecordDetailPage({
     },
   })
 
-  if (!record || record.tableId !== table.id) {
-    redirect(`/dashboard/data/${table.name}`)
+  if (!record || record.tableId !== tableWithLayout.id) {
+    redirect(`/dashboard/data/${tableWithLayout.name}`)
   }
 
-  return <RecordDetailClient table={table} record={record} initialEditMode={searchParams.mode === 'edit'} />
+  return <RecordDetailClient table={tableWithLayout} record={record} initialEditMode={searchParams.mode === 'edit'} />
 }
