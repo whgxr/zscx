@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, LogOut, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -25,8 +26,41 @@ interface HeaderProps {
 
 export function Header({ user }: HeaderProps) {
   const router = useRouter()
+  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const res = await fetch('/api/auth/check', {
+          method: 'GET',
+          cache: 'no-store',
+        })
+        if (!res.ok) {
+          if (checkIntervalRef.current) {
+            clearInterval(checkIntervalRef.current)
+          }
+          alert('您的账号已在其他设备登录，您已被下线')
+          router.push('/login')
+          router.refresh()
+        }
+      } catch (err) {
+        console.error('Session check error:', err)
+      }
+    }
+
+    checkIntervalRef.current = setInterval(checkSession, 30000)
+
+    return () => {
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current)
+      }
+    }
+  }, [router])
 
   const handleLogout = async () => {
+    if (checkIntervalRef.current) {
+      clearInterval(checkIntervalRef.current)
+    }
     await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
     router.refresh()

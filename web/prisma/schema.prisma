@@ -33,6 +33,7 @@ model User {
   dataRecords      DataRecord[]      @relation("CreatedRecords")
   uploadedFiles    UploadedFile[]
   versionLogs      VersionLog[]      @relation("VersionLogCreator")
+  sessions         UserSession[]
 
   @@index([username])
   @@index([roleId])
@@ -69,6 +70,25 @@ enum DefaultRole {
 enum UserStatus {
   ACTIVE
   DISABLED
+}
+
+// 用户登录会话
+model UserSession {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  token       String    @db.Text
+  ipAddress   String?
+  userAgent   String?
+  deviceInfo  Json?
+  isActive    Boolean   @default(true)
+  lastActiveAt DateTime @default(now())
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([isActive])
 }
 
 // 按数据表分配的权限

@@ -33,3 +33,22 @@ docker/.env
 .github/workflows/
 
 .sync_temp_dir/
+
+# 临时部署/测试脚本
+*.py
+!build.py
+!deploy.py
+!rebuild.py
+!fix-db.py
+!final-check.py
+!check-deploy.py
+!check-status.py
+!check-final.py
+!check-compose.py
+!check-error.py
+!check-categories.py
+!download-font.py
+!deploy-features.py
+!deploy-fix.py
+!deploy-permission.py
+!deploy-refresh-fix.py
