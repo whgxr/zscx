@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from 'react'
+import { useState, useRef, Fragment } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -839,9 +839,8 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
               ) : (
                 <>
                   {item.items.map((childItem, childIndex) => (
-                    <>
+                    <Fragment key={`sub-item-wrapper-${childItem.id}`}>
                       <div
-                        key={`sub-drop-before-${childItem.id}`}
                         className={cn(
                           'h-8 rounded-lg transition-all col-span-full',
                           dropTarget?.groupId === groupId &&
@@ -862,10 +861,9 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                       ) : (
                         renderSubGroup(childItem, groupId, newPath, childIndex, depth + 1)
                       )}
-                    </>
+                    </Fragment>
                   ))}
                   <div
-                    key="sub-drop-after-last"
                     className={cn(
                       'h-8 rounded-lg transition-all col-span-full',
                       dropTarget?.groupId === groupId &&
@@ -994,31 +992,31 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
             ) : (
               <>
                 {group.items.map((item, index) => (
-                  <div
-                    key={`drop-before-${item.id}`}
-                    className={cn(
-                      'h-10 rounded-lg transition-all col-span-full',
-                      dropTarget?.groupId === group.id &&
-                        arraysEqual(dropTarget.path, groupPath) &&
-                        dropTarget.index === index
-                        ? 'bg-primary/10 border-2 border-dashed border-primary'
-                        : dragging && 'bg-gray-50 border border-dashed border-gray-200'
+                  <Fragment key={`item-wrapper-${item.id}`}>
+                    <div
+                      className={cn(
+                        'h-10 rounded-lg transition-all col-span-full',
+                        dropTarget?.groupId === group.id &&
+                          arraysEqual(dropTarget.path, groupPath) &&
+                          dropTarget.index === index
+                          ? 'bg-primary/10 border-2 border-dashed border-primary'
+                          : dragging && 'bg-gray-50 border border-dashed border-gray-200'
+                      )}
+                      onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
+                      onDrop={e => handleDrop(e, group.id, groupPath, index)}
+                    />
+                    {item.type === 'field' ? (
+                      (() => {
+                        const field = getFieldById(item.fieldId)
+                        if (!field) return null
+                        return renderFieldCard(field, item, group.id, groupPath, index)
+                      })()
+                    ) : (
+                      renderSubGroup(item, group.id, groupPath, index)
                     )}
-                    onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
-                    onDrop={e => handleDrop(e, group.id, groupPath, index)}
-                  />
-                  {item.type === 'field' ? (
-                    (() => {
-                      const field = getFieldById(item.fieldId)
-                      if (!field) return null
-                      return renderFieldCard(field, item, group.id, groupPath, index)
-                    })()
-                  ) : (
-                    renderSubGroup(item, group.id, groupPath, index)
-                  )}
+                  </Fragment>
                 ))}
                 <div
-                  key="drop-after-last"
                   className={cn(
                     'h-10 rounded-lg transition-all col-span-full',
                     dropTarget?.groupId === group.id &&
