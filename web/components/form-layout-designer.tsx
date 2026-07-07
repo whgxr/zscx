@@ -1,10 +1,9 @@
 "use client"
 
-import { useState, useRef, Fragment } from 'react'
+import { useState, Fragment } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
   Plus,
@@ -13,39 +12,35 @@ import {
   ChevronUp,
   ChevronDown,
   Save,
-  Settings2,
   FolderOpen,
   Maximize2,
   Minimize2,
   Move,
   PanelLeft,
-  LayoutGrid,
   Type,
 } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
-
-// ============ 新的数据结构 ============
 
 export type LayoutItemType = 'field' | 'subgroup'
 
 export interface BaseLayoutItem {
   id: string
   type: LayoutItemType
-  width: number // 1-12，在父级列中占几列
+  width: number
 }
 
 export interface FieldLayoutItem extends BaseLayoutItem {
   type: 'field'
   fieldId: number
   fieldName: string
-  labelWidth?: number // 标签宽度，像素值
+  labelWidth?: number
 }
 
 export interface SubGroupLayoutItem extends BaseLayoutItem {
   type: 'subgroup'
   title: string
-  columns: number // 子分组内的列数
+  columns: number
   items: LayoutItem[]
 }
 
@@ -54,15 +49,13 @@ export type LayoutItem = FieldLayoutItem | SubGroupLayoutItem
 export interface FormLayoutGroup {
   id: string
   title: string
-  columns: number // 分组内的列数
+  columns: number
   items: LayoutItem[]
 }
 
 export interface FormLayoutConfig {
   groups: FormLayoutGroup[]
 }
-
-// ============ 兼容旧数据结构 ============
 
 export interface LegacyFormLayoutFieldConfig {
   fieldId: number
@@ -80,16 +73,12 @@ export interface LegacyFormLayoutConfig {
   groups: LegacyFormLayoutGroup[]
 }
 
-// ============ Props ============
-
 interface FormLayoutDesignerProps {
   tableId: number
   fields: TableField[]
   initialConfig?: FormLayoutConfig | LegacyFormLayoutConfig | null
   onSave: (config: FormLayoutConfig) => Promise<void>
 }
-
-// ============ 工具函数 ============
 
 const fieldTypeIcons: Record<FieldType, string> = {
   TEXT: '📝',
@@ -98,233 +87,83 @@ const fieldTypeIcons: Record<FieldType, string> = {
   INTEGER: '🔢',
   FLOAT: '🔢',
   DATE: '📅',
-  DATETIME: '🕐',
+  DATETIME: '📅',
   SELECT: '📋',
   RADIO: '🔘',
   MULTISELECT: '☑️',
   CHECKBOX: '☑️',
+  UPLOAD_FILE: '📎',
   UPLOAD_IMAGE: '🖼️',
-  UPLOAD_FILE: '📁',
-  PHONE: '📱',
+  PHONE: '📞',
   EMAIL: '📧',
-  IDCARD: '🪪',
+  IDCARD: '🆔',
   ADDRESS: '📍',
   MONEY: '💰',
-  SWITCH: '🔀',
+  SWITCH: '🔄',
   RICHTEXT: '📝',
   RELATION: '🔗',
 }
 
-function generateId() {
-  return Math.random().toString(36).substring(2, 11)
+const generateId = () => Math.random().toString(36).substring(2, 11)
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((val, index) => val === b[index])
 }
 
-/** 检测是否是旧版配置 */
-function isLegacyConfig(config: any): config is LegacyFormLayoutConfig {
-  if (!config || !config.groups) return false
-  return config.groups.some((g: any) => Array.isArray(g.fields))
-}
-
-/** 旧版配置转新版 */
-function migrateLegacyConfig(legacy: LegacyFormLayoutConfig): FormLayoutConfig {
-  return {
-    groups: legacy.groups.map(g => ({
-      id: g.id,
-      title: g.title,
-      columns: 2,
-      items: g.fields.map(f => ({
-        id: generateId(),
-        type: 'field' as const,
-        fieldId: f.fieldId,
-        fieldName: f.fieldName,
-        width: f.span === 2 ? 2 : 1,
-      })),
-    })),
-  }
-}
-
-function getDefaultConfig(fields: TableField[]): FormLayoutConfig {
-  const formFields = fields.filter(f => f.showInForm)
-  return {
-    groups: [
-      {
-        id: generateId(),
-        title: '基本信息',
-        columns: 2,
-        items: formFields.map(f => ({
-          id: generateId(),
-          type: 'field' as const,
-          fieldId: f.id,
-          fieldName: f.name,
-          width: 1,
-        })),
-      },
-    ],
-  }
-}
-
-/** 从配置中收集所有已分配的字段ID */
-function collectAssignedFieldIds(items: LayoutItem[]): Set<number> {
-  const ids = new Set<number>()
-  for (const item of items) {
-    if (item.type === 'field') {
-      ids.add(item.fieldId)
-    } else {
-      for (const id of collectAssignedFieldIds(item.items)) {
-        ids.add(id)
-      }
-    }
-  }
-  return ids
-}
-
-/** 在 items 树中指定路径插入字段 */
-function insertItemAtPath(
-  items: LayoutItem[],
-  path: string[],
-  insertIndex: number,
-  newItem: LayoutItem
-): LayoutItem[] {
-  if (path.length === 0) {
-    const result = [...items]
-    result.splice(insertIndex, 0, newItem)
-    return result
-  }
-
-  const [head, ...rest] = path
-  return items.map(item => {
-    if (item.type === 'subgroup' && item.id === head) {
-      return { ...item, items: insertItemAtPath(item.items, rest, insertIndex, newItem) }
-    }
-    return item
-  })
-}
-
-/** 在 items 树中指定路径删除指定id的项 */
-function removeItemById(items: LayoutItem[], path: string[], itemId: string): LayoutItem[] {
-  if (path.length === 0) {
-    return items.filter(item => item.id !== itemId)
-  }
-
-  const [head, ...rest] = path
-  return items.map(item => {
-    if (item.type === 'subgroup' && item.id === head) {
-      return { ...item, items: removeItemById(item.items, rest, itemId) }
-    }
-    return item
-  })
-}
-
-/** 更新 items 树中指定路径的 items */
-function updateItemsAtPath(
-  items: LayoutItem[],
-  path: string[],
-  updater: (items: LayoutItem[]) => LayoutItem[]
-): LayoutItem[] {
-  if (path.length === 0) {
-    return updater(items)
-  }
-
-  const [head, ...rest] = path
-  return items.map(item => {
-    if (item.type === 'subgroup' && item.id === head) {
-      return { ...item, items: updateItemsAtPath(item.items, rest, updater) }
-    }
-    return item
-  })
-}
-
-/** 更新 items 中某个项的宽度 */
-function updateItemWidth(items: LayoutItem[], itemId: string, width: number): LayoutItem[] {
-  return items.map(item => {
-    if (item.id === itemId) {
-      return { ...item, width }
-    }
-    if (item.type === 'subgroup') {
-      return { ...item, items: updateItemWidth(item.items, itemId, width) }
-    }
-    return item
-  })
-}
-
-/** 更新子分组标题 */
-function updateSubGroupTitle(items: LayoutItem[], itemId: string, title: string): LayoutItem[] {
-  return items.map(item => {
-    if (item.id === itemId && item.type === 'subgroup') {
-      return { ...item, title }
-    }
-    if (item.type === 'subgroup') {
-      return { ...item, items: updateSubGroupTitle(item.items, itemId, title) }
-    }
-    return item
-  })
-}
-
-/** 更新子分组列数 */
-function updateSubGroupColumns(items: LayoutItem[], itemId: string, columns: number): LayoutItem[] {
-  return items.map(item => {
-    if (item.id === itemId && item.type === 'subgroup') {
-      return { ...item, columns }
-    }
-    if (item.type === 'subgroup') {
-      return { ...item, items: updateSubGroupColumns(item.items, itemId, columns) }
-    }
-    return item
-  })
-}
-
-// ============ 拖拽类型 ============
-
-interface DragData {
-  sourcePath: string[]
-  sourceIndex: number
-  itemType: 'field' | 'subgroup'
-  fieldId?: number
-  fieldName?: string
-  itemId?: string
-  width?: number
-}
-
-// ============ 主组件 ============
-
-export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: FormLayoutDesignerProps) {
-  const formFields = fields.filter(f => f.showInForm)
-
+export default function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: FormLayoutDesignerProps) {
   const [config, setConfig] = useState<FormLayoutConfig>(() => {
-    if (initialConfig && initialConfig.groups && initialConfig.groups.length > 0) {
-      if (isLegacyConfig(initialConfig)) {
-        return migrateLegacyConfig(initialConfig)
+    if (!initialConfig) {
+      return { groups: [{ id: generateId(), title: '基本信息', columns: 2, items: [] }] }
+    }
+    if ('groups' in initialConfig) {
+      if (initialConfig.groups.length > 0 && 'fields' in initialConfig.groups[0]) {
+        return {
+          groups: (initialConfig as LegacyFormLayoutConfig).groups.map(g => ({
+            ...g,
+            columns: 2,
+            items: (g as LegacyFormLayoutGroup).fields.map(f => ({
+              id: generateId(),
+              type: 'field' as const,
+              fieldId: f.fieldId,
+              fieldName: f.fieldName,
+              width: f.span,
+            })),
+          })),
+        }
       }
       return initialConfig as FormLayoutConfig
     }
-    return getDefaultConfig(fields)
+    return { groups: [{ id: generateId(), title: '基本信息', columns: 2, items: [] }] }
   })
 
   const [saving, setSaving] = useState(false)
-
-  const [dragging, setDragging] = useState<DragData | null>(null)
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const [dragging, setDragging] = useState<{
+    sourcePath: string[]
+    sourceIndex: number
+    itemType: 'field' | 'subgroup'
+    fieldId?: number
+    fieldName?: string
+    itemId?: string
+    width?: number
+  } | null>(null)
   const [dropTarget, setDropTarget] = useState<{
     groupId: string
     path: string[]
     index: number
-    column?: number
   } | null>(null)
 
-  const getUnassignedFields = (): TableField[] => {
-    const assignedFieldIds = new Set<number>()
-    for (const group of config.groups) {
-      for (const id of collectAssignedFieldIds(group.items)) {
-        assignedFieldIds.add(id)
-      }
-    }
-    return formFields.filter(f => !assignedFieldIds.has(f.id))
-  }
+  const unassignedFields = fields.filter(field => {
+    if (!field.showInForm) return false
+    const used = config.groups.some(g =>
+      g.items.some(item => item.type === 'field' && item.fieldId === field.id)
+    )
+    return !used
+  })
 
-  const unassignedFields = getUnassignedFields()
-
-  const getFieldById = (fieldId: number) => fields.find(f => f.id === fieldId)
-
-  // ========== 分组操作 ==========
+  const getFieldById = (fieldId: number): TableField | undefined => fields.find(f => f.id === fieldId)
+  const getFieldByName = (fieldName: string): TableField | undefined => fields.find(f => f.name === fieldName)
 
   const addGroup = () => {
     const newGroup: FormLayoutGroup = {
@@ -333,41 +172,21 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
       columns: 2,
       items: [],
     }
-    setConfig({ ...config, groups: [...config.groups, newGroup] })
+    setConfig(prev => ({ ...prev, groups: [...prev.groups, newGroup] }))
   }
 
-  const removeGroup = (groupId: string) => {
-    if (config.groups.length <= 1) {
-      alert('至少保留一个分组')
-      return
-    }
-    if (!confirm('确定要删除这个分组吗？分组内的字段将移到未分配区域。')) return
-    setConfig({ ...config, groups: config.groups.filter(g => g.id !== groupId) })
+  const removeGroup = (index: number) => {
+    if (config.groups.length <= 1) return
+    setConfig(prev => ({ ...prev, groups: prev.groups.filter((_, i) => i !== index) }))
   }
 
-  const updateGroupTitle = (groupId: string, title: string) => {
-    setConfig({
-      ...config,
-      groups: config.groups.map(g => (g.id === groupId ? { ...g, title } : g)),
-    })
-  }
-
-  const updateGroupColumns = (groupId: string, columns: number) => {
-    setConfig({
-      ...config,
-      groups: config.groups.map(g => (g.id === groupId ? { ...g, columns } : g)),
-    })
-  }
-
-  const moveGroup = (index: number, direction: 'up' | 'down') => {
+  const reorderGroups = (index: number, direction: 'up' | 'down') => {
     const newGroups = [...config.groups]
     const targetIndex = direction === 'up' ? index - 1 : index + 1
     if (targetIndex < 0 || targetIndex >= newGroups.length) return
     ;[newGroups[index], newGroups[targetIndex]] = [newGroups[targetIndex], newGroups[index]]
     setConfig({ ...config, groups: newGroups })
   }
-
-  // ========== 子分组操作 ==========
 
   const addSubGroup = (groupId: string, path: string[]) => {
     const newSubGroup: SubGroupLayoutItem = {
@@ -387,12 +206,9 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     }))
   }
 
-  // ========== 拖拽处理 ==========
-
-  const handleDragStart = (e: React.DragEvent, data: DragData) => {
+  const handleDragStart = (e: React.DragEvent, data: typeof dragging) => {
     setDragging(data)
     e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('application/json', JSON.stringify(data))
   }
 
   const handleDragEnd = () => {
@@ -400,13 +216,13 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     setDropTarget(null)
   }
 
-  const handleDragOver = (e: React.DragEvent, groupId: string, path: string[], index: number, column?: number) => {
+  const handleDragOver = (e: React.DragEvent, groupId: string, path: string[], index: number) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    setDropTarget({ groupId, path, index, column })
+    setDropTarget({ groupId, path, index })
   }
 
-  const handleDrop = (e: React.DragEvent, targetGroupId: string, targetPath: string[], targetIndex: number, column?: number) => {
+  const handleDrop = (e: React.DragEvent, targetGroupId: string, targetPath: string[], targetIndex: number) => {
     e.preventDefault()
     setDropTarget(null)
 
@@ -416,7 +232,6 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
       let newConfig = { ...prev }
       let movedItem: LayoutItem | null = null
 
-      // 1. 从源位置移除并获取完整数据
       if (dragging.sourcePath.length >= 1) {
         const sourceGroupId = dragging.sourcePath[0]
         const sourceSubPath = dragging.sourcePath.slice(1)
@@ -430,12 +245,11 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
             const newSourceItems = [...sourceItems]
             const [removed] = newSourceItems.splice(sourceIndex, 1)
             if (!removed) return g
-            movedItem = removed  // 保存完整数据（子分组的 title/columns/items 都保留）
+            movedItem = removed
             return { ...g, items: updateItemsAtPath(g.items, sourceSubPath, () => newSourceItems) }
           }),
         }
       } else {
-        // 从左侧未分配区域拖入的新字段
         movedItem = {
           id: generateId(),
           type: 'field',
@@ -445,14 +259,12 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
         }
       }
 
-      // 2. 插入到目标位置（保留完整的子分组数据）
       if (movedItem) {
-        const itemToInsert = movedItem as LayoutItem
         newConfig = {
           ...newConfig,
           groups: newConfig.groups.map(g => {
             if (g.id !== targetGroupId) return g
-            return { ...g, items: insertItemAtPath(g.items, targetPath, targetIndex, itemToInsert) }
+            return { ...g, items: insertItemAtPath(g.items, targetPath, targetIndex, movedItem!) }
           }),
         }
       }
@@ -487,14 +299,11 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     setConfig(prev => {
       const group = prev.groups.find(g => g.id === groupId)
       if (!group) return prev
-      // 找到 item 所在容器的 columns 和当前 width
       const findContainer = (items: LayoutItem[], path: string[]): { container: FormLayoutGroup | SubGroupLayoutItem; currentWidth: number } | null => {
         for (let i = 0; i < items.length; i++) {
           const it = items[i]
           if (it.id === itemId) {
-            // 找到 item，path 是从 group root 到包含它的容器
             if (path.length === 0) return { container: group, currentWidth: it.width }
-            // path 的最后一个是子分组 id
             const found = getContainerById(group, path)
             if (found) return { container: found, currentWidth: it.width }
             return null
@@ -515,6 +324,18 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
         groups: prev.groups.map(g => (g.id === groupId ? { ...g, items: updateItemWidth(g.items, itemId, newWidth) } : g)),
       }
     })
+  }
+
+  function getContainerById(group: FormLayoutGroup, path: string[]): SubGroupLayoutItem | null {
+    let current: LayoutItem[] = group.items
+    for (const id of path) {
+      const found = current.find(item => item.type === 'subgroup' && item.id === id)
+      if (!found || found.type !== 'subgroup') return null
+      current = found.items
+    }
+    const lastId = path[path.length - 1]
+    const found = group.items.find(item => item.type === 'subgroup' && item.id === lastId)
+    return found && found.type === 'subgroup' ? found : null
   }
 
   const handleLabelWidthChange = (groupId: string, itemId: string, delta: number) => {
@@ -540,58 +361,97 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     }))
   }
 
-  const pathToContainer = (groupId: string, path: string[], callback: (path: string[]) => number): number => {
+  function updateItemWidth(items: LayoutItem[], itemId: string, newWidth: number): LayoutItem[] {
+    return items.map(item => {
+      if (item.id === itemId) {
+        return { ...item, width: newWidth }
+      }
+      if (item.type === 'subgroup') {
+        return { ...item, items: updateItemWidth(item.items, itemId, newWidth) }
+      }
+      return item
+    })
+  }
+
+  function removeItemById(items: LayoutItem[], path: string[], itemId: string): LayoutItem[] {
     if (path.length === 0) {
-      const group = config.groups.find(g => g.id === groupId)
-      return group ? callback(path) : 1
+      return items.filter(item => item.id !== itemId)
     }
     const [head, ...rest] = path
-    const group = config.groups.find(g => g.id === groupId)
-    if (!group) return 1
-    const findSubGroup = (items: LayoutItem[], subPath: string[]): number => {
-      if (subPath.length === 0) return callback(path)
-      const [id, ...remaining] = subPath
-      const item = items.find(i => i.type === 'subgroup' && i.id === id)
-      if (!item || item.type !== 'subgroup') return 1
-      return findSubGroup(item.items, remaining)
+    return items.map(item => {
+      if (item.type === 'subgroup' && item.id === head) {
+        return { ...item, items: removeItemById(item.items, rest, itemId) }
+      }
+      return item
+    })
+  }
+
+  function insertItemAtPath(items: LayoutItem[], path: string[], index: number, newItem: LayoutItem): LayoutItem[] {
+    if (path.length === 0) {
+      const newItems = [...items]
+      newItems.splice(index, 0, newItem)
+      return newItems
     }
-    return findSubGroup(group.items, path)
-  }
-
-  const getContainerById = (group: FormLayoutGroup, path: string[]): FormLayoutGroup | SubGroupLayoutItem | null => {
-    if (path.length === 0) return group
     const [head, ...rest] = path
-    const item = group.items.find(i => i.type === 'subgroup' && i.id === head)
-    if (!item || item.type !== 'subgroup') return null
-    if (rest.length === 0) return item
-    return getSubGroupContainer(item, rest)
+    return items.map(item => {
+      if (item.type === 'subgroup' && item.id === head) {
+        return { ...item, items: insertItemAtPath(item.items, rest, index, newItem) }
+      }
+      return item
+    })
   }
 
-  const getSubGroupContainer = (subgroup: SubGroupLayoutItem, path: string[]): SubGroupLayoutItem | null => {
-    if (path.length === 0) return subgroup
+  function updateItemsAtPath(items: LayoutItem[], path: string[], updater: (items: LayoutItem[]) => LayoutItem[]): LayoutItem[] {
+    if (path.length === 0) {
+      return updater(items)
+    }
     const [head, ...rest] = path
-    const item = subgroup.items.find(i => i.type === 'subgroup' && i.id === head)
-    if (!item || item.type !== 'subgroup') return null
-    if (rest.length === 0) return item
-    return getSubGroupContainer(item, rest)
+    return items.map(item => {
+      if (item.type === 'subgroup' && item.id === head) {
+        return { ...item, items: updateItemsAtPath(item.items, rest, updater) }
+      }
+      return item
+    })
   }
 
-  const handleSubGroupTitleChange = (groupId: string, itemId: string, title: string) => {
+  const handleSubGroupTitleChange = (groupId: string, subGroupId: string, title: string) => {
     setConfig(prev => ({
       ...prev,
       groups: prev.groups.map(g => {
         if (g.id !== groupId) return g
-        return { ...g, items: updateSubGroupTitle(g.items, itemId, title) }
+        const updateTitle = (items: LayoutItem[]): LayoutItem[] => {
+          return items.map(item => {
+            if (item.id === subGroupId && item.type === 'subgroup') {
+              return { ...item, title }
+            }
+            if (item.type === 'subgroup') {
+              return { ...item, items: updateTitle(item.items) }
+            }
+            return item
+          })
+        }
+        return { ...g, items: updateTitle(g.items) }
       }),
     }))
   }
 
-  const handleSubGroupColumnsChange = (groupId: string, itemId: string, columns: number) => {
+  const handleSubGroupColumnsChange = (groupId: string, subGroupId: string, columns: number) => {
     setConfig(prev => ({
       ...prev,
       groups: prev.groups.map(g => {
         if (g.id !== groupId) return g
-        return { ...g, items: updateSubGroupColumns(g.items, itemId, columns) }
+        const updateCols = (items: LayoutItem[]): LayoutItem[] => {
+          return items.map(item => {
+            if (item.id === subGroupId && item.type === 'subgroup') {
+              return { ...item, columns }
+            }
+            if (item.type === 'subgroup') {
+              return { ...item, items: updateCols(item.items) }
+            }
+            return item
+          })
+        }
+        return { ...g, items: updateCols(g.items) }
       }),
     }))
   }
@@ -605,18 +465,13 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     }
   }
 
-  // ========== 渲染 ==========
-
-  /** 渲染字段拖拽卡片（设计器内的简化版） */
-  const renderFieldDesignerCard = (
+  const renderFieldCard = (
     field: TableField,
     item: FieldLayoutItem,
     groupId: string,
     path: string[],
     index: number,
-    inSubGroup: boolean = false,
-    depth: number = 0,
-    containerColumns: number = 6
+    isSub: boolean = false
   ) => {
     const isDragging = dragging?.itemId === item.id
     const labelW = item.labelWidth || 100
@@ -625,110 +480,94 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     return (
       <div
         key={item.id}
+        draggable
+        onDragStart={e =>
+          handleDragStart(e, {
+            sourcePath: [groupId, ...path],
+            sourceIndex: index,
+            itemType: 'field',
+            fieldId: item.fieldId,
+            fieldName: item.fieldName,
+            itemId: item.id,
+            width: item.width,
+          })
+        }
+        onDragEnd={handleDragEnd}
+        onDragOver={e => handleDragOver(e, groupId, path, index)}
+        onDrop={e => handleDrop(e, groupId, path, index)}
         className={cn(
-          'transition-all duration-150',
-          isDragging && 'opacity-30'
+          'border rounded-lg cursor-grab active:cursor-grabbing transition-all',
+          isDragging ? 'opacity-30' : 'hover:border-primary/50 hover:shadow-sm',
+          isSub ? 'bg-gray-50' : 'bg-white'
         )}
         style={{
           gridColumn: fieldW > 1 ? `span ${fieldW}` : undefined,
           minWidth: '140px',
         }}
       >
-        <div
-          draggable
-          onDragStart={e =>
-            handleDragStart(e, {
-              sourcePath: [groupId, ...path],
-              sourceIndex: index,
-              itemType: 'field',
-              fieldId: item.fieldId,
-              fieldName: item.fieldName,
-              itemId: item.id,
-              width: item.width,
-            })
-          }
-          onDragEnd={handleDragEnd}
-          className={cn(
-            'border rounded-lg group hover:border-primary/50 hover:shadow-sm transition-all cursor-grab active:cursor-grabbing bg-white',
-            inSubGroup && 'bg-gray-50',
-            depth > 0 && 'bg-gray-50'
-          )}
-        >
-          {/* 字段预览区 - 所看即所得 */}
-          <div className="p-2 border-b bg-gray-50/50">
-            <div className="flex items-center gap-2">
-              <GripVertical className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <span className="text-base flex-shrink-0">{fieldTypeIcons[field.type]}</span>
-              <div className="font-medium text-xs truncate flex-1">{field.label}</div>
-              {field.required && <span className="text-red-500 text-xs flex-shrink-0">*</span>}
-            </div>
+        <div className="p-2 border-b bg-gray-50/50">
+          <div className="flex items-center gap-2">
+            <GripVertical className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            <span className="text-base flex-shrink-0">{fieldTypeIcons[field.type]}</span>
+            <div className="font-medium text-xs truncate flex-1">{field.label}</div>
+            {field.required && <span className="text-red-500 text-xs flex-shrink-0">*</span>}
           </div>
-
-          {/* 实际标签+输入框预览 - 显示 labelWidth 效果 */}
-          <div className="p-2 flex items-start gap-2">
-            <div
-              className="flex-shrink-0 text-right text-xs text-gray-600 leading-7 truncate"
-              style={{ width: `${labelW}px`, minWidth: `${labelW}px` }}
-            >
-              {field.label}{field.required && <span className="text-red-500">*</span>}
-            </div>
-            <div className="flex-1 min-w-0 h-7 bg-white border border-dashed border-gray-300 rounded px-2 text-[10px] text-gray-400 flex items-center">
-              {field.placeholder || `请输入${field.label}`}
-            </div>
+        </div>
+        <div className="p-2 flex items-start gap-2">
+          <div
+            className="flex-shrink-0 text-right text-xs text-gray-600 leading-7 truncate"
+            style={{ width: `${labelW}px`, minWidth: `${labelW}px` }}
+          >
+            {field.label}{field.required && <span className="text-red-500">*</span>}
           </div>
-
-          {/* 控制按钮区 */}
-          <div className="px-2 py-1.5 flex items-center gap-1 border-t bg-gray-50/30 flex-wrap">
-            <Badge variant="outline" className="text-[10px] h-4 px-1 bg-white">
-              {fieldW > 1 ? `${fieldW}列` : '1列'}
-            </Badge>
-
-            <div className="flex items-center gap-0.5 bg-white border rounded px-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-4 w-4 p-0"
-                onClick={() => handleWidthChange(groupId, item.id, -1)}
-                disabled={fieldW <= 1}
-                title="减小宽度"
-              >
-                <Minimize2 className="w-2.5 h-2.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-4 w-4 p-0"
-                onClick={() => handleWidthChange(groupId, item.id, 1)}
-                disabled={fieldW >= containerColumns || fieldW >= 6}
-                title="增大宽度"
-              >
-                <Maximize2 className="w-2.5 h-2.5" />
-              </Button>
-            </div>
-
-            <div className="flex items-center gap-0.5 bg-white border rounded px-1">
-              <Type className="w-2.5 h-2.5 text-gray-500" />
-              <button
-                onClick={() => handleLabelWidthChange(groupId, item.id, -10)}
-                className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-[10px] font-bold"
-              >-</button>
-              <span className="text-[10px] font-medium text-gray-600 w-8 text-center">{labelW}px</span>
-              <button
-                onClick={() => handleLabelWidthChange(groupId, item.id, 10)}
-                className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-[10px] font-bold"
-              >+</button>
-            </div>
-
+          <div className="flex-1 min-w-0 h-7 bg-white border border-dashed border-gray-300 rounded px-2 text-[10px] text-gray-400 flex items-center">
+            {field.placeholder || `请输入${field.label}`}
+          </div>
+        </div>
+        <div className="px-2 py-1.5 flex items-center gap-1 border-t bg-gray-50/30 flex-wrap">
+          <Badge variant="outline" className="text-[10px] h-4 px-1 bg-white">
+            {fieldW > 1 ? `${fieldW}列` : '1列'}
+          </Badge>
+          <div className="flex items-center gap-0.5 bg-white border rounded px-1">
             <Button
               variant="ghost"
               size="sm"
-              className="h-4 w-4 p-0 text-red-500 hover:text-red-600 ml-auto"
-              onClick={() => handleRemoveItem(groupId, path, item.id)}
-              title="移除"
+              className="h-4 w-4 p-0"
+              onClick={() => handleWidthChange(groupId, item.id, -1)}
+              disabled={fieldW <= 1}
             >
-              <Trash2 className="w-3 h-3" />
+              <Minimize2 className="w-2.5 h-2.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-4 w-4 p-0"
+              onClick={() => handleWidthChange(groupId, item.id, 1)}
+              disabled={fieldW >= 6}
+            >
+              <Maximize2 className="w-2.5 h-2.5" />
             </Button>
           </div>
+          <div className="flex items-center gap-0.5 bg-white border rounded px-1">
+            <Type className="w-2.5 h-2.5 text-gray-500" />
+            <button
+              onClick={() => handleLabelWidthChange(groupId, item.id, -10)}
+              className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-[10px] font-bold"
+            >-</button>
+            <span className="text-[10px] font-medium text-gray-600 w-8 text-center">{labelW}px</span>
+            <button
+              onClick={() => handleLabelWidthChange(groupId, item.id, 10)}
+              className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-[10px] font-bold"
+            >+</button>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-4 w-4 p-0 text-red-500 hover:text-red-600 ml-auto"
+            onClick={() => handleRemoveItem(groupId, path, item.id)}
+          >
+            <Trash2 className="w-3 h-3" />
+          </Button>
         </div>
       </div>
     )
@@ -742,411 +581,129 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     depth: number = 0
   ) => {
     const isDragging = dragging?.itemId === item.id
-    const isDropTarget = dropTarget?.groupId === groupId && arraysEqual(dropTarget.path, path) && dropTarget.index === index
     const newPath = [...path, item.id]
 
     return (
       <div
         key={item.id}
-        className={cn('transition-all duration-150', isDragging && 'opacity-40')}
+        draggable
+        onDragStart={e =>
+          handleDragStart(e, {
+            sourcePath: [groupId, ...path],
+            sourceIndex: index,
+            itemType: 'subgroup',
+            itemId: item.id,
+            width: item.width,
+          })
+        }
+        onDragEnd={handleDragEnd}
+        onDragOver={e => handleDragOver(e, groupId, path, index)}
+        onDrop={e => handleDrop(e, groupId, path, index)}
+        className={cn(
+          'border rounded-lg cursor-grab active:cursor-grabbing transition-all',
+          isDragging ? 'opacity-30' : 'hover:border-primary/50 hover:shadow-sm',
+          depth > 0 && 'bg-white border-l-4 border-l-amber-400'
+        )}
         style={{
           gridColumn: item.width > 1 ? `span ${item.width}` : undefined,
           minWidth: '200px',
         }}
       >
-        {isDropTarget && <div className="h-1 bg-primary rounded-full mb-1" />}
-
-        <div
-          draggable
-          onDragStart={e =>
-            handleDragStart(e, {
-              sourcePath: [groupId, ...path],
-              sourceIndex: index,
-              itemType: 'subgroup',
-              itemId: item.id,
-              width: item.width,
-            })
-          }
-          onDragEnd={handleDragEnd}
-          className={cn(
-            'border rounded-lg bg-gray-50/60 group hover:border-primary/50 hover:shadow-sm transition-all',
-            depth > 0 && 'bg-white border-l-4 border-l-amber-400'
-          )}
-        >
-          <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-gray-100/60 rounded-t-lg cursor-grab active:cursor-grabbing">
-            <GripVertical className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-            <FolderOpen className="w-4 h-4 text-amber-600 flex-shrink-0" />
-            <Input
-              value={item.title}
-              onChange={e => handleSubGroupTitleChange(groupId, item.id, e.target.value)}
-              className="h-7 text-sm font-medium bg-transparent border-0 px-1 focus-visible:ring-1"
-            />
-            
-            <div className="flex items-center gap-1 ml-auto">
-              <Badge variant="outline" className="text-[10px] h-5 px-1 flex-shrink-0">
-                {item.width > 1 ? `${item.width}列` : ''}
-              </Badge>
-              
-              <div className="flex items-center gap-0.5 bg-white border rounded px-1.5">
-                <LayoutGrid className="w-3 h-3 text-gray-500" />
-                <button
-                  onClick={() => {
-                    const newCols = Math.max(1, item.columns - 1)
-                    handleSubGroupColumnsChange(groupId, item.id, newCols)
-                  }}
-                  className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
-                >-</button>
-                <span className="text-xs font-medium text-gray-600 w-4 text-center">{item.columns}</span>
-                <button
-                  onClick={() => {
-                    const newCols = Math.min(6, item.columns + 1)
-                    handleSubGroupColumnsChange(groupId, item.id, newCols)
-                  }}
-                  className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
-                >+</button>
-              </div>
-
-              <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  onClick={() => handleWidthChange(groupId, item.id, -1)}
-                  disabled={item.width <= 1}
-                  title="减小宽度"
-                >
-                  <Minimize2 className="w-3 h-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  onClick={() => handleWidthChange(groupId, item.id, 1)}
-                  disabled={item.width >= 12}
-                  title="增大宽度"
-                >
-                  <Maximize2 className="w-3 h-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 text-red-500 hover:text-red-600"
-                  onClick={() => handleRemoveItem(groupId, path, item.id)}
-                  title="删除子分组"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-3">
-            <div
-              className="min-h-[60px] gap-3"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: `repeat(${item.columns}, minmax(0, 1fr))`,
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-gray-100/60 rounded-t-lg">
+          <GripVertical className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+          <FolderOpen className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <Input
+            value={item.title}
+            onChange={e => handleSubGroupTitleChange(groupId, item.id, e.target.value)}
+            className="h-7 text-sm font-medium bg-transparent border-0 px-1 focus-visible:ring-1"
+          />
+          <Badge variant="outline" className="text-[10px] h-5 px-1 flex-shrink-0">
+            {item.columns}列
+          </Badge>
+          <div className="flex items-center gap-0.5 bg-white border rounded px-1">
+            <button
+              onClick={() => {
+                const newCols = Math.max(1, item.columns - 1)
+                handleSubGroupColumnsChange(groupId, item.id, newCols)
               }}
-            >
-              {item.items.length === 0 ? (
-                <div
-                  className="col-span-full text-center py-6 text-gray-400 text-xs border-2 border-dashed border-gray-200 rounded-lg hover:border-primary/30 hover:bg-primary/5 transition-colors"
-                  onDragOver={e => handleDragOver(e, groupId, newPath, 0)}
-                  onDrop={e => handleDrop(e, groupId, newPath, 0)}
-                >
-                  <Move className="w-4 h-4 mx-auto mb-1 opacity-50" />
-                  拖拽字段到这里
-                </div>
-              ) : (
-                <>
-                  {/* 开头放置指示器 */}
-                  {dragging && (
-                    <div
-                      className={cn(
-                        'col-span-full h-2 rounded-full transition-all',
-                        dropTarget?.groupId === groupId &&
-                          arraysEqual(dropTarget.path, newPath) &&
-                          dropTarget.index === 0
-                          ? 'bg-primary'
-                          : 'bg-transparent'
-                      )}
-                      onDragOver={e => handleDragOver(e, groupId, newPath, 0)}
-                      onDrop={e => handleDrop(e, groupId, newPath, 0)}
-                    />
-                  )}
-                  {item.items.map((childItem, childIndex) => {
-                    const isSource = dragging?.itemId === childItem.id
-                    return (
-                      <Fragment key={`sub-item-wrapper-${childItem.id}`}>
-                        {/* 字段或子分组 */}
-                        {isSource ? (
-                          <div
-                            className="h-16 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary opacity-50"
-                            style={{
-                              gridColumn: childItem.width > 1 ? `span ${childItem.width}` : undefined,
-                            }}
-                          >
-                            拖动中...
-                          </div>
-                        ) : childItem.type === 'field' ? (
-                          <div
-                            className={cn(
-                              'transition-all',
-                              dropTarget?.groupId === groupId &&
-                                arraysEqual(dropTarget.path, newPath) &&
-                                dropTarget.index === childIndex
-                                ? 'ring-2 ring-primary ring-offset-1 rounded-lg'
-                                : ''
-                            )}
-                            style={{
-                              gridColumn: (childItem as FieldLayoutItem).width > 1 ? `span ${(childItem as FieldLayoutItem).width}` : undefined,
-                            }}
-                            onDragOver={e => handleDragOver(e, groupId, newPath, childIndex)}
-                            onDrop={e => handleDrop(e, groupId, newPath, childIndex)}
-                          >
-                            {(() => {
-                              const field = getFieldById(childItem.fieldId)
-                              if (!field) return null
-                              return renderFieldDesignerCard(field, childItem as FieldLayoutItem, groupId, newPath, childIndex, true, depth + 1, item.columns)
-                            })()}
-                          </div>
-                        ) : (
-                          <div
-                            className={cn(
-                              'transition-all',
-                              dropTarget?.groupId === groupId &&
-                                arraysEqual(dropTarget.path, newPath) &&
-                                dropTarget.index === childIndex
-                                ? 'ring-2 ring-primary ring-offset-1 rounded-lg'
-                                : ''
-                            )}
-                            style={{
-                              gridColumn: childItem.width > 1 ? `span ${childItem.width}` : undefined,
-                            }}
-                            onDragOver={e => handleDragOver(e, groupId, newPath, childIndex)}
-                            onDrop={e => handleDrop(e, groupId, newPath, childIndex)}
-                          >
-                            {renderSubGroup(childItem as SubGroupLayoutItem, groupId, newPath, childIndex, depth + 1)}
-                          </div>
-                        )}
-                        {/* 字段后放置指示器 */}
-                        {dragging && (
-                          <div
-                            className={cn(
-                              'col-span-full h-2 rounded-full transition-all',
-                              dropTarget?.groupId === groupId &&
-                                arraysEqual(dropTarget.path, newPath) &&
-                                dropTarget.index === childIndex + 1
-                                ? 'bg-primary'
-                                : 'bg-transparent'
-                            )}
-                            onDragOver={e => handleDragOver(e, groupId, newPath, childIndex + 1)}
-                            onDrop={e => handleDrop(e, groupId, newPath, childIndex + 1)}
-                          />
-                        )}
-                      </Fragment>
-                    )
-                  })}
-                </>
-              )}
-            </div>
-
+              className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
+            >-</button>
+            <button
+              onClick={() => {
+                const newCols = Math.min(6, item.columns + 1)
+                handleSubGroupColumnsChange(groupId, item.id, newCols)
+              }}
+              className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
+            >+</button>
+          </div>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
             <Button
               variant="ghost"
               size="sm"
-              className="mt-2 h-7 text-xs text-gray-500 hover:text-primary"
-              onClick={() => addSubGroup(groupId, newPath)}
+              className="h-6 w-6 p-0"
+              onClick={() => handleWidthChange(groupId, item.id, -1)}
+              disabled={item.width <= 1}
             >
-              <Plus className="w-3 h-3 mr-1" />
-              添加内部分组
+              <Minimize2 className="w-3 h-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={() => handleWidthChange(groupId, item.id, 1)}
+              disabled={item.width >= 12}
+            >
+              <Maximize2 className="w-3 h-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 text-red-500 hover:text-red-600"
+              onClick={() => handleRemoveItem(groupId, path, item.id)}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
             </Button>
           </div>
         </div>
-      </div>
-    )
-  }
 
-  const renderGroup = (group: FormLayoutGroup, groupIndex: number) => {
-    const groupPath: string[] = []
-
-    return (
-      <Card
-        key={group.id}
-        className={cn(
-          'transition-colors overflow-visible',
-          dragging && 'hover:border-primary/50'
-        )}
-      >
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => moveGroup(groupIndex, 'up')}
-                disabled={groupIndex === 0}
-                title="上移分组"
-              >
-                <ChevronUp className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => moveGroup(groupIndex, 'down')}
-                disabled={groupIndex === config.groups.length - 1}
-                title="下移分组"
-              >
-                <ChevronDown className="w-4 h-4" />
-              </Button>
-            </div>
-            <div className="flex-1">
-              <Input
-                value={group.title}
-                onChange={e => updateGroupTitle(group.id, e.target.value)}
-                className="font-semibold text-base h-9"
-              />
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">{countItems(group.items)} 个元素</Badge>
-              
-              <div className="flex items-center gap-0.5 bg-white border rounded px-2 py-1">
-                <LayoutGrid className="w-3.5 h-3.5 text-gray-500" />
-                <button
-                  onClick={() => {
-                    const newCols = Math.max(1, group.columns - 1)
-                    updateGroupColumns(group.id, newCols)
-                  }}
-                  className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
-                >-</button>
-                <span className="text-xs font-medium text-gray-600 w-5 text-center">{group.columns}列</span>
-                <button
-                  onClick={() => {
-                    const newCols = Math.min(6, group.columns + 1)
-                    updateGroupColumns(group.id, newCols)
-                  }}
-                  className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
-                >+</button>
-              </div>
-              
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 text-red-500 hover:text-red-600"
-                onClick={() => removeGroup(group.id)}
-                title="删除分组"
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
+        <div className="p-3">
           <div
-            className="min-h-[100px]"
+            className="min-h-[60px] gap-3"
             style={{
               display: 'grid',
-              gridTemplateColumns: `repeat(${group.columns}, minmax(0, 1fr))`,
-              gap: '12px',
+              gridTemplateColumns: `repeat(${item.columns}, minmax(0, 1fr))`,
             }}
           >
-            {group.items.length === 0 ? (
+            {item.items.length === 0 ? (
               <div
-                className="col-span-full text-center py-8 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg hover:border-primary/30 hover:bg-primary/5 transition-colors"
-                onDragOver={e => handleDragOver(e, group.id, groupPath, 0)}
-                onDrop={e => handleDrop(e, group.id, groupPath, 0)}
+                className="col-span-full text-center py-6 text-gray-400 text-xs border-2 border-dashed border-gray-200 rounded-lg hover:border-primary/30 hover:bg-primary/5 transition-colors"
+                onDragOver={e => handleDragOver(e, groupId, newPath, 0)}
+                onDrop={e => handleDrop(e, groupId, newPath, 0)}
               >
-                <Move className="w-6 h-6 mx-auto mb-2 opacity-50" />
-                拖拽字段到这里开始布局
+                <Move className="w-4 h-4 mx-auto mb-1 opacity-50" />
+                拖拽字段到这里
               </div>
             ) : (
               <>
-                {/* 开头放置指示器 */}
-                {dragging && (
-                  <div
-                    className={cn(
-                      'col-span-full h-2 rounded-full transition-all',
-                      dropTarget?.groupId === group.id &&
-                        arraysEqual(dropTarget.path, groupPath) &&
-                        dropTarget.index === 0
-                        ? 'bg-primary'
-                        : 'bg-transparent'
-                    )}
-                    onDragOver={e => handleDragOver(e, group.id, groupPath, 0)}
-                    onDrop={e => handleDrop(e, group.id, groupPath, 0)}
-                  />
-                )}
-                {group.items.map((item, index) => {
-                  const isSource = dragging?.itemId === item.id
+                {item.items.map((childItem, childIndex) => {
+                  const isChildDragging = dragging?.itemId === childItem.id
                   return (
-                    <Fragment key={`item-wrapper-${item.id}`}>
-                      {/* 字段或子分组 */}
-                      {isSource ? (
+                    <Fragment key={`sub-item-${childItem.id}`}>
+                      {isChildDragging ? (
                         <div
-                          className="h-20 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary opacity-50"
-                          style={{
-                            gridColumn: item.width > 1 ? `span ${item.width}` : undefined,
-                          }}
+                          className="h-16 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary opacity-50"
+                          style={{ gridColumn: childItem.width > 1 ? `span ${childItem.width}` : undefined }}
                         >
                           拖动中...
                         </div>
-                      ) : item.type === 'field' ? (
-                        <div
-                          className={cn(
-                            'transition-all',
-                            dropTarget?.groupId === group.id &&
-                              arraysEqual(dropTarget.path, groupPath) &&
-                              dropTarget.index === index
-                              ? 'ring-2 ring-primary ring-offset-1 rounded-lg'
-                              : ''
-                          )}
-                          style={{
-                            gridColumn: (item as FieldLayoutItem).width > 1 ? `span ${(item as FieldLayoutItem).width}` : undefined,
-                          }}
-                          onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
-                          onDrop={e => handleDrop(e, group.id, groupPath, index)}
-                        >
-                          {(() => {
-                            const field = getFieldById(item.fieldId)
-                            if (!field) return null
-                            return renderFieldDesignerCard(field, item as FieldLayoutItem, group.id, groupPath, index, false, 0, group.columns)
-                          })()}
-                        </div>
+                      ) : childItem.type === 'field' ? (
+                        (() => {
+                          const field = getFieldById(childItem.fieldId)
+                          if (!field) return null
+                          return renderFieldCard(field, childItem, groupId, newPath, childIndex, true)
+                        })()
                       ) : (
-                        <div
-                          className={cn(
-                            'transition-all',
-                            dropTarget?.groupId === group.id &&
-                              arraysEqual(dropTarget.path, groupPath) &&
-                              dropTarget.index === index
-                              ? 'ring-2 ring-primary ring-offset-1 rounded-lg'
-                              : ''
-                          )}
-                          style={{
-                            gridColumn: item.width > 1 ? `span ${item.width}` : undefined,
-                          }}
-                          onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
-                          onDrop={e => handleDrop(e, group.id, groupPath, index)}
-                        >
-                          {renderSubGroup(item as SubGroupLayoutItem, group.id, groupPath, index)}
-                        </div>
-                      )}
-                      {/* 字段后放置指示器 */}
-                      {dragging && (
-                        <div
-                          className={cn(
-                            'col-span-full h-2 rounded-full transition-all',
-                            dropTarget?.groupId === group.id &&
-                              arraysEqual(dropTarget.path, groupPath) &&
-                              dropTarget.index === index + 1
-                              ? 'bg-primary'
-                              : 'bg-transparent'
-                          )}
-                          onDragOver={e => handleDragOver(e, group.id, groupPath, index + 1)}
-                          onDrop={e => handleDrop(e, group.id, groupPath, index + 1)}
-                        />
+                        renderSubGroup(childItem, groupId, newPath, childIndex, depth + 1)
                       )}
                     </Fragment>
                   )
@@ -1155,18 +712,161 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
             )}
           </div>
 
-          <div className="flex gap-2 mt-3">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => addSubGroup(group.id, [])}
-            >
-              <FolderOpen className="w-3.5 h-3.5 mr-1" />
-              添加子分组
-            </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-2 h-7 text-xs text-gray-500 hover:text-primary"
+            onClick={() => addSubGroup(groupId, newPath)}
+          >
+            <Plus className="w-3 h-3 mr-1" />
+            添加内部分组
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const renderGroup = (group: FormLayoutGroup, index: number) => {
+    const isExpanded = expandedGroups[group.id] !== false
+    const groupPath: string[] = []
+
+    return (
+      <Card key={group.id} className="mb-4">
+        <CardHeader className="pb-3 cursor-pointer" onClick={() => setExpandedGroups(prev => ({ ...prev, [group.id]: !prev[group.id] }))}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={e => {
+                  e.stopPropagation()
+                  setExpandedGroups(prev => ({ ...prev, [group.id]: !prev[group.id] }))
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+              </button>
+              <Input
+                value={group.title}
+                onChange={e => setConfig(prev => ({
+                  ...prev,
+                  groups: prev.groups.map(g => (g.id === group.id ? { ...g, title: e.target.value } : g)),
+                }))}
+                className="h-8 text-sm font-medium bg-transparent border-0 px-1 focus-visible:ring-1 w-32"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-xs">
+                {group.items.length} 个元素
+              </Badge>
+              <Badge variant="outline" className="text-xs">
+                {group.columns} 列
+              </Badge>
+              <div className="flex items-center gap-0.5">
+                <button
+                  onClick={() => {
+                    const newCols = Math.max(1, group.columns - 1)
+                    setConfig(prev => ({
+                      ...prev,
+                      groups: prev.groups.map(g => (g.id === group.id ? { ...g, columns: newCols } : g)),
+                    }))
+                  }}
+                  className="w-6 h-6 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-sm font-bold"
+                >-</button>
+                <button
+                  onClick={() => {
+                    const newCols = Math.min(6, group.columns + 1)
+                    setConfig(prev => ({
+                      ...prev,
+                      groups: prev.groups.map(g => (g.id === group.id ? { ...g, columns: newCols } : g)),
+                    }))
+                  }}
+                  className="w-6 h-6 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-sm font-bold"
+                >+</button>
+              </div>
+              <button
+                onClick={() => reorderGroups(index, 'up')}
+                disabled={index === 0}
+                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronUp className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => reorderGroups(index, 'down')}
+                disabled={index === config.groups.length - 1}
+                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => removeGroup(index)}
+                disabled={config.groups.length <= 1}
+                className="w-6 h-6 flex items-center justify-center text-red-500 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-        </CardContent>
+        </CardHeader>
+
+        {isExpanded && (
+          <CardContent className="pt-0">
+            <div
+              className="gap-3"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${group.columns}, minmax(0, 1fr))`,
+              }}
+            >
+              {group.items.length === 0 ? (
+                <div
+                  className="col-span-full text-center py-8 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg hover:border-primary/30 hover:bg-primary/5 transition-colors"
+                  onDragOver={e => handleDragOver(e, group.id, groupPath, 0)}
+                  onDrop={e => handleDrop(e, group.id, groupPath, 0)}
+                >
+                  <Move className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                  拖拽字段到这里开始布局
+                </div>
+              ) : (
+                <>
+                  {group.items.map((item, itemIndex) => {
+                    const isItemDragging = dragging?.itemId === item.id
+                    return (
+                      <Fragment key={`group-item-${item.id}`}>
+                        {isItemDragging ? (
+                          <div
+                            className="h-20 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary opacity-50"
+                            style={{ gridColumn: item.width > 1 ? `span ${item.width}` : undefined }}
+                          >
+                            拖动中...
+                          </div>
+                        ) : item.type === 'field' ? (
+                          (() => {
+                            const field = getFieldById(item.fieldId)
+                            if (!field) return null
+                            return renderFieldCard(field, item, group.id, groupPath, itemIndex)
+                          })()
+                        ) : (
+                          renderSubGroup(item, group.id, groupPath, itemIndex)
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </>
+              )}
+            </div>
+
+            <div className="flex gap-2 mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => addSubGroup(group.id, [])}
+              >
+                <FolderOpen className="w-3.5 h-3.5 mr-1" />
+                添加子分组
+              </Button>
+            </div>
+          </CardContent>
+        )}
       </Card>
     )
   }
@@ -1219,12 +919,11 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                 onDrop={e => {
                   e.preventDefault()
                   if (!dragging || dragging.sourcePath.length === 0) return
-                  const sourceGroupId = dragging.sourcePath[0]
-                  const sourceSubPath = dragging.sourcePath.slice(1)
                   setConfig(prev => ({
                     ...prev,
                     groups: prev.groups.map(g => {
-                      if (g.id !== sourceGroupId) return g
+                      if (g.id !== dragging.sourcePath[0]) return g
+                      const sourceSubPath = dragging.sourcePath.slice(1)
                       const sourceItems = getItemsAtPath(g.items, sourceSubPath)
                       const newSourceItems = [...sourceItems]
                       newSourceItems.splice(dragging.sourceIndex, 1)
@@ -1232,7 +931,6 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                     }),
                   }))
                   setDragging(null)
-                  setDropTarget(null)
                 }}
               >
                 {unassignedFields.length === 0 ? (
@@ -1247,7 +945,7 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                       onDragStart={e =>
                         handleDragStart(e, {
                           sourcePath: [],
-                          sourceIndex: -1,
+                          sourceIndex: 0,
                           itemType: 'field',
                           fieldId: field.id,
                           fieldName: field.name,
@@ -1255,79 +953,30 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                         })
                       }
                       onDragEnd={handleDragEnd}
-                      className="cursor-grab active:cursor-grabbing"
+                      className="flex items-center gap-2 p-2 bg-white border rounded-lg cursor-grab active:cursor-grabbing hover:border-primary/50 hover:shadow-sm transition-all"
                     >
-                      <div className="flex items-center gap-2 p-2 bg-white border rounded-lg hover:border-primary/50 transition-colors">
-                        <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                        <span className="text-lg flex-shrink-0">{fieldTypeIcons[field.type]}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">{field.label}</div>
-                          <div className="text-xs text-gray-500 truncate">{field.name}</div>
-                        </div>
-                        {field.required && (
-                          <Badge variant="destructive" className="text-xs flex-shrink-0">
-                            必填
-                          </Badge>
-                        )}
+                      <span className="text-base">{fieldTypeIcons[field.type]}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{field.label}</div>
+                        <div className="text-xs text-gray-500 truncate">{field.name}</div>
                       </div>
+                      {field.required && (
+                        <Badge variant="destructive" className="text-[10px] h-4 px-1">
+                          必填
+                        </Badge>
+                      )}
                     </div>
                   ))
                 )}
               </div>
             </CardContent>
           </Card>
-
-          <Card className="mt-4">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Settings2 className="w-4 h-4" />
-                使用提示
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="text-xs text-gray-500 space-y-1.5">
-                <li className="flex items-start gap-1.5">
-                  <Move className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                  <span>拖拽字段到右侧分组中</span>
-                </li>
-                <li className="flex items-start gap-1.5">
-                  <LayoutGrid className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                  <span>点击分组右上角 +/- 调整列数（1-6列）</span>
-                </li>
-                <li className="flex items-start gap-1.5">
-                  <Maximize2 className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                  <span>悬停字段可跨列（1-6列宽）</span>
-                </li>
-                <li className="flex items-start gap-1.5">
-                  <FolderOpen className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                  <span>支持2-3级嵌套子分组</span>
-                </li>
-              </ul>
-            </CardContent>
-          </Card>
         </div>
 
-        <div className="lg:col-span-3 space-y-4">
+        <div className="lg:col-span-3">
           {config.groups.map((group, index) => renderGroup(group, index))}
         </div>
       </div>
     </div>
   )
-}
-
-function arraysEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false
-  return a.every((val, i) => val === b[i])
-}
-
-function countItems(items: LayoutItem[]): number {
-  let count = 0
-  for (const item of items) {
-    if (item.type === 'field') {
-      count++
-    } else {
-      count += 1 + countItems(item.items)
-    }
-  }
-  return count
 }
