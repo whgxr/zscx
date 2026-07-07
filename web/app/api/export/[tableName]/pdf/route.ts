@@ -20,16 +20,29 @@ interface Fonts {
   bold: PDFFont
 }
 
-async function loadFonts(pdfDoc: PDFDocument): Promise<Fonts> {
-  pdfDoc.registerFontkit(fontkit)
-  
+let cachedRegularFontBytes: Buffer | null = null
+let cachedBoldFontBytes: Buffer | null = null
+const fontCacheTTL = 3600000
+
+function loadFontBytes(): { regular: Buffer; bold: Buffer } {
   const fontDir = path.join(process.cwd(), 'public', 'fonts')
-  
   const regularFontPath = path.join(fontDir, 'NotoSansSC-Regular.ttf')
   const boldFontPath = path.join(fontDir, 'NotoSansSC-Bold.ttf')
   
-  const regularFontBytes = fs.readFileSync(regularFontPath)
-  const boldFontBytes = fs.readFileSync(boldFontPath)
+  if (!cachedRegularFontBytes) {
+    cachedRegularFontBytes = fs.readFileSync(regularFontPath)
+  }
+  if (!cachedBoldFontBytes) {
+    cachedBoldFontBytes = fs.readFileSync(boldFontPath)
+  }
+  
+  return { regular: cachedRegularFontBytes, bold: cachedBoldFontBytes }
+}
+
+async function loadFonts(pdfDoc: PDFDocument): Promise<Fonts> {
+  pdfDoc.registerFontkit(fontkit)
+  
+  const { regular: regularFontBytes, bold: boldFontBytes } = loadFontBytes()
   
   const regularFont = await pdfDoc.embedFont(regularFontBytes)
   const boldFont = await pdfDoc.embedFont(boldFontBytes)
@@ -214,11 +227,16 @@ export async function GET(
       console.error('Failed to log export:', logError)
     }
 
+    const isPreview = searchParams.get('preview') === 'true'
+    const disposition = isPreview ? 'inline' : 'attachment'
+
     return new NextResponse(pdfBytes as unknown as BodyInit, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        'Content-Length': pdfBytes.length.toString(),
+        'Content-Disposition': `${disposition}; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        'Cache-Control': isPreview ? 'no-cache, no-store, must-revalidate' : 'private, max-age=0',
       },
     })
   } catch (error: any) {
