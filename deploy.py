@@ -24,6 +24,10 @@ files_to_upload = [
     "components/export/export-dialog.tsx",
     "app/dashboard/export-templates/export-templates-client.tsx",
     "app/dashboard/data/[tableName]/data-list-client.tsx",
+    # 表单布局升级相关文件
+    "app/dashboard/tables/[id]/field-designer.tsx",
+    "components/form-layout-designer.tsx",
+    "components/dynamic-form.tsx",
     "prisma/schema.prisma",
     "prisma/seed.ts",
     "prisma/docker-migrate.js",
