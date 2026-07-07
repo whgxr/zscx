@@ -389,11 +389,10 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
     }
   }
 
-  const renderFieldWithLabel = (field: TableField, width?: number) => (
+  const renderFieldWithLabel = (field: TableField, width?: number, labelWidth?: number) => (
     <div
       key={field.id}
       className={cn(
-        "space-y-2",
         (field.type === FieldType.UPLOAD_IMAGE || field.type === FieldType.UPLOAD_FILE) && "col-span-full"
       )}
       style={
@@ -402,14 +401,21 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
           : { minWidth: '140px' }
       }
     >
-      <Label className="flex items-center gap-1">
-        {field.label}
-        {field.required && <span className="text-red-500">*</span>}
-      </Label>
-      {renderField(field)}
-      {field.description && (
-        <p className="text-xs text-gray-500">{field.description}</p>
-      )}
+      <div className="flex items-start gap-3">
+        <Label
+          className="flex-shrink-0 pt-2 flex items-center gap-1"
+          style={{ width: labelWidth ? `${labelWidth}px` : '100px', textAlign: 'right' }}
+        >
+          <span className="flex-1 truncate">{field.label}</span>
+          {field.required && <span className="text-red-500 flex-shrink-0">*</span>}
+        </Label>
+        <div className="flex-1 min-w-0 space-y-2">
+          {renderField(field)}
+          {field.description && (
+            <p className="text-xs text-gray-500">{field.description}</p>
+          )}
+        </div>
+      </div>
     </div>
   )
 
@@ -451,7 +457,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
       if (item.type === 'field') {
         const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
         if (!field || !field.showInForm) return null
-        return renderFieldWithLabel(field, item.width)
+        return renderFieldWithLabel(field, item.width, item.labelWidth)
       } else {
         return renderSubGroup(item)
       }
