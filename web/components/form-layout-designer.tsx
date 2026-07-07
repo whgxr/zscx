@@ -859,34 +859,29 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                 </div>
               ) : (
                 <>
+                  {/* 开头放置指示器 */}
+                  {dragging && (
+                    <div
+                      className={cn(
+                        'col-span-full h-2 rounded-full transition-all',
+                        dropTarget?.groupId === groupId &&
+                          arraysEqual(dropTarget.path, newPath) &&
+                          dropTarget.index === 0
+                          ? 'bg-primary'
+                          : 'bg-transparent'
+                      )}
+                      onDragOver={e => handleDragOver(e, groupId, newPath, 0)}
+                      onDrop={e => handleDrop(e, groupId, newPath, 0)}
+                    />
+                  )}
                   {item.items.map((childItem, childIndex) => {
                     const isSource = dragging?.itemId === childItem.id
                     return (
                       <Fragment key={`sub-item-wrapper-${childItem.id}`}>
-                        {/* 左侧放置槽 - 1列宽，所看即所得 */}
-                        {dragging && !isSource && (
-                          <div
-                            className={cn(
-                              'h-20 rounded transition-all border-2 border-dashed flex items-center justify-center text-xs',
-                              dropTarget?.groupId === groupId &&
-                                arraysEqual(dropTarget.path, newPath) &&
-                                dropTarget.index === childIndex
-                                ? 'border-primary bg-primary/20 text-primary font-medium'
-                                : 'border-gray-300 bg-gray-50/50 text-gray-400'
-                            )}
-                            onDragOver={e => handleDragOver(e, groupId, newPath, childIndex)}
-                            onDrop={e => handleDrop(e, groupId, newPath, childIndex)}
-                          >
-                            {dropTarget?.groupId === groupId &&
-                              arraysEqual(dropTarget.path, newPath) &&
-                              dropTarget.index === childIndex ? '放置' : ''}
-                          </div>
-                        )}
-
                         {/* 字段或子分组 */}
                         {isSource ? (
                           <div
-                            className="h-20 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary"
+                            className="h-16 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary opacity-50"
                             style={{
                               gridColumn: childItem.width > 1 ? `span ${childItem.width}` : undefined,
                             }}
@@ -894,36 +889,64 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                             拖动中...
                           </div>
                         ) : childItem.type === 'field' ? (
-                          (() => {
-                            const field = getFieldById(childItem.fieldId)
-                            if (!field) return null
-                            return renderFieldDesignerCard(field, childItem, groupId, newPath, childIndex, true, depth + 1, item.columns)
-                          })()
+                          <div
+                            className={cn(
+                              'transition-all',
+                              dropTarget?.groupId === groupId &&
+                                arraysEqual(dropTarget.path, newPath) &&
+                                dropTarget.index === childIndex
+                                ? 'ring-2 ring-primary ring-offset-1 rounded-lg'
+                                : ''
+                            )}
+                            style={{
+                              gridColumn: (childItem as FieldLayoutItem).width > 1 ? `span ${(childItem as FieldLayoutItem).width}` : undefined,
+                            }}
+                            onDragOver={e => handleDragOver(e, groupId, newPath, childIndex)}
+                            onDrop={e => handleDrop(e, groupId, newPath, childIndex)}
+                          >
+                            {(() => {
+                              const field = getFieldById(childItem.fieldId)
+                              if (!field) return null
+                              return renderFieldDesignerCard(field, childItem as FieldLayoutItem, groupId, newPath, childIndex, true, depth + 1, item.columns)
+                            })()}
+                          </div>
                         ) : (
-                          renderSubGroup(childItem, groupId, newPath, childIndex, depth + 1)
+                          <div
+                            className={cn(
+                              'transition-all',
+                              dropTarget?.groupId === groupId &&
+                                arraysEqual(dropTarget.path, newPath) &&
+                                dropTarget.index === childIndex
+                                ? 'ring-2 ring-primary ring-offset-1 rounded-lg'
+                                : ''
+                            )}
+                            style={{
+                              gridColumn: childItem.width > 1 ? `span ${childItem.width}` : undefined,
+                            }}
+                            onDragOver={e => handleDragOver(e, groupId, newPath, childIndex)}
+                            onDrop={e => handleDrop(e, groupId, newPath, childIndex)}
+                          >
+                            {renderSubGroup(childItem as SubGroupLayoutItem, groupId, newPath, childIndex, depth + 1)}
+                          </div>
+                        )}
+                        {/* 字段后放置指示器 */}
+                        {dragging && (
+                          <div
+                            className={cn(
+                              'col-span-full h-2 rounded-full transition-all',
+                              dropTarget?.groupId === groupId &&
+                                arraysEqual(dropTarget.path, newPath) &&
+                                dropTarget.index === childIndex + 1
+                                ? 'bg-primary'
+                                : 'bg-transparent'
+                            )}
+                            onDragOver={e => handleDragOver(e, groupId, newPath, childIndex + 1)}
+                            onDrop={e => handleDrop(e, groupId, newPath, childIndex + 1)}
+                          />
                         )}
                       </Fragment>
                     )
                   })}
-                  {/* 末尾放置槽 */}
-                  {dragging && (
-                    <div
-                      className={cn(
-                        'h-20 rounded transition-all border-2 border-dashed flex items-center justify-center text-xs',
-                        dropTarget?.groupId === groupId &&
-                          arraysEqual(dropTarget.path, newPath) &&
-                          dropTarget.index === item.items.length
-                          ? 'border-primary bg-primary/20 text-primary font-medium'
-                          : 'border-gray-300 bg-gray-50/50 text-gray-400'
-                      )}
-                      onDragOver={e => handleDragOver(e, groupId, newPath, item.items.length)}
-                      onDrop={e => handleDrop(e, groupId, newPath, item.items.length)}
-                    >
-                      {dropTarget?.groupId === groupId &&
-                        arraysEqual(dropTarget.path, newPath) &&
-                        dropTarget.index === item.items.length ? '放置' : ''}
-                    </div>
-                  )}
                 </>
               )}
             </div>
@@ -1040,34 +1063,29 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
               </div>
             ) : (
               <>
+                {/* 开头放置指示器 */}
+                {dragging && (
+                  <div
+                    className={cn(
+                      'col-span-full h-2 rounded-full transition-all',
+                      dropTarget?.groupId === group.id &&
+                        arraysEqual(dropTarget.path, groupPath) &&
+                        dropTarget.index === 0
+                        ? 'bg-primary'
+                        : 'bg-transparent'
+                    )}
+                    onDragOver={e => handleDragOver(e, group.id, groupPath, 0)}
+                    onDrop={e => handleDrop(e, group.id, groupPath, 0)}
+                  />
+                )}
                 {group.items.map((item, index) => {
                   const isSource = dragging?.itemId === item.id
                   return (
                     <Fragment key={`item-wrapper-${item.id}`}>
-                      {/* 左侧放置槽 - 1列宽，所看即所得 */}
-                      {dragging && !isSource && (
-                        <div
-                          className={cn(
-                            'h-24 rounded transition-all border-2 border-dashed flex items-center justify-center text-xs',
-                            dropTarget?.groupId === group.id &&
-                              arraysEqual(dropTarget.path, groupPath) &&
-                              dropTarget.index === index
-                              ? 'border-primary bg-primary/20 text-primary font-medium'
-                              : 'border-gray-300 bg-gray-50/50 text-gray-400'
-                          )}
-                          onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
-                          onDrop={e => handleDrop(e, group.id, groupPath, index)}
-                        >
-                          {dropTarget?.groupId === group.id &&
-                            arraysEqual(dropTarget.path, groupPath) &&
-                            dropTarget.index === index ? '放置' : ''}
-                        </div>
-                      )}
-
                       {/* 字段或子分组 */}
                       {isSource ? (
                         <div
-                          className="h-24 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary"
+                          className="h-20 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary opacity-50"
                           style={{
                             gridColumn: item.width > 1 ? `span ${item.width}` : undefined,
                           }}
@@ -1075,36 +1093,64 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                           拖动中...
                         </div>
                       ) : item.type === 'field' ? (
-                        (() => {
-                          const field = getFieldById(item.fieldId)
-                          if (!field) return null
-                          return renderFieldDesignerCard(field, item, group.id, groupPath, index, false, 0, group.columns)
-                        })()
+                        <div
+                          className={cn(
+                            'transition-all',
+                            dropTarget?.groupId === group.id &&
+                              arraysEqual(dropTarget.path, groupPath) &&
+                              dropTarget.index === index
+                              ? 'ring-2 ring-primary ring-offset-1 rounded-lg'
+                              : ''
+                          )}
+                          style={{
+                            gridColumn: (item as FieldLayoutItem).width > 1 ? `span ${(item as FieldLayoutItem).width}` : undefined,
+                          }}
+                          onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
+                          onDrop={e => handleDrop(e, group.id, groupPath, index)}
+                        >
+                          {(() => {
+                            const field = getFieldById(item.fieldId)
+                            if (!field) return null
+                            return renderFieldDesignerCard(field, item as FieldLayoutItem, group.id, groupPath, index, false, 0, group.columns)
+                          })()}
+                        </div>
                       ) : (
-                        renderSubGroup(item, group.id, groupPath, index)
+                        <div
+                          className={cn(
+                            'transition-all',
+                            dropTarget?.groupId === group.id &&
+                              arraysEqual(dropTarget.path, groupPath) &&
+                              dropTarget.index === index
+                              ? 'ring-2 ring-primary ring-offset-1 rounded-lg'
+                              : ''
+                          )}
+                          style={{
+                            gridColumn: item.width > 1 ? `span ${item.width}` : undefined,
+                          }}
+                          onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
+                          onDrop={e => handleDrop(e, group.id, groupPath, index)}
+                        >
+                          {renderSubGroup(item as SubGroupLayoutItem, group.id, groupPath, index)}
+                        </div>
+                      )}
+                      {/* 字段后放置指示器 */}
+                      {dragging && (
+                        <div
+                          className={cn(
+                            'col-span-full h-2 rounded-full transition-all',
+                            dropTarget?.groupId === group.id &&
+                              arraysEqual(dropTarget.path, groupPath) &&
+                              dropTarget.index === index + 1
+                              ? 'bg-primary'
+                              : 'bg-transparent'
+                          )}
+                          onDragOver={e => handleDragOver(e, group.id, groupPath, index + 1)}
+                          onDrop={e => handleDrop(e, group.id, groupPath, index + 1)}
+                        />
                       )}
                     </Fragment>
                   )
                 })}
-                {/* 末尾放置槽 */}
-                {dragging && (
-                  <div
-                    className={cn(
-                      'h-24 rounded transition-all border-2 border-dashed flex items-center justify-center text-xs',
-                      dropTarget?.groupId === group.id &&
-                        arraysEqual(dropTarget.path, groupPath) &&
-                        dropTarget.index === group.items.length
-                        ? 'border-primary bg-primary/20 text-primary font-medium'
-                        : 'border-gray-300 bg-gray-50/50 text-gray-400'
-                    )}
-                    onDragOver={e => handleDragOver(e, group.id, groupPath, group.items.length)}
-                    onDrop={e => handleDrop(e, group.id, groupPath, group.items.length)}
-                  >
-                    {dropTarget?.groupId === group.id &&
-                      arraysEqual(dropTarget.path, groupPath) &&
-                      dropTarget.index === group.items.length ? '放置' : ''}
-                  </div>
-                )}
               </>
             )}
           </div>
