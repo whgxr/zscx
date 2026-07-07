@@ -305,6 +305,7 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     groupId: string
     path: string[]
     index: number
+    column?: number
   } | null>(null)
 
   const getUnassignedFields = (): TableField[] => {
@@ -397,13 +398,13 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     setDropTarget(null)
   }
 
-  const handleDragOver = (e: React.DragEvent, groupId: string, path: string[], index: number) => {
+  const handleDragOver = (e: React.DragEvent, groupId: string, path: string[], index: number, column?: number) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    setDropTarget({ groupId, path, index })
+    setDropTarget({ groupId, path, index, column })
   }
 
-  const handleDrop = (e: React.DragEvent, targetGroupId: string, targetPath: string[], targetIndex: number) => {
+  const handleDrop = (e: React.DragEvent, targetGroupId: string, targetPath: string[], targetIndex: number, column?: number) => {
     e.preventDefault()
     setDropTarget(null)
 
@@ -799,20 +800,20 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                 </div>
               ) : (
                 <>
-                  <div
-                    className={cn(
-                      'col-span-full h-1 rounded-full transition-colors',
-                      dropTarget?.groupId === groupId &&
-                        arraysEqual(dropTarget.path, newPath) &&
-                        dropTarget.index === 0
-                        ? 'bg-primary'
-                        : 'bg-transparent'
-                    )}
-                    onDragOver={e => handleDragOver(e, groupId, newPath, 0)}
-                    onDrop={e => handleDrop(e, groupId, newPath, 0)}
-                  />
                   {item.items.map((childItem, childIndex) => (
                     <div key={childItem.id} className="contents">
+                      <div
+                        className={cn(
+                          'h-8 mb-1 rounded-lg transition-all',
+                          dropTarget?.groupId === groupId &&
+                            arraysEqual(dropTarget.path, newPath) &&
+                            dropTarget.index === childIndex
+                            ? 'bg-primary/10 border-2 border-dashed border-primary'
+                            : dragging && 'bg-gray-50 border border-dashed border-gray-200'
+                        )}
+                        onDragOver={e => handleDragOver(e, groupId, newPath, childIndex)}
+                        onDrop={e => handleDrop(e, groupId, newPath, childIndex)}
+                      />
                       {childItem.type === 'field' ? (
                         (() => {
                           const field = getFieldById(childItem.fieldId)
@@ -822,20 +823,20 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                       ) : (
                         renderSubGroup(childItem, groupId, newPath, childIndex, depth + 1)
                       )}
-                      <div
-                        className={cn(
-                          'col-span-full h-1 rounded-full transition-colors -mt-1',
-                          dropTarget?.groupId === groupId &&
-                            arraysEqual(dropTarget.path, newPath) &&
-                            dropTarget.index === childIndex + 1
-                            ? 'bg-primary'
-                            : 'bg-transparent'
-                        )}
-                        onDragOver={e => handleDragOver(e, groupId, newPath, childIndex + 1)}
-                        onDrop={e => handleDrop(e, groupId, newPath, childIndex + 1)}
-                      />
                     </div>
                   ))}
+                  <div
+                    className={cn(
+                      'h-8 mt-1 rounded-lg transition-all col-span-full',
+                      dropTarget?.groupId === groupId &&
+                        arraysEqual(dropTarget.path, newPath) &&
+                        dropTarget.index === item.items.length
+                        ? 'bg-primary/10 border-2 border-dashed border-primary'
+                        : dragging && 'bg-gray-50 border border-dashed border-gray-200'
+                    )}
+                    onDragOver={e => handleDragOver(e, groupId, newPath, item.items.length)}
+                    onDrop={e => handleDrop(e, groupId, newPath, item.items.length)}
+                  />
                 </>
               )}
             </div>
@@ -952,20 +953,20 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
               </div>
             ) : (
               <>
-                <div
-                  className={cn(
-                    'col-span-full h-1 rounded-full transition-colors',
-                    dropTarget?.groupId === group.id &&
-                      arraysEqual(dropTarget.path, groupPath) &&
-                      dropTarget.index === 0
-                      ? 'bg-primary'
-                      : 'bg-transparent'
-                  )}
-                  onDragOver={e => handleDragOver(e, group.id, groupPath, 0)}
-                  onDrop={e => handleDrop(e, group.id, groupPath, 0)}
-                />
                 {group.items.map((item, index) => (
                   <div key={item.id} className="contents">
+                    <div
+                      className={cn(
+                        'h-10 mb-1 rounded-lg transition-all',
+                        dropTarget?.groupId === group.id &&
+                          arraysEqual(dropTarget.path, groupPath) &&
+                          dropTarget.index === index
+                          ? 'bg-primary/10 border-2 border-dashed border-primary'
+                          : dragging && 'bg-gray-50 border border-dashed border-gray-200'
+                      )}
+                      onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
+                      onDrop={e => handleDrop(e, group.id, groupPath, index)}
+                    />
                     {item.type === 'field' ? (
                       (() => {
                         const field = getFieldById(item.fieldId)
@@ -975,20 +976,20 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                     ) : (
                       renderSubGroup(item, group.id, groupPath, index)
                     )}
-                    <div
-                      className={cn(
-                        'col-span-full h-1 rounded-full transition-colors -mt-1',
-                        dropTarget?.groupId === group.id &&
-                          arraysEqual(dropTarget.path, groupPath) &&
-                          dropTarget.index === index + 1
-                          ? 'bg-primary'
-                          : 'bg-transparent'
-                      )}
-                      onDragOver={e => handleDragOver(e, group.id, groupPath, index + 1)}
-                      onDrop={e => handleDrop(e, group.id, groupPath, index + 1)}
-                    />
                   </div>
                 ))}
+                <div
+                  className={cn(
+                    'h-10 mt-1 rounded-lg transition-all col-span-full',
+                    dropTarget?.groupId === group.id &&
+                      arraysEqual(dropTarget.path, groupPath) &&
+                      dropTarget.index === group.items.length
+                      ? 'bg-primary/10 border-2 border-dashed border-primary'
+                      : dragging && 'bg-gray-50 border border-dashed border-gray-200'
+                  )}
+                  onDragOver={e => handleDragOver(e, group.id, groupPath, group.items.length)}
+                  onDrop={e => handleDrop(e, group.id, groupPath, group.items.length)}
+                />
               </>
             )}
           </div>
