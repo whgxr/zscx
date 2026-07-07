@@ -8,12 +8,22 @@ ssh.connect('192.168.0.7', port=22, username='zhaowei', password='Thomas009865')
 local_base = r"D:\开发征收项目\zscx\web"
 remote_base = "/vol3/1000/docker/zscx/web"
 
-# 只上传修复的文件
 files_to_upload = [
+    "app/api/auth/login/route.ts",
+    "app/api/auth/wechat/route.ts",
+    "app/api/auth/check/route.ts",
+    "app/api/auth/logout/route.ts",
+    "lib/auth.ts",
     "app/api/export/[tableName]/preview/route.ts",
+    "app/api/export/[tableName]/excel/route.ts",
+    "app/api/export/[tableName]/pdf/route.ts",
     "app/api/permissions/[userId]/route.ts",
     "app/api/version-logs/route.ts",
+    "app/api/export-templates/route.ts",
+    "app/api/export-templates/[id]/route.ts",
     "components/export/export-dialog.tsx",
+    "app/dashboard/export-templates/export-templates-client.tsx",
+    "app/dashboard/data/[tableName]/data-list-client.tsx",
     "prisma/schema.prisma",
     "prisma/seed.ts",
     "prisma/docker-migrate.js",

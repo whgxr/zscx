@@ -68,15 +68,18 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
 
   const fetchTemplates = async () => {
     try {
-      const res = await fetch(`/api/export-templates?tableId=${table.id}&category=EXPORT`)
+      const res = await fetch(`/api/export-templates?tableId=${table.id}`)
       if (res.ok) {
         const data = await res.json()
-        setTemplates(data.templates || [])
-        const defaultTemplate = data.templates?.find((t: ExportTemplate) => t.isDefault)
+        const exportTemplates = (data.templates || []).filter((t: ExportTemplate) => 
+          t.category?.includes('EXPORT')
+        )
+        setTemplates(exportTemplates)
+        const defaultTemplate = exportTemplates.find((t: ExportTemplate) => t.isDefault)
         if (defaultTemplate) {
           setSelectedTemplate(defaultTemplate.id.toString())
-        } else if (data.templates?.length > 0) {
-          setSelectedTemplate(data.templates[0].id.toString())
+        } else if (exportTemplates.length > 0) {
+          setSelectedTemplate(exportTemplates[0].id.toString())
         } else {
           setSelectedTemplate('')
         }

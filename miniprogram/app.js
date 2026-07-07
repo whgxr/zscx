@@ -1,6 +1,6 @@
 App({
   globalData: {
-    baseUrl: 'https://oa.whgxr.cn:777',
+    baseUrl: 'http://192.168.0.7:777',
     token: '',
     userInfo: null,
   },

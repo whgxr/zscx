@@ -481,14 +481,15 @@ async function main() {
         \`userAgent\` TEXT NULL,
         \`deviceInfo\` LONGTEXT NULL,
         \`isActive\` TINYINT(1) NOT NULL DEFAULT 1,
-        \`lastActiveAt\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`lastActiveAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`createdAt\` DATETIME NULL,
         \`expiresAt\` DATETIME NULL,
         INDEX \`UserSession_userId_idx\` (\`userId\`),
         INDEX \`UserSession_isActive_idx\` (\`isActive\`),
         CONSTRAINT \`UserSession_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `)
+    await createUpdateTrigger('UserSession')
     console.log('   ✅ UserSession 表创建完成')
   } else {
     console.log('   UserSession 表已存在')

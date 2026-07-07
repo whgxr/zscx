@@ -38,20 +38,21 @@ export async function GET(req: NextRequest) {
       OR: [
         { isSystem: true },
         { createdBy: user.id },
+        // 同表格的共享模板
+        {
+          isShared: true,
+          tableId: tableId ? parseInt(tableId) : undefined,
+        },
       ],
     }
 
     if (tableId) {
       where.OR = [
-        { ...where.OR[0], tableId: parseInt(tableId) },
-        { ...where.OR[1], tableId: parseInt(tableId) },
+        { isSystem: true, tableId: parseInt(tableId) },
+        { createdBy: user.id, tableId: parseInt(tableId) },
         {
           isShared: true,
-          sharedTables: {
-            some: {
-              id: parseInt(tableId),
-            },
-          },
+          tableId: parseInt(tableId),
         },
       ]
     }

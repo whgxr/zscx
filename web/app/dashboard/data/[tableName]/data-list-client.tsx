@@ -309,15 +309,18 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
     setSelectedRecord(record)
     setRecordPrintDialogOpen(true)
     try {
-      const res = await fetch(`/api/export-templates?tableId=${table.id}&category=PRINT`)
+      const res = await fetch(`/api/export-templates?tableId=${table.id}`)
       if (res.ok) {
         const data = await res.json()
-        setPrintTemplates(data.templates || [])
-        const defaultTemplate = data.templates?.find((t: any) => t.isDefault)
+        const printTemplates = (data.templates || []).filter((t: any) => 
+          t.category?.includes('PRINT')
+        )
+        setPrintTemplates(printTemplates)
+        const defaultTemplate = printTemplates.find((t: any) => t.isDefault)
         if (defaultTemplate) {
           setSelectedPrintTemplate(defaultTemplate.id.toString())
-        } else if (data.templates?.length > 0) {
-          setSelectedPrintTemplate(data.templates[0].id.toString())
+        } else if (printTemplates.length > 0) {
+          setSelectedPrintTemplate(printTemplates[0].id.toString())
         } else {
           setSelectedPrintTemplate('')
         }

@@ -67,6 +67,29 @@ export async function GET(
         selectedFields.sort((a: any, b: any) => {
           return fieldNames.indexOf(a.name) - fieldNames.indexOf(b.name)
         })
+      } else if (config?.grid) {
+        const fieldNames: string[] = []
+        config.grid.forEach((row: any[]) => {
+          row.forEach((cell: any) => {
+            if (cell?.value && cell.value.includes('{{') && cell.value.includes('}}')) {
+              const match = cell.value.match(/\{\{([^}]+)\}\}/)
+              if (match && match[1]) {
+                const fieldName = match[1].trim()
+                if (!['id', 'status', 'createdAt', 'createTime', 'updatedAt', 'updateTime'].includes(fieldName)) {
+                  if (!fieldNames.includes(fieldName)) {
+                    fieldNames.push(fieldName)
+                  }
+                }
+              }
+            }
+          })
+        })
+        if (fieldNames.length > 0) {
+          selectedFields = table.fields.filter((f: any) => fieldNames.includes(f.name))
+          selectedFields.sort((a: any, b: any) => {
+            return fieldNames.indexOf(a.name) - fieldNames.indexOf(b.name)
+          })
+        }
       }
     }
 
