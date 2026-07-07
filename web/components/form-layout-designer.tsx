@@ -486,29 +486,37 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
   }
 
   const handleWidthChange = (groupId: string, itemId: string, delta: number) => {
-    setConfig(prev => ({
-      ...prev,
-      groups: prev.groups.map(g => {
-        if (g.id !== groupId) return g
-        const findWidth = (items: LayoutItem[]): number | null => {
-          for (const item of items) {
-            if (item.id === itemId) return item.width
-            if (item.type === 'subgroup') {
-              const w = findWidth(item.items)
-              if (w !== null) return w
-            }
+    setConfig(prev => {
+      const group = prev.groups.find(g => g.id === groupId)
+      if (!group) return prev
+      // 找到 item 所在容器的 columns 和当前 width
+      const findContainer = (items: LayoutItem[], path: string[]): { container: FormLayoutGroup | SubGroupLayoutItem; currentWidth: number } | null => {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i]
+          if (it.id === itemId) {
+            // 找到 item，path 是从 group root 到包含它的容器
+            if (path.length === 0) return { container: group, currentWidth: it.width }
+            // path 的最后一个是子分组 id
+            const found = getContainerById(group, path)
+            if (found) return { container: found, currentWidth: it.width }
+            return null
           }
-          return null
+          if (it.type === 'subgroup') {
+            const sub = findContainer(it.items, [...path, it.id])
+            if (sub) return sub
+          }
         }
-        const currentWidth = findWidth(g.items) || 1
-        const maxWidth = pathToContainer(g.id, [], path => {
-          const container = getContainerById(g, path)
-          return container?.columns || 1
-        })
-        const newWidth = Math.max(1, Math.min(maxWidth, currentWidth + delta))
-        return { ...g, items: updateItemWidth(g.items, itemId, newWidth) }
-      }),
-    }))
+        return null
+      }
+      const result = findContainer(group.items, [])
+      if (!result) return prev
+      const maxWidth = result.container.columns || 1
+      const newWidth = Math.max(1, Math.min(maxWidth, result.currentWidth + delta))
+      return {
+        ...prev,
+        groups: prev.groups.map(g => (g.id === groupId ? { ...g, items: updateItemWidth(g.items, itemId, newWidth) } : g)),
+      }
+    })
   }
 
   const handleLabelWidthChange = (groupId: string, itemId: string, delta: number) => {
@@ -601,27 +609,31 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
 
   // ========== 渲染 ==========
 
-  const renderFieldCard = (
+  /** 渲染字段拖拽卡片（设计器内的简化版） */
+  const renderFieldDesignerCard = (
     field: TableField,
     item: FieldLayoutItem,
     groupId: string,
     path: string[],
     index: number,
     inSubGroup: boolean = false,
-    depth: number = 0
+    depth: number = 0,
+    containerColumns: number = 6
   ) => {
     const isDragging = dragging?.itemId === item.id || (dragging?.fieldId === item.fieldId && dragging?.sourcePath.length === 0)
     const isDropTarget = dropTarget?.groupId === groupId && arraysEqual(dropTarget.path, path) && dropTarget.index === index
+    const labelW = item.labelWidth || 100
+    const fieldW = item.width || 1
 
     return (
       <div
         key={item.id}
         className={cn(
           'transition-all duration-150',
-          isDragging && 'opacity-40'
+          isDragging && 'opacity-30'
         )}
         style={{
-          gridColumn: item.width > 1 ? `span ${item.width}` : undefined,
+          gridColumn: fieldW > 1 ? `span ${fieldW}` : undefined,
           minWidth: '140px',
         }}
       >
@@ -642,72 +654,86 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
           }
           onDragEnd={handleDragEnd}
           className={cn(
-            'flex items-center gap-1.5 p-2.5 bg-white border rounded-lg group hover:border-primary/50 hover:shadow-sm transition-all cursor-grab active:cursor-grabbing',
+            'border rounded-lg group hover:border-primary/50 hover:shadow-sm transition-all cursor-grab active:cursor-grabbing bg-white',
             inSubGroup && 'bg-gray-50',
             depth > 0 && 'bg-gray-50'
           )}
         >
-          <GripVertical className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-          <span className="text-base flex-shrink-0">{fieldTypeIcons[field.type]}</span>
-          <div className="flex-1 min-w-0">
-            <div className="font-medium text-sm truncate">{field.label}</div>
-            <div className="text-[11px] text-gray-500 truncate">{field.name}</div>
+          {/* 字段预览区 - 所看即所得 */}
+          <div className="p-2 border-b bg-gray-50/50">
+            <div className="flex items-center gap-2">
+              <GripVertical className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <span className="text-base flex-shrink-0">{fieldTypeIcons[field.type]}</span>
+              <div className="font-medium text-xs truncate flex-1">{field.label}</div>
+              {field.required && <span className="text-red-500 text-xs flex-shrink-0">*</span>}
+            </div>
           </div>
-          {field.required && (
-            <Badge variant="destructive" className="text-[10px] h-4 px-1 flex-shrink-0">
-              必填
+
+          {/* 实际标签+输入框预览 - 显示 labelWidth 效果 */}
+          <div className="p-2 flex items-start gap-2">
+            <div
+              className="flex-shrink-0 text-right text-xs text-gray-600 leading-7 truncate"
+              style={{ width: `${labelW}px`, minWidth: `${labelW}px` }}
+            >
+              {field.label}{field.required && <span className="text-red-500">*</span>}
+            </div>
+            <div className="flex-1 min-w-0 h-7 bg-white border border-dashed border-gray-300 rounded px-2 text-[10px] text-gray-400 flex items-center">
+              {field.placeholder || `请输入${field.label}`}
+            </div>
+          </div>
+
+          {/* 控制按钮区 */}
+          <div className="px-2 py-1.5 flex items-center gap-1 border-t bg-gray-50/30 flex-wrap">
+            <Badge variant="outline" className="text-[10px] h-4 px-1 bg-white">
+              {fieldW > 1 ? `${fieldW}列` : '1列'}
             </Badge>
-          )}
 
-          <Badge variant="outline" className="text-[10px] h-5 px-1 flex-shrink-0 bg-gray-50">
-            {item.width > 1 ? `${item.width}列` : ''}
-          </Badge>
+            <div className="flex items-center gap-0.5 bg-white border rounded px-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-4 w-4 p-0"
+                onClick={() => handleWidthChange(groupId, item.id, -1)}
+                disabled={fieldW <= 1}
+                title="减小宽度"
+              >
+                <Minimize2 className="w-2.5 h-2.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-4 w-4 p-0"
+                onClick={() => handleWidthChange(groupId, item.id, 1)}
+                disabled={fieldW >= containerColumns || fieldW >= 6}
+                title="增大宽度"
+              >
+                <Maximize2 className="w-2.5 h-2.5" />
+              </Button>
+            </div>
 
-          <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-0.5 bg-white border rounded px-1">
+              <Type className="w-2.5 h-2.5 text-gray-500" />
+              <button
+                onClick={() => handleLabelWidthChange(groupId, item.id, -10)}
+                className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-[10px] font-bold"
+              >-</button>
+              <span className="text-[10px] font-medium text-gray-600 w-8 text-center">{labelW}px</span>
+              <button
+                onClick={() => handleLabelWidthChange(groupId, item.id, 10)}
+                className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-[10px] font-bold"
+              >+</button>
+            </div>
+
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 w-6 p-0"
-              onClick={() => handleWidthChange(groupId, item.id, -1)}
-              disabled={item.width <= 1}
-              title="减小宽度"
+              className="h-4 w-4 p-0 text-red-500 hover:text-red-600 ml-auto"
+              onClick={() => handleRemoveItem(groupId, path, item.id)}
+              title="移除"
             >
-              <Minimize2 className="w-3 h-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0"
-              onClick={() => handleWidthChange(groupId, item.id, 1)}
-              disabled={item.width >= 12}
-              title="增大宽度"
-            >
-              <Maximize2 className="w-3 h-3" />
+              <Trash2 className="w-3 h-3" />
             </Button>
           </div>
-
-          <div className="flex items-center gap-0.5 bg-white border rounded px-1.5 py-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Type className="w-3 h-3 text-gray-500" />
-            <button
-              onClick={() => handleLabelWidthChange(groupId, item.id, -10)}
-              className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
-            >-</button>
-            <span className="text-xs font-medium text-gray-600 w-10 text-center">{item.labelWidth || 100}px</span>
-            <button
-              onClick={() => handleLabelWidthChange(groupId, item.id, 10)}
-              className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
-            >+</button>
-          </div>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 text-red-500 hover:text-red-600 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={() => handleRemoveItem(groupId, path, item.id)}
-            title="移除"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
         </div>
       </div>
     )
@@ -838,43 +864,71 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                 </div>
               ) : (
                 <>
-                  {item.items.map((childItem, childIndex) => (
-                    <Fragment key={`sub-item-wrapper-${childItem.id}`}>
-                      <div
-                        className={cn(
-                          'h-8 rounded-lg transition-all col-span-full',
-                          dropTarget?.groupId === groupId &&
-                            arraysEqual(dropTarget.path, newPath) &&
-                            dropTarget.index === childIndex
-                            ? 'bg-primary/10 border-2 border-dashed border-primary'
-                            : dragging && 'bg-gray-50 border border-dashed border-gray-200'
+                  {item.items.map((childItem, childIndex) => {
+                    const isSource = dragging?.itemId === childItem.id
+                    return (
+                      <Fragment key={`sub-item-wrapper-${childItem.id}`}>
+                        {/* 左侧放置槽 - 1列宽，所看即所得 */}
+                        {dragging && !isSource && (
+                          <div
+                            className={cn(
+                              'h-20 rounded transition-all border-2 border-dashed flex items-center justify-center text-xs',
+                              dropTarget?.groupId === groupId &&
+                                arraysEqual(dropTarget.path, newPath) &&
+                                dropTarget.index === childIndex
+                                ? 'border-primary bg-primary/20 text-primary font-medium'
+                                : 'border-gray-300 bg-gray-50/50 text-gray-400'
+                            )}
+                            onDragOver={e => handleDragOver(e, groupId, newPath, childIndex)}
+                            onDrop={e => handleDrop(e, groupId, newPath, childIndex)}
+                          >
+                            {dropTarget?.groupId === groupId &&
+                              arraysEqual(dropTarget.path, newPath) &&
+                              dropTarget.index === childIndex ? '放置' : ''}
+                          </div>
                         )}
-                        onDragOver={e => handleDragOver(e, groupId, newPath, childIndex)}
-                        onDrop={e => handleDrop(e, groupId, newPath, childIndex)}
-                      />
-                      {childItem.type === 'field' ? (
-                        (() => {
-                          const field = getFieldById(childItem.fieldId)
-                          if (!field) return null
-                          return renderFieldCard(field, childItem, groupId, newPath, childIndex, true, depth + 1)
-                        })()
-                      ) : (
-                        renderSubGroup(childItem, groupId, newPath, childIndex, depth + 1)
+
+                        {/* 字段或子分组 */}
+                        {isSource ? (
+                          <div
+                            className="h-20 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary"
+                            style={{
+                              gridColumn: childItem.width > 1 ? `span ${childItem.width}` : undefined,
+                            }}
+                          >
+                            拖动中...
+                          </div>
+                        ) : childItem.type === 'field' ? (
+                          (() => {
+                            const field = getFieldById(childItem.fieldId)
+                            if (!field) return null
+                            return renderFieldDesignerCard(field, childItem, groupId, newPath, childIndex, true, depth + 1, item.columns)
+                          })()
+                        ) : (
+                          renderSubGroup(childItem, groupId, newPath, childIndex, depth + 1)
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                  {/* 末尾放置槽 */}
+                  {dragging && (
+                    <div
+                      className={cn(
+                        'h-20 rounded transition-all border-2 border-dashed flex items-center justify-center text-xs',
+                        dropTarget?.groupId === groupId &&
+                          arraysEqual(dropTarget.path, newPath) &&
+                          dropTarget.index === item.items.length
+                          ? 'border-primary bg-primary/20 text-primary font-medium'
+                          : 'border-gray-300 bg-gray-50/50 text-gray-400'
                       )}
-                    </Fragment>
-                  ))}
-                  <div
-                    className={cn(
-                      'h-8 rounded-lg transition-all col-span-full',
-                      dropTarget?.groupId === groupId &&
+                      onDragOver={e => handleDragOver(e, groupId, newPath, item.items.length)}
+                      onDrop={e => handleDrop(e, groupId, newPath, item.items.length)}
+                    >
+                      {dropTarget?.groupId === groupId &&
                         arraysEqual(dropTarget.path, newPath) &&
-                        dropTarget.index === item.items.length
-                        ? 'bg-primary/10 border-2 border-dashed border-primary'
-                        : dragging && 'bg-gray-50 border border-dashed border-gray-200'
-                    )}
-                    onDragOver={e => handleDragOver(e, groupId, newPath, item.items.length)}
-                    onDrop={e => handleDrop(e, groupId, newPath, item.items.length)}
-                  />
+                        dropTarget.index === item.items.length ? '放置' : ''}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -991,43 +1045,71 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
               </div>
             ) : (
               <>
-                {group.items.map((item, index) => (
-                  <Fragment key={`item-wrapper-${item.id}`}>
-                    <div
-                      className={cn(
-                        'h-10 rounded-lg transition-all col-span-full',
-                        dropTarget?.groupId === group.id &&
-                          arraysEqual(dropTarget.path, groupPath) &&
-                          dropTarget.index === index
-                          ? 'bg-primary/10 border-2 border-dashed border-primary'
-                          : dragging && 'bg-gray-50 border border-dashed border-gray-200'
+                {group.items.map((item, index) => {
+                  const isSource = dragging?.itemId === item.id
+                  return (
+                    <Fragment key={`item-wrapper-${item.id}`}>
+                      {/* 左侧放置槽 - 1列宽，所看即所得 */}
+                      {dragging && !isSource && (
+                        <div
+                          className={cn(
+                            'h-24 rounded transition-all border-2 border-dashed flex items-center justify-center text-xs',
+                            dropTarget?.groupId === group.id &&
+                              arraysEqual(dropTarget.path, groupPath) &&
+                              dropTarget.index === index
+                              ? 'border-primary bg-primary/20 text-primary font-medium'
+                              : 'border-gray-300 bg-gray-50/50 text-gray-400'
+                          )}
+                          onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
+                          onDrop={e => handleDrop(e, group.id, groupPath, index)}
+                        >
+                          {dropTarget?.groupId === group.id &&
+                            arraysEqual(dropTarget.path, groupPath) &&
+                            dropTarget.index === index ? '放置' : ''}
+                        </div>
                       )}
-                      onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
-                      onDrop={e => handleDrop(e, group.id, groupPath, index)}
-                    />
-                    {item.type === 'field' ? (
-                      (() => {
-                        const field = getFieldById(item.fieldId)
-                        if (!field) return null
-                        return renderFieldCard(field, item, group.id, groupPath, index)
-                      })()
-                    ) : (
-                      renderSubGroup(item, group.id, groupPath, index)
+
+                      {/* 字段或子分组 */}
+                      {isSource ? (
+                        <div
+                          className="h-24 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary"
+                          style={{
+                            gridColumn: item.width > 1 ? `span ${item.width}` : undefined,
+                          }}
+                        >
+                          拖动中...
+                        </div>
+                      ) : item.type === 'field' ? (
+                        (() => {
+                          const field = getFieldById(item.fieldId)
+                          if (!field) return null
+                          return renderFieldDesignerCard(field, item, group.id, groupPath, index, false, 0, group.columns)
+                        })()
+                      ) : (
+                        renderSubGroup(item, group.id, groupPath, index)
+                      )}
+                    </Fragment>
+                  )
+                })}
+                {/* 末尾放置槽 */}
+                {dragging && (
+                  <div
+                    className={cn(
+                      'h-24 rounded transition-all border-2 border-dashed flex items-center justify-center text-xs',
+                      dropTarget?.groupId === group.id &&
+                        arraysEqual(dropTarget.path, groupPath) &&
+                        dropTarget.index === group.items.length
+                        ? 'border-primary bg-primary/20 text-primary font-medium'
+                        : 'border-gray-300 bg-gray-50/50 text-gray-400'
                     )}
-                  </Fragment>
-                ))}
-                <div
-                  className={cn(
-                    'h-10 rounded-lg transition-all col-span-full',
-                    dropTarget?.groupId === group.id &&
+                    onDragOver={e => handleDragOver(e, group.id, groupPath, group.items.length)}
+                    onDrop={e => handleDrop(e, group.id, groupPath, group.items.length)}
+                  >
+                    {dropTarget?.groupId === group.id &&
                       arraysEqual(dropTarget.path, groupPath) &&
-                      dropTarget.index === group.items.length
-                      ? 'bg-primary/10 border-2 border-dashed border-primary'
-                      : dragging && 'bg-gray-50 border border-dashed border-gray-200'
-                  )}
-                  onDragOver={e => handleDragOver(e, group.id, groupPath, group.items.length)}
-                  onDrop={e => handleDrop(e, group.id, groupPath, group.items.length)}
-                />
+                      dropTarget.index === group.items.length ? '放置' : ''}
+                  </div>
+                )}
               </>
             )}
           </div>
