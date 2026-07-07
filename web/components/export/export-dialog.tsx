@@ -25,7 +25,7 @@ import {
   Eye,
   Printer,
 } from 'lucide-react'
-import { DataTable, TableField, ExportType, TemplateCategory } from '@prisma/client'
+import { DataTable, TableField, ExportType } from '@prisma/client'
 
 interface ExportDialogProps {
   open: boolean
@@ -42,7 +42,7 @@ interface ExportTemplate {
   id: number
   name: string
   type: ExportType
-  category: TemplateCategory
+  category: string
   description: string | null
   config: any
   isDefault: boolean

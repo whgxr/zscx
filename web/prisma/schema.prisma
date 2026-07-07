@@ -381,7 +381,7 @@ model ExportTemplate {
   tableId      Int
   name         String           // 模板名称
   type         ExportType       // 导出类型
-  category     TemplateCategory @default(EXPORT) // 模板分类：导出/打印
+  category     String           @default("EXPORT") // 模板分类：逗号分隔，如 "EXPORT,PRINT"
   description  String?
   config       Json             // 导出配置（字段、样式等）
   isDefault    Boolean          @default(false)

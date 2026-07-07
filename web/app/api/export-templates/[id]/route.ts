@@ -2,15 +2,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { z } from 'zod'
+import { ExportType } from '@prisma/client'
 
 const updateTemplateSchema = z.object({
   name: z.string().min(1, '模板名称不能为空').optional(),
+  type: z.nativeEnum(ExportType).optional(),
+  category: z.union([z.string(), z.array(z.string())]).optional(),
   description: z.string().optional().nullable(),
   config: z.record(z.any()).optional(),
   isDefault: z.boolean().optional(),
   isShared: z.boolean().optional(),
   sharedTableIds: z.array(z.number()).optional(),
 })
+
+// 将分类值标准化为逗号分隔的字符串
+function normalizeCategory(category: string | string[] | undefined): string | undefined {
+  if (!category) return undefined
+  if (Array.isArray(category)) {
+    return category.filter(Boolean).join(',')
+  }
+  return String(category)
+}
 
 export async function PUT(
   req: NextRequest,
@@ -46,7 +58,6 @@ export async function PUT(
       await prisma.exportTemplate.updateMany({
         where: {
           tableId: template.tableId,
-          category: template.category,
           createdBy: user.id,
           isDefault: true,
           id: { not: templateId },
@@ -59,6 +70,8 @@ export async function PUT(
       where: { id: templateId },
       data: {
         ...(data.name !== undefined && { name: data.name }),
+        ...(data.type !== undefined && { type: data.type }),
+        ...(data.category !== undefined && { category: normalizeCategory(data.category) }),
         ...(data.description !== undefined && { description: data.description }),
         ...(data.config !== undefined && { config: data.config as any }),
         ...(data.isDefault !== undefined && { isDefault: data.isDefault }),

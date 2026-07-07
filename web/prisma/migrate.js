@@ -330,6 +330,7 @@ async function main() {
         \`name\` VARCHAR(191) NOT NULL,
         \`type\` ENUM('STANDARD','CARD','GROUPED','FORM') NOT NULL,
         \`format\` ENUM('EXCEL','PDF') NOT NULL,
+        \`category\` VARCHAR(191) NOT NULL DEFAULT 'EXPORT',
         \`description\` TEXT NULL,
         \`config\` LONGTEXT NOT NULL,
         \`isDefault\` TINYINT(1) NOT NULL DEFAULT 0,
@@ -350,6 +351,17 @@ async function main() {
     const [etCols] = await conn.execute('DESCRIBE `ExportTemplate`')
     if (!etCols.some(c => c.Field === 'isShared')) {
       await conn.execute('ALTER TABLE `ExportTemplate` ADD COLUMN `isShared` TINYINT(1) NOT NULL DEFAULT 0')
+    }
+    // category: ENUM -> VARCHAR (支持多分类逗号分隔)
+    const catCol = etCols.find(c => c.Field === 'category')
+    if (catCol && catCol.Type && catCol.Type.toLowerCase().startsWith('enum')) {
+      console.log('   ExportTemplate.category: ENUM -> VARCHAR(191)')
+      await conn.execute("ALTER TABLE `ExportTemplate` MODIFY COLUMN `category` VARCHAR(191) NOT NULL DEFAULT 'EXPORT'")
+      await conn.execute("ALTER TABLE `ExportTemplate` ADD INDEX `ExportTemplate_category_idx` (`category`)")
+    } else if (!catCol) {
+      console.log('   给 ExportTemplate 添加 category 字段')
+      await conn.execute("ALTER TABLE `ExportTemplate` ADD COLUMN `category` VARCHAR(191) NOT NULL DEFAULT 'EXPORT'")
+      await conn.execute("ALTER TABLE `ExportTemplate` ADD INDEX `ExportTemplate_category_idx` (`category`)")
     }
   }
   

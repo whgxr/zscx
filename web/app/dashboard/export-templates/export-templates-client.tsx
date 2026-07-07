@@ -31,10 +31,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { 
-  Plus, 
-  Edit, 
-  Trash2, 
+import {
+  Plus,
+  Edit,
+  Trash2,
   FileSpreadsheet,
   FileText,
   Star,
@@ -48,9 +48,10 @@ import {
   Check,
   Printer,
   Download,
+  Settings2,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
-import { ExportType, TemplateCategory, DataTable, TableField, ExportTemplate } from '@prisma/client'
+import { ExportType, DataTable, TableField, ExportTemplate } from '@prisma/client'
 
 interface TemplateWithTable extends ExportTemplate {
   table: {
@@ -93,11 +94,24 @@ const categoryIcons: Record<string, any> = {
   PRINT: Printer,
 }
 
+// 解析逗号分隔的分类字符串为数组
+function parseCategories(category: string | null | undefined): string[] {
+  if (!category) return []
+  return category.split(',').map(c => c.trim()).filter(Boolean)
+}
+
+// 判断模板是否包含指定分类
+function hasCategory(template: ExportTemplate, cat: string): boolean {
+  return parseCategories(template.category).includes(cat)
+}
+
 export function ExportTemplatesClient({ initialTemplates, tables }: ExportTemplatesClientProps) {
   const router = useRouter()
   const [templates, setTemplates] = useState<TemplateWithTable[]>(initialTemplates)
-  const [activeCategory, setActiveCategory] = useState<TemplateCategory>('EXPORT')
+  const [activeCategory, setActiveCategory] = useState<string>('EXPORT')
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState<TemplateWithTable | null>(null)
   const [loading, setLoading] = useState(false)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [sharingTemplate, setSharingTemplate] = useState<any>(null)
@@ -106,8 +120,13 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
     name: '',
     tableId: '',
     type: 'STANDARD' as ExportType,
-    category: 'EXPORT' as TemplateCategory,
+    categories: ['EXPORT'] as string[],
     description: '',
+  })
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    type: 'STANDARD' as ExportType,
+    categories: ['EXPORT'] as string[],
   })
 
   const handleCreate = async () => {
@@ -133,6 +152,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
         body: JSON.stringify({
           ...formData,
           tableId: parseInt(formData.tableId),
+          category: formData.categories,
           config: defaultConfig,
         }),
       })
@@ -140,7 +160,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
       if (res.ok) {
         const data = await res.json()
         setDialogOpen(false)
-        setFormData({ name: '', tableId: '', type: 'STANDARD', category: activeCategory, description: '' })
+        setFormData({ name: '', tableId: '', type: 'STANDARD', categories: ['EXPORT'], description: '' })
         router.push(`/dashboard/export-templates/${data.template.id}`)
       } else {
         const data = await res.json()
@@ -227,6 +247,59 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
     }
   }
 
+  const openEditDialog = (template: TemplateWithTable) => {
+    setEditingTemplate(template)
+    setEditFormData({
+      name: template.name,
+      type: template.type as ExportType,
+      categories: parseCategories(template.category),
+    })
+    setEditDialogOpen(true)
+  }
+
+  const handleEditSave = async () => {
+    if (!editingTemplate) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/export-templates/${editingTemplate.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editFormData.name,
+          type: editFormData.type,
+          category: editFormData.categories,
+        }),
+      })
+
+      if (res.ok) {
+        setEditDialogOpen(false)
+        setEditingTemplate(null)
+        router.refresh()
+      } else {
+        const data = await res.json()
+        alert(data.message || '更新失败')
+      }
+    } catch (err) {
+      alert('更新失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggleCategory = (cat: string, isEdit: boolean = false) => {
+    const target = isEdit ? editFormData : formData
+    const setter = isEdit ? setEditFormData : setFormData
+    const current = target.categories
+    const updated = current.includes(cat)
+      ? current.filter(c => c !== cat)
+      : [...current, cat]
+    // 至少保留一个分类
+    if (updated.length === 0) return
+    setter({ ...target, categories: updated } as any)
+  }
+
+  const filteredTemplates = templates.filter(t => hasCategory(t, activeCategory))
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -236,7 +309,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button onClick={() => setFormData({ ...formData, category: activeCategory })}>
+            <Button onClick={() => setFormData({ name: '', tableId: '', type: 'STANDARD', categories: [activeCategory], description: '' })}>
               <Plus className="w-4 h-4 mr-2" />
               新建模板
             </Button>
@@ -259,16 +332,29 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                 />
               </div>
               <div className="space-y-2">
-                <Label>模板分类</Label>
-                <Select value={formData.category} onValueChange={(v: TemplateCategory) => setFormData({ ...formData, category: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="EXPORT">导出模板</SelectItem>
-                    <SelectItem value="PRINT">打印模板</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>模板分类（可多选）</Label>
+                <div className="flex gap-2">
+                  {Object.entries(categoryLabels).map(([key, label]) => {
+                    const CatIcon = categoryIcons[key]
+                    const isSelected = formData.categories.includes(key)
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => toggleCategory(key)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${
+                          isSelected
+                            ? 'bg-primary text-white border-primary'
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <CatIcon className="w-4 h-4" />
+                        {label}
+                        {isSelected && <Check className="w-3.5 h-3.5" />}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="tableId">所属数据表</Label>
@@ -332,7 +418,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
               return (
                 <button
                   key={key}
-                  onClick={() => setActiveCategory(key as TemplateCategory)}
+                  onClick={() => setActiveCategory(key)}
                   className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                     activeCategory === key
                       ? 'border-primary text-primary'
@@ -342,7 +428,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                   <CatIcon className="w-4 h-4" />
                   {label}
                   <Badge variant="secondary" className="text-xs ml-1">
-                    {templates.filter(t => t.category === key).length}
+                    {templates.filter(t => hasCategory(t, key)).length}
                   </Badge>
                 </button>
               )
@@ -356,16 +442,17 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                 <TableHead>模板名称</TableHead>
                 <TableHead>所属表</TableHead>
                 <TableHead>类型</TableHead>
-                <TableHead>创建者</TableHead>
+                <TableHead>分类</TableHead>
                 <TableHead>默认</TableHead>
                 <TableHead>更新时间</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {templates.filter(t => t.category === activeCategory).length > 0 ? (
-                templates.filter(t => t.category === activeCategory).map((template) => {
+              {filteredTemplates.length > 0 ? (
+                filteredTemplates.map((template) => {
                   const TypeIcon = typeIcons[template.type] || TableIcon
+                  const cats = parseCategories(template.category)
                   return (
                     <TableRow key={template.id}>
                       <TableCell className="font-medium">
@@ -396,8 +483,14 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                           {typeLabels[template.type]}
                         </div>
                       </TableCell>
-                      <TableCell className="text-gray-500">
-                        {template.isSystem ? '系统' : '自定义'}
+                      <TableCell>
+                        <div className="flex gap-1">
+                          {cats.map(cat => (
+                            <Badge key={cat} variant="outline" className="text-xs">
+                              {categoryLabels[cat] || cat}
+                            </Badge>
+                          ))}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <button
@@ -421,6 +514,16 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
+                          {!template.isSystem && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="修改名称和类型"
+                              onClick={() => openEditDialog(template)}
+                            >
+                              <Settings2 className="w-4 h-4" />
+                            </Button>
+                          )}
                           {!template.isSystem && (
                             <Button
                               variant="ghost"
@@ -459,6 +562,76 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
           </Table>
         </CardContent>
       </Card>
+
+      {/* 编辑名称和类型对话框 */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修改模板信息</DialogTitle>
+            <DialogDescription>
+              修改模板的名称、类型和分类
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">模板名称</Label>
+              <Input
+                id="edit-name"
+                placeholder="模板名称"
+                value={editFormData.name}
+                onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>模板分类（可多选）</Label>
+              <div className="flex gap-2">
+                {Object.entries(categoryLabels).map(([key, label]) => {
+                  const CatIcon = categoryIcons[key]
+                  const isSelected = editFormData.categories.includes(key)
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => toggleCategory(key, true)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${
+                        isSelected
+                          ? 'bg-primary text-white border-primary'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <CatIcon className="w-4 h-4" />
+                      {label}
+                      {isSelected && <Check className="w-3.5 h-3.5" />}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>模板类型</Label>
+              <Select value={editFormData.type} onValueChange={(v: ExportType) => setEditFormData({ ...editFormData, type: v })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="STANDARD">标准列表</SelectItem>
+                  <SelectItem value="CARD">卡片式</SelectItem>
+                  <SelectItem value="GROUPED">分组汇总</SelectItem>
+                  <SelectItem value="FORM">表单式</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleEditSave} disabled={loading || !editFormData.name}>
+              {loading ? '保存中...' : '保存'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
         <DialogContent>
