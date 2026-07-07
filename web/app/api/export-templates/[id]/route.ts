@@ -43,11 +43,13 @@ export async function PUT(
       return NextResponse.json({ message: '模板不存在' }, { status: 404 })
     }
 
-    if (template.isSystem) {
-      return NextResponse.json({ message: '系统模板不能修改' }, { status: 403 })
+    // 系统模板：管理员和创建者可以修改，其他用户不能修改
+    if (template.isSystem && user.role?.name !== 'ADMIN' && template.createdBy !== user.id) {
+      return NextResponse.json({ message: '系统模板只有管理员或创建者可以修改' }, { status: 403 })
     }
 
-    if (template.createdBy !== user.id && user.role?.name !== 'ADMIN') {
+    // 非系统模板：只有创建者和管理员可以修改
+    if (!template.isSystem && template.createdBy !== user.id && user.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限修改此模板' }, { status: 403 })
     }
 
@@ -126,11 +128,13 @@ export async function DELETE(
       return NextResponse.json({ message: '模板不存在' }, { status: 404 })
     }
 
-    if (template.isSystem) {
-      return NextResponse.json({ message: '系统模板不能删除' }, { status: 403 })
+    // 系统模板：管理员和创建者可以删除，其他用户不能删除
+    if (template.isSystem && user.role?.name !== 'ADMIN' && template.createdBy !== user.id) {
+      return NextResponse.json({ message: '系统模板只有管理员或创建者可以删除' }, { status: 403 })
     }
 
-    if (template.createdBy !== user.id && user.role?.name !== 'ADMIN') {
+    // 非系统模板：只有创建者和管理员可以删除
+    if (!template.isSystem && template.createdBy !== user.id && user.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '无权限删除此模板' }, { status: 403 })
     }
 

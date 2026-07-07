@@ -10,32 +10,7 @@ local_base = r"D:\开发征收项目\zscx\web"
 remote_base = "/vol3/1000/docker/zscx/web"
 
 files_to_upload = [
-    "app/api/auth/login/route.ts",
-    "app/api/auth/wechat/route.ts",
-    "app/api/auth/check/route.ts",
-    "app/api/auth/logout/route.ts",
-    "lib/auth.ts",
-    "app/api/export/[tableName]/preview/route.ts",
-    "app/api/export/[tableName]/excel/route.ts",
-    "app/api/export/[tableName]/pdf/route.ts",
-    "app/api/permissions/[userId]/route.ts",
-    "app/api/version-logs/route.ts",
-    "app/api/export-templates/route.ts",
     "app/api/export-templates/[id]/route.ts",
-    "components/export/export-dialog.tsx",
-    "app/dashboard/export-templates/export-templates-client.tsx",
-    "app/dashboard/data/[tableName]/data-list-client.tsx",
-    # 表单布局升级相关文件
-    "app/dashboard/tables/[id]/field-designer.tsx",
-    "components/form-layout-designer.tsx",
-    "components/dynamic-form.tsx",
-    "prisma/schema.prisma",
-    "prisma/seed.ts",
-    "prisma/docker-migrate.js",
-    "prisma/migrate.js",
-    # 依赖更新
-    "package.json",
-    "package-lock.json",
 ]
 
 sftp = ssh.open_sftp()
@@ -66,7 +41,7 @@ print(f"\nUploaded {success_count}/{len(files_to_upload)} files", flush=True)
 print("\n=== Starting Docker rebuild ===", flush=True)
 print("This will take 2-5 minutes...", flush=True)
 
-cmd = "echo 'Thomas009865' | sudo -S bash -c 'cd /vol3/1000/docker/zscx/docker && docker compose up -d --build --force-recreate' 2>&1"
+cmd = "echo 'Thomas009865' | sudo -S bash -c 'cd /vol3/1000/docker/zscx/docker && docker compose restart web' 2>&1"
 stdin, stdout, stderr = ssh.exec_command(cmd)
 
 output = ""

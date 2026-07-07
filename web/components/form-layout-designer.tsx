@@ -618,8 +618,8 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     depth: number = 0,
     containerColumns: number = 6
   ) => {
-    const isDragging = dragging?.itemId === item.id || (dragging?.fieldId === item.fieldId && dragging?.sourcePath.length === 0)
-    const isDropTarget = dropTarget?.groupId === groupId && arraysEqual(dropTarget.path, path) && dropTarget.index === index
+    const isDragging = dragging?.itemId === item.id || 
+      (dragging?.itemType === 'field' && dragging?.fieldId === item.fieldId && dragging?.sourcePath.length === 0)
     const labelW = item.labelWidth || 100
     const fieldW = item.width || 1
 
@@ -635,8 +635,6 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
           minWidth: '140px',
         }}
       >
-        {isDropTarget && <div className="h-1 bg-primary rounded-full mb-1" />}
-
         <div
           draggable
           onDragStart={e =>
@@ -744,7 +742,8 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     index: number,
     depth: number = 0
   ) => {
-    const isDragging = dragging?.itemId === item.id
+    const isDragging = dragging?.itemId === item.id || 
+      (dragging?.itemType === 'subgroup' && dragging?.itemId === item.id)
     const isDropTarget = dropTarget?.groupId === groupId && arraysEqual(dropTarget.path, path) && dropTarget.index === index
     const newPath = [...path, item.id]
 
@@ -863,7 +862,8 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
               ) : (
                 <>
                   {item.items.map((childItem, childIndex) => {
-                    const isSource = dragging?.itemId === childItem.id
+                    const isSource = dragging?.itemId === childItem.id ||
+                      (dragging?.itemType === 'field' && dragging?.fieldId === (childItem as FieldLayoutItem).fieldId && dragging?.sourcePath.length === 0)
                     return (
                       <Fragment key={`sub-item-wrapper-${childItem.id}`}>
                         {/* 左侧放置槽 - 1列宽，所看即所得 */}
@@ -1044,7 +1044,8 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
             ) : (
               <>
                 {group.items.map((item, index) => {
-                  const isSource = dragging?.itemId === item.id
+                  const isSource = dragging?.itemId === item.id || 
+                    (dragging?.itemType === 'field' && dragging?.fieldId === (item as FieldLayoutItem).fieldId && dragging?.sourcePath.length === 0)
                   return (
                     <Fragment key={`item-wrapper-${item.id}`}>
                       {/* 左侧放置槽 - 1列宽，所看即所得 */}
