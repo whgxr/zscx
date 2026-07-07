@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, Fragment } from 'react'
+import { useState, Fragment, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -153,6 +153,24 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
     path: string[]
     index: number
   } | null>(null)
+  const dragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (dragTimeoutRef.current) {
+        clearTimeout(dragTimeoutRef.current)
+        dragTimeoutRef.current = null
+      }
+      setDragging(null)
+      setDropTarget(null)
+    }
+    document.addEventListener('mouseup', handleGlobalMouseUp)
+    document.addEventListener('touchend', handleGlobalMouseUp)
+    return () => {
+      document.removeEventListener('mouseup', handleGlobalMouseUp)
+      document.removeEventListener('touchend', handleGlobalMouseUp)
+    }
+  }, [])
 
   const unassignedFields = fields.filter(field => {
     if (!field.showInForm) return false
@@ -207,11 +225,20 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
   }
 
   const handleDragStart = (e: React.DragEvent, data: typeof dragging) => {
-    setDragging(data)
+    if (dragTimeoutRef.current) {
+      clearTimeout(dragTimeoutRef.current)
+    }
+    dragTimeoutRef.current = setTimeout(() => {
+      setDragging(data)
+    }, 100)
     e.dataTransfer.effectAllowed = 'move'
   }
 
   const handleDragEnd = () => {
+    if (dragTimeoutRef.current) {
+      clearTimeout(dragTimeoutRef.current)
+      dragTimeoutRef.current = null
+    }
     setDragging(null)
     setDropTarget(null)
   }
