@@ -2,17 +2,26 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { z } from 'zod'
-import { ExportType, TemplateCategory } from '@prisma/client'
+import { ExportType } from '@prisma/client'
 
 const createTemplateSchema = z.object({
   tableId: z.number(),
   name: z.string().min(1, '模板名称不能为空'),
   type: z.nativeEnum(ExportType),
-  category: z.nativeEnum(TemplateCategory).optional(),
+  category: z.union([z.string(), z.array(z.string())]).optional(),
   description: z.string().optional().nullable(),
   config: z.record(z.any()),
   isDefault: z.boolean().optional(),
 })
+
+// 将分类值标准化为逗号分隔的字符串
+function normalizeCategory(category: string | string[] | undefined): string {
+  if (!category) return 'EXPORT'
+  if (Array.isArray(category)) {
+    return category.filter(Boolean).join(',')
+  }
+  return String(category)
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -48,7 +57,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (category) {
-      where.category = category as TemplateCategory
+      where.category = { contains: category }
     }
 
     const templates = await prisma.exportTemplate.findMany({
@@ -90,7 +99,6 @@ export async function POST(req: NextRequest) {
       await prisma.exportTemplate.updateMany({
         where: {
           tableId: data.tableId,
-          category: data.category || 'EXPORT',
           createdBy: user.id,
           isDefault: true,
         },
@@ -103,7 +111,7 @@ export async function POST(req: NextRequest) {
         tableId: data.tableId,
         name: data.name,
         type: data.type,
-        category: data.category || 'EXPORT',
+        category: normalizeCategory(data.category),
         description: data.description || null,
         config: data.config as any,
         isDefault: data.isDefault || false,

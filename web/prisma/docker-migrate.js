@@ -174,7 +174,7 @@ async function main() {
     }
   }
 
-  // ExportTemplate 添加 category 字段（替换 format）
+  // ExportTemplate 添加 category 字段（支持多分类逗号分隔）
   if (tableNames.includes('exporttemplate')) {
     const etCols = await prisma.$queryRaw`DESCRIBE \`ExportTemplate\``
     const etColNames = etCols.map(c => c.Field)
@@ -182,10 +182,14 @@ async function main() {
       console.log('   给 ExportTemplate 添加 isShared 字段')
       await prisma.$executeRawUnsafe('ALTER TABLE `ExportTemplate` ADD COLUMN `isShared` TINYINT(1) NOT NULL DEFAULT 0')
     }
-    if (!etColNames.includes('category')) {
+    const catCol = etCols.find(c => c.Field === 'category')
+    if (!catCol) {
       console.log('   给 ExportTemplate 添加 category 字段')
-      await prisma.$executeRawUnsafe("ALTER TABLE `ExportTemplate` ADD COLUMN `category` ENUM('EXPORT','PRINT') NOT NULL DEFAULT 'EXPORT'")
+      await prisma.$executeRawUnsafe("ALTER TABLE `ExportTemplate` ADD COLUMN `category` VARCHAR(191) NOT NULL DEFAULT 'EXPORT'")
       await prisma.$executeRawUnsafe("ALTER TABLE `ExportTemplate` ADD INDEX `ExportTemplate_category_idx` (`category`)")
+    } else if (catCol.Type && catCol.Type.toLowerCase().startsWith('enum')) {
+      console.log('   ExportTemplate.category: ENUM -> VARCHAR(191)')
+      await prisma.$executeRawUnsafe("ALTER TABLE `ExportTemplate` MODIFY COLUMN `category` VARCHAR(191) NOT NULL DEFAULT 'EXPORT'")
     }
   }
 
@@ -410,7 +414,7 @@ async function createExportTemplate(prisma) {
       \`tableId\` INT NOT NULL,
       \`name\` VARCHAR(191) NOT NULL,
       \`type\` ENUM('STANDARD','CARD','GROUPED','FORM') NOT NULL,
-      \`category\` ENUM('EXPORT','PRINT') NOT NULL DEFAULT 'EXPORT',
+      \`category\` VARCHAR(191) NOT NULL DEFAULT 'EXPORT',
       \`description\` TEXT NULL,
       \`config\` JSON NOT NULL,
       \`isDefault\` TINYINT(1) NOT NULL DEFAULT 0,
