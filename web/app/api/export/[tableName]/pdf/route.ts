@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import ExcelJS from 'exceljs'
 import { ExportType } from '@prisma/client'
-import { PDFDocument, PDFFont, rgb, StandardFonts, degrees } from 'pdf-lib'
-import fontkit from '@pdf-lib/fontkit'
 import * as fs from 'fs'
 import * as path from 'path'
+import { execSync } from 'child_process'
 
 const statusText: Record<string, string> = {
   DRAFT: '草稿',
@@ -15,79 +15,15 @@ const statusText: Record<string, string> = {
   ARCHIVED: '已归档',
 }
 
-interface Fonts {
-  regular: PDFFont
-  bold: PDFFont
-}
-
-let cachedRegularFontBytes: Buffer | null = null
-let cachedBoldFontBytes: Buffer | null = null
-const fontCacheTTL = 3600000
-
-function loadFontBytes(): { regular: Buffer; bold: Buffer } {
-  const fontDir = path.join(process.cwd(), 'public', 'fonts')
-  const regularFontPath = path.join(fontDir, 'NotoSansSC-Regular.ttf')
-  const boldFontPath = path.join(fontDir, 'NotoSansSC-Bold.ttf')
-  
-  if (!cachedRegularFontBytes) {
-    cachedRegularFontBytes = fs.readFileSync(regularFontPath)
-  }
-  if (!cachedBoldFontBytes) {
-    cachedBoldFontBytes = fs.readFileSync(boldFontPath)
-  }
-  
-  return { regular: cachedRegularFontBytes, bold: cachedBoldFontBytes }
-}
-
-async function loadFonts(pdfDoc: PDFDocument): Promise<Fonts> {
-  pdfDoc.registerFontkit(fontkit)
-  
-  const { regular: regularFontBytes, bold: boldFontBytes } = loadFontBytes()
-  
-  const regularFont = await pdfDoc.embedFont(regularFontBytes)
-  const boldFont = await pdfDoc.embedFont(boldFontBytes)
-  
-  return { regular: regularFont, bold: boldFont }
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
   return result
     ? {
-        r: parseInt(result[1], 16) / 255,
-        g: parseInt(result[2], 16) / 255,
-        b: parseInt(result[3], 16) / 255,
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
       }
-    : { r: 0, g: 0, b: 0 }
-}
-
-function wrapText(
-  text: string,
-  font: PDFFont,
-  fontSize: number,
-  maxWidth: number
-): string[] {
-  if (!text) return ['']
-  
-  const lines: string[] = []
-  let currentLine = ''
-  
-  for (const char of text) {
-    const testLine = currentLine + char
-    const width = font.widthOfTextAtSize(testLine, fontSize)
-    if (width > maxWidth && currentLine.length > 0) {
-      lines.push(currentLine)
-      currentLine = char
-    } else {
-      currentLine = testLine
-    }
-  }
-  
-  if (currentLine) {
-    lines.push(currentLine)
-  }
-  
-  return lines.length > 0 ? lines : ['']
+    : null
 }
 
 export async function GET(
@@ -146,6 +82,9 @@ export async function GET(
     if (fieldsParam) {
       const fieldNames = fieldsParam.split(',')
       selectedFields = table.fields.filter((f: any) => fieldNames.includes(f.name))
+      selectedFields.sort((a: any, b: any) => {
+        return fieldNames.indexOf(a.name) - fieldNames.indexOf(b.name)
+      })
     }
 
     let templateConfig: any = null
@@ -166,8 +105,8 @@ export async function GET(
       }
     }
 
-    const pdfDoc = await PDFDocument.create()
-    const fonts = await loadFonts(pdfDoc)
+    const workbook = new ExcelJS.Workbook()
+    const worksheet = workbook.addWorksheet(table.label)
 
     const typeNames: Record<string, string> = {
       STANDARD: '标准表格',
@@ -177,32 +116,65 @@ export async function GET(
     }
 
     if (useTemplate && templateConfig?.grid) {
-      await exportTemplatePdf(pdfDoc, fonts, table, records, templateConfig, exportTemplate)
+      await exportTemplateExcel(worksheet, table, records, templateConfig, exportTemplate)
     } else {
       const type = templateConfig?.type || ExportType.STANDARD
-      const orientation = templateConfig?.orientation === 'landscape' 
-        ? 'landscape' 
+      const orientation = templateConfig?.orientation === 'landscape'
+        ? 'landscape'
         : (selectedFields.length > 6 ? 'landscape' : 'portrait')
 
       switch (type) {
         case ExportType.STANDARD:
-          await exportStandardPdf(pdfDoc, fonts, table, selectedFields, records, templateConfig, orientation)
+          await exportStandardExcel(worksheet, table, selectedFields, records, templateConfig)
           break
         case ExportType.CARD:
-          await exportCardPdf(pdfDoc, fonts, table, selectedFields, records, templateConfig)
+          await exportCardExcel(worksheet, table, selectedFields, records, templateConfig)
           break
         case ExportType.GROUPED:
-          await exportGroupedPdf(pdfDoc, fonts, table, selectedFields, records, templateConfig, orientation)
+          await exportGroupedExcel(worksheet, table, selectedFields, records, templateConfig)
           break
         case ExportType.FORM:
-          await exportFormPdf(pdfDoc, fonts, table, selectedFields, records, templateConfig)
+          await exportFormExcel(worksheet, table, selectedFields, records, templateConfig)
           break
         default:
-          await exportStandardPdf(pdfDoc, fonts, table, selectedFields, records, templateConfig, orientation)
+          await exportStandardExcel(worksheet, table, selectedFields, records, templateConfig)
       }
     }
 
-    const pdfBytes = await pdfDoc.save()
+    const excelBuffer = await workbook.xlsx.writeBuffer()
+
+    const tempDir = path.join(process.cwd(), 'tmp')
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true })
+    }
+
+    const timestamp = Date.now()
+    const excelPath = path.join(tempDir, `export_${timestamp}.xlsx`)
+    const pdfPath = path.join(tempDir, `export_${timestamp}.pdf`)
+
+    fs.writeFileSync(excelPath, excelBuffer as unknown as Buffer)
+
+    try {
+      execSync(`soffice --headless --convert-to pdf "${excelPath}" --outdir "${tempDir}"`)
+    } catch (convertError) {
+      console.error('Excel to PDF conversion failed:', convertError)
+      fs.unlinkSync(excelPath)
+      if (fs.existsSync(pdfPath)) {
+        fs.unlinkSync(pdfPath)
+      }
+      return NextResponse.json({ message: 'PDF转换失败' }, { status: 500 })
+    }
+
+    if (!fs.existsSync(pdfPath)) {
+      fs.unlinkSync(excelPath)
+      return NextResponse.json({ message: 'PDF转换失败' }, { status: 500 })
+    }
+
+    const pdfBytes = fs.readFileSync(pdfPath)
+
+    fs.unlinkSync(excelPath)
+    fs.unlinkSync(pdfPath)
+
     const type = templateConfig?.type || ExportType.STANDARD
     const fileName = `${table.label}_${typeNames[type] || '导出'}_${new Date().toISOString().slice(0, 10)}.pdf`
 
@@ -271,651 +243,343 @@ export async function GET(
   }
 }
 
-async function exportStandardPdf(
-  pdfDoc: PDFDocument,
-  fonts: Fonts,
-  table: any,
-  fields: any[],
-  records: any[],
-  config: any,
-  orientation: string
-) {
-  const isLandscape = orientation === 'landscape'
-  const pageWidth = isLandscape ? 842 : 595
-  const pageHeight = isLandscape ? 595 : 842
-  
-  let page = pdfDoc.addPage([pageWidth, pageHeight])
-  const marginLeft = 40
-  const marginRight = 40
-  const marginTop = 40
-  const marginBottom = 40
-  const contentWidth = pageWidth - marginLeft - marginRight
-
-  const titleSize = config?.titleSize || 16
-  const fontSize = config?.fontSize || 8
-  const headerColor = config?.headerColor || [59, 130, 246]
-  const zebraColor = config?.zebraColor || [248, 249, 250]
-
-  let currentY = pageHeight - marginTop
-
-  page.drawText(table.label, {
-    x: marginLeft,
-    y: currentY,
-    font: fonts.bold,
-    size: titleSize,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= titleSize + 10
-
-  page.drawText(`导出时间: ${new Date().toLocaleString('zh-CN')}`, {
-    x: marginLeft,
-    y: currentY,
-    font: fonts.regular,
-    size: 10,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= 18
-
-  page.drawText(`记录数: ${records.length}`, {
-    x: marginLeft,
-    y: currentY,
-    font: fonts.regular,
-    size: 10,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= 25
-
-  const headers = ['ID', ...fields.map(f => f.label), '状态', '创建时间']
-  const body = records.map(record => {
-    const data = record.data as Record<string, any> || {}
-    return [
-      record.id.toString(),
-      ...fields.map(f => data[f.name]?.toString() || ''),
-      statusText[record.status] || record.status,
-      record.createdAt.toLocaleString('zh-CN'),
-    ]
-  })
-
-  const colCount = headers.length
-  const colWidth = contentWidth / colCount
-  const rowHeight = Math.max(20, fontSize * 1.8)
-  const headerHeight = Math.max(24, fontSize * 2)
-
-  const headerColorRgb = {
-    r: headerColor[0] / 255,
-    g: headerColor[1] / 255,
-    b: headerColor[2] / 255,
-  }
-  const zebraColorRgb = {
-    r: zebraColor[0] / 255,
-    g: zebraColor[1] / 255,
-    b: zebraColor[2] / 255,
-  }
-
-  const drawRow = (rowData: string[], y: number, isHeader: boolean, isZebra: boolean) => {
-    const cellPadding = 5
-    
-    if (isHeader) {
-      page.drawRectangle({
-        x: marginLeft,
-        y: y - headerHeight,
-        width: contentWidth,
-        height: headerHeight,
-        color: rgb(headerColorRgb.r, headerColorRgb.g, headerColorRgb.b),
-      })
-    } else if (isZebra && config?.zebraStripes) {
-      page.drawRectangle({
-        x: marginLeft,
-        y: y - rowHeight,
-        width: contentWidth,
-        height: rowHeight,
-        color: rgb(zebraColorRgb.r, zebraColorRgb.g, zebraColorRgb.b),
-      })
-    }
-
-    if (config?.showBorder) {
-      page.drawRectangle({
-        x: marginLeft,
-        y: y - (isHeader ? headerHeight : rowHeight),
-        width: contentWidth,
-        height: isHeader ? headerHeight : rowHeight,
-        borderColor: rgb(0.8, 0.8, 0.8),
-        borderWidth: 0.5,
-      })
-    }
-
-    rowData.forEach((cell, colIdx) => {
-      const x = marginLeft + colIdx * colWidth + cellPadding
-      const textY = y - (isHeader ? headerHeight : rowHeight) + ((isHeader ? headerHeight : rowHeight) - fontSize) / 2 + fontSize * 0.2
-      
-      const maxTextWidth = colWidth - cellPadding * 2
-      const displayFont = isHeader ? fonts.bold : fonts.regular
-      const lines = wrapText(cell, displayFont, fontSize, maxTextWidth)
-      
-      const textColor = isHeader ? rgb(1, 1, 1) : rgb(0, 0, 0)
-      
-      let lineY = textY + (lines.length - 1) * (fontSize * 1.2) / 2
-      lines.forEach((line) => {
-        page.drawText(line, {
-          x,
-          y: lineY,
-          font: displayFont,
-          size: fontSize,
-          color: textColor,
-        })
-        lineY -= fontSize * 1.2
-      })
-
-      if (config?.showBorder && colIdx > 0) {
-        page.drawLine({
-          start: { x: marginLeft + colIdx * colWidth, y: y - (isHeader ? headerHeight : rowHeight) },
-          end: { x: marginLeft + colIdx * colWidth, y: y },
-          color: rgb(0.8, 0.8, 0.8),
-          thickness: 0.5,
-        })
-      }
-    })
-  }
-
-  drawRow(headers, currentY, true, false)
-  currentY -= headerHeight
-
-  body.forEach((row, rowIdx) => {
-    if (currentY - rowHeight < marginBottom) {
-      page = pdfDoc.addPage([pageWidth, pageHeight])
-      currentY = pageHeight - marginTop
-      drawRow(headers, currentY, true, false)
-      currentY -= headerHeight
-    }
-    drawRow(row, currentY, false, rowIdx % 2 === 1)
-    currentY -= rowHeight
-  })
-}
-
-async function exportCardPdf(
-  pdfDoc: PDFDocument,
-  fonts: Fonts,
+async function exportStandardExcel(
+  worksheet: ExcelJS.Worksheet,
   table: any,
   fields: any[],
   records: any[],
   config: any
 ) {
-  const pageWidth = 595
-  const pageHeight = 842
-  
-  let page = pdfDoc.addPage([pageWidth, pageHeight])
-  const pageMargin = 40
+  const titleSize = config?.titleSize || 16
+  const fontSize = config?.fontSize || 12
+  const headerColor = config?.headerColor || [59, 130, 246]
 
-  const cardsPerRow = config?.cardsPerRow || 2
-  const cardWidth = 260
-  const cardPadding = 20
-  const cardHeight = 150 + fields.length * 20
+  let currentRow = 1
 
-  let currentY = pageHeight - pageMargin
-  let currentX = pageMargin
-  let cardCount = 0
+  worksheet.mergeCells(`A${currentRow}:${String.fromCharCode(65 + fields.length + 2)}${currentRow}`)
+  const titleCell = worksheet.getCell(`A${currentRow}`)
+  titleCell.value = table.label
+  titleCell.font = { size: titleSize, bold: true }
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+  currentRow++
 
-  const cardHeaderColor = config?.cardHeaderColor || [59, 130, 246]
-  const headerColorRgb = {
-    r: cardHeaderColor[0] / 255,
-    g: cardHeaderColor[1] / 255,
-    b: cardHeaderColor[2] / 255,
-  }
+  worksheet.getCell(`A${currentRow}`).value = `导出时间: ${new Date().toLocaleString('zh-CN')}`
+  worksheet.getCell(`A${currentRow}`).font = { size: 10 }
+  currentRow++
 
-  page.drawText(table.label, {
-    x: pageMargin,
-    y: currentY,
-    font: fonts.bold,
-    size: 16,
-    color: rgb(0, 0, 0),
+  worksheet.getCell(`A${currentRow}`).value = `记录数: ${records.length}`
+  worksheet.getCell(`A${currentRow}`).font = { size: 10 }
+  currentRow++
+
+  currentRow++
+
+  const headers = ['ID', ...fields.map(f => f.label), '状态', '创建时间']
+  const headerRow = worksheet.addRow(headers)
+  headerRow.eachCell((cell: any, colNumber: number) => {
+    cell.font = { size: fontSize, bold: true }
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: `FF${headerColor[0].toString(16).padStart(2, '0')}${headerColor[1].toString(16).padStart(2, '0')}${headerColor[2].toString(16).padStart(2, '0')}` },
+    }
+    cell.alignment = { horizontal: 'center', vertical: 'middle' }
+    cell.border = {
+      top: { style: 'thin' },
+      bottom: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+    }
   })
-  currentY -= 30
 
-  page.drawText(`导出时间: ${new Date().toLocaleString('zh-CN')}`, {
-    x: pageMargin,
-    y: currentY,
-    font: fonts.regular,
-    size: 10,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= 20
-
-  page.drawText(`记录数: ${records.length}`, {
-    x: pageMargin,
-    y: currentY,
-    font: fonts.regular,
-    size: 10,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= 30
-
-  records.forEach((record) => {
+  records.forEach((record: any) => {
     const data = record.data as Record<string, any> || {}
-
-    if (cardCount > 0 && cardCount % cardsPerRow === 0) {
-      currentX = pageMargin
-      currentY -= cardHeight + 20
-    }
-
-    if (currentY - cardHeight < pageMargin) {
-      page = pdfDoc.addPage([pageWidth, pageHeight])
-      currentY = pageHeight - pageMargin
-      currentX = pageMargin
-    }
-
-    page.drawRectangle({
-      x: currentX,
-      y: currentY - 35,
-      width: cardWidth,
-      height: 35,
-      color: rgb(headerColorRgb.r, headerColorRgb.g, headerColorRgb.b),
+    const rowData = [
+      record.id.toString(),
+      ...fields.map(f => data[f.name]?.toString() || ''),
+      statusText[record.status] || record.status,
+      record.createdAt.toLocaleString('zh-CN'),
+    ]
+    const row = worksheet.addRow(rowData)
+    row.eachCell((cell: any) => {
+      cell.font = { size: fontSize }
+      cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }
+      cell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      }
     })
-
-    page.drawText(`记录 #${record.id}`, {
-      x: currentX + 15,
-      y: currentY - 22,
-      font: fonts.bold,
-      size: 12,
-      color: rgb(1, 1, 1),
-    })
-
-    let fieldY = currentY - 50
-    fields.forEach((field) => {
-      page.drawText(field.label + ':', {
-        x: currentX + 15,
-        y: fieldY,
-        font: fonts.regular,
-        size: 9,
-        color: rgb(107 / 255, 114 / 255, 128 / 255),
-      })
-
-      const value = data[field.name]?.toString() || '-'
-      const maxWidth = cardWidth - 100
-      const lines = wrapText(value, fonts.regular, 10, maxWidth)
-      lines.forEach((line, idx) => {
-        page.drawText(line, {
-          x: currentX + 80,
-          y: fieldY - idx * 12,
-          font: fonts.regular,
-          size: 10,
-          color: rgb(0, 0, 0),
-        })
-      })
-
-      fieldY -= 20
-    })
-
-    page.drawText('状态:', {
-      x: currentX + 15,
-      y: fieldY,
-      font: fonts.regular,
-      size: 9,
-      color: rgb(107 / 255, 114 / 255, 128 / 255),
-    })
-    page.drawText(statusText[record.status] || record.status, {
-      x: currentX + 80,
-      y: fieldY,
-      font: fonts.regular,
-      size: 10,
-      color: rgb(0, 0, 0),
-    })
-    fieldY -= 20
-
-    page.drawText('创建时间:', {
-      x: currentX + 15,
-      y: fieldY,
-      font: fonts.regular,
-      size: 9,
-      color: rgb(107 / 255, 114 / 255, 128 / 255),
-    })
-    page.drawText(record.createdAt.toLocaleString('zh-CN'), {
-      x: currentX + 80,
-      y: fieldY,
-      font: fonts.regular,
-      size: 10,
-      color: rgb(0, 0, 0),
-    })
-
-    if (config?.showBorder) {
-      page.drawRectangle({
-        x: currentX,
-        y: currentY - cardHeight,
-        width: cardWidth,
-        height: cardHeight,
-        borderColor: rgb(229 / 255, 231 / 255, 235 / 255),
-        borderWidth: 0.5,
-      })
-    }
-
-    currentX += cardWidth + cardPadding
-    cardCount++
   })
+
+  for (let i = 1; i <= headers.length; i++) {
+    worksheet.columns[i - 1].width = 15
+  }
 }
 
-async function exportGroupedPdf(
-  pdfDoc: PDFDocument,
-  fonts: Fonts,
+async function exportCardExcel(
+  worksheet: ExcelJS.Worksheet,
   table: any,
   fields: any[],
   records: any[],
-  config: any,
-  orientation: string
+  config: any
 ) {
-  const isLandscape = orientation === 'landscape'
-  const pageWidth = isLandscape ? 842 : 595
-  const pageHeight = isLandscape ? 595 : 842
-  
-  let page = pdfDoc.addPage([pageWidth, pageHeight])
-  const marginLeft = 40
-  const marginRight = 40
-  const marginTop = 40
-  const marginBottom = 40
-  const contentWidth = pageWidth - marginLeft - marginRight
+  const fontSize = config?.fontSize || 11
+  const cardHeaderColor = config?.cardHeaderColor || [59, 130, 246]
+
+  let currentRow = 1
+
+  worksheet.mergeCells(`A${currentRow}:D${currentRow}`)
+  const titleCell = worksheet.getCell(`A${currentRow}`)
+  titleCell.value = table.label
+  titleCell.font = { size: 16, bold: true }
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+  currentRow++
+
+  worksheet.getCell(`A${currentRow}`).value = `导出时间: ${new Date().toLocaleString('zh-CN')}`
+  worksheet.getCell(`A${currentRow}`).font = { size: 10 }
+  currentRow++
+
+  worksheet.getCell(`A${currentRow}`).value = `记录数: ${records.length}`
+  worksheet.getCell(`A${currentRow}`).font = { size: 10 }
+  currentRow++
+
+  currentRow++
+
+  records.forEach((record: any) => {
+    const data = record.data as Record<string, any> || {}
+
+    worksheet.mergeCells(`A${currentRow}:D${currentRow}`)
+    const cardHeader = worksheet.getCell(`A${currentRow}`)
+    cardHeader.value = `记录 #${record.id}`
+    cardHeader.font = { size: 12, bold: true, color: { argb: 'FFFFFFFF' } }
+    cardHeader.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: `FF${cardHeaderColor[0].toString(16).padStart(2, '0')}${cardHeaderColor[1].toString(16).padStart(2, '0')}${cardHeaderColor[2].toString(16).padStart(2, '0')}` },
+    }
+    cardHeader.alignment = { horizontal: 'left', vertical: 'middle' }
+    currentRow++
+
+    fields.forEach((field: any) => {
+      worksheet.getCell(`A${currentRow}`).value = field.label + ':'
+      worksheet.getCell(`A${currentRow}`).font = { size: fontSize, bold: true, color: { argb: 'FF6B7280' } }
+      worksheet.getCell(`B${currentRow}`).value = data[field.name]?.toString() || '-'
+      worksheet.getCell(`B${currentRow}`).font = { size: fontSize }
+      currentRow++
+    })
+
+    worksheet.getCell(`A${currentRow}`).value = '状态:'
+    worksheet.getCell(`A${currentRow}`).font = { size: fontSize, bold: true, color: { argb: 'FF6B7280' } }
+    worksheet.getCell(`B${currentRow}`).value = statusText[record.status] || record.status
+    worksheet.getCell(`B${currentRow}`).font = { size: fontSize }
+    currentRow++
+
+    worksheet.getCell(`A${currentRow}`).value = '创建时间:'
+    worksheet.getCell(`A${currentRow}`).font = { size: fontSize, bold: true, color: { argb: 'FF6B7280' } }
+    worksheet.getCell(`B${currentRow}`).value = record.createdAt.toLocaleString('zh-CN')
+    worksheet.getCell(`B${currentRow}`).font = { size: fontSize }
+    currentRow++
+
+    currentRow++
+  })
+
+  worksheet.columns[0].width = 25
+  worksheet.columns[1].width = 40
+}
+
+async function exportGroupedExcel(
+  worksheet: ExcelJS.Worksheet,
+  table: any,
+  fields: any[],
+  records: any[],
+  config: any
+) {
+  const fontSize = config?.fontSize || 12
+  const headerColor = config?.headerColor || [59, 130, 246]
+  const groupHeaderColor = config?.groupHeaderColor || [243, 244, 246]
 
   const groupField = config?.groupField || fields[0]?.name
   const groupFieldInfo = fields.find(f => f.name === groupField) || fields[0]
 
   const groups: Record<string, any[]> = {}
-  records.forEach((record) => {
+  records.forEach((record: any) => {
     const data = record.data as Record<string, any> || {}
     const key = data[groupField]?.toString() || '未分类'
     if (!groups[key]) groups[key] = []
     groups[key].push(record)
   })
 
-  const headerColor = config?.headerColor || [59, 130, 246]
-  const groupHeaderColor = config?.groupHeaderColor || [243, 244, 246]
-  const headerColorRgb = { r: headerColor[0] / 255, g: headerColor[1] / 255, b: headerColor[2] / 255 }
-  const groupHeaderColorRgb = { r: groupHeaderColor[0] / 255, g: groupHeaderColor[1] / 255, b: groupHeaderColor[2] / 255 }
+  let currentRow = 1
 
-  let currentY = pageHeight - marginTop
-  const fontSize = 8
+  worksheet.mergeCells(`A${currentRow}:${String.fromCharCode(65 + fields.length + 1)}${currentRow}`)
+  const titleCell = worksheet.getCell(`A${currentRow}`)
+  titleCell.value = table.label + ' - 分组汇总'
+  titleCell.font = { size: 16, bold: true }
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+  currentRow++
 
-  page.drawText(table.label + ' - 分组汇总', {
-    x: marginLeft,
-    y: currentY,
-    font: fonts.bold,
-    size: 16,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= 26
+  worksheet.getCell(`A${currentRow}`).value = `导出时间: ${new Date().toLocaleString('zh-CN')}`
+  worksheet.getCell(`A${currentRow}`).font = { size: 10 }
+  currentRow++
 
-  page.drawText(`导出时间: ${new Date().toLocaleString('zh-CN')}`, {
-    x: marginLeft,
-    y: currentY,
-    font: fonts.regular,
-    size: 10,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= 18
+  worksheet.getCell(`A${currentRow}`).value = `分组字段: ${groupFieldInfo.label}`
+  worksheet.getCell(`A${currentRow}`).font = { size: 10 }
+  currentRow++
 
-  page.drawText(`分组字段: ${groupFieldInfo.label}`, {
-    x: marginLeft,
-    y: currentY,
-    font: fonts.regular,
-    size: 10,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= 18
+  worksheet.getCell(`A${currentRow}`).value = `总记录数: ${records.length}`
+  worksheet.getCell(`A${currentRow}`).font = { size: 10 }
+  currentRow++
 
-  page.drawText(`总记录数: ${records.length}`, {
-    x: marginLeft,
-    y: currentY,
-    font: fonts.regular,
-    size: 10,
-    color: rgb(0, 0, 0),
-  })
-  currentY -= 25
+  currentRow++
 
   const otherFields = fields.filter(f => f.name !== groupField)
   const headers = ['ID', ...otherFields.map(f => f.label), '状态', '创建时间']
-  const colCount = headers.length
-  const colWidth = contentWidth / colCount
-  const rowHeight = Math.max(20, fontSize * 1.8)
-  const headerHeight = Math.max(24, fontSize * 2)
-
-  const drawTableHeader = () => {
-    page.drawRectangle({
-      x: marginLeft,
-      y: currentY - headerHeight,
-      width: contentWidth,
-      height: headerHeight,
-      color: rgb(headerColorRgb.r, headerColorRgb.g, headerColorRgb.b),
-    })
-    headers.forEach((header, colIdx) => {
-      const x = marginLeft + colIdx * colWidth + 5
-      const textY = currentY - headerHeight + (headerHeight - fontSize) / 2 + fontSize * 0.2
-      page.drawText(header, {
-        x,
-        y: textY,
-        font: fonts.bold,
-        size: fontSize,
-        color: rgb(1, 1, 1),
-      })
-    })
-    currentY -= headerHeight
-  }
-
-  const drawRow = (rowData: string[]) => {
-    if (currentY - rowHeight < marginBottom) {
-      page = pdfDoc.addPage([pageWidth, pageHeight])
-      currentY = pageHeight - marginTop
-      drawTableHeader()
-    }
-
-    rowData.forEach((cell, colIdx) => {
-      const x = marginLeft + colIdx * colWidth + 5
-      const textY = currentY - rowHeight + (rowHeight - fontSize) / 2 + fontSize * 0.2
-      const maxTextWidth = colWidth - 10
-      const lines = wrapText(cell, fonts.regular, fontSize, maxTextWidth)
-      lines.forEach((line, idx) => {
-        page.drawText(line, {
-          x,
-          y: textY + (lines.length - 1 - idx) * (fontSize * 1.2),
-          font: fonts.regular,
-          size: fontSize,
-          color: rgb(0, 0, 0),
-        })
-      })
-    })
-    currentY -= rowHeight
-  }
 
   Object.entries(groups).forEach(([group, groupRecords]) => {
-    if (currentY - 30 < marginBottom) {
-      page = pdfDoc.addPage([pageWidth, pageHeight])
-      currentY = pageHeight - marginTop
+    worksheet.mergeCells(`A${currentRow}:${String.fromCharCode(65 + headers.length - 1)}${currentRow}`)
+    const groupHeader = worksheet.getCell(`A${currentRow}`)
+    groupHeader.value = `${groupFieldInfo.label}: ${group} (${groupRecords.length}条)`
+    groupHeader.font = { size: 12, bold: true }
+    groupHeader.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: `FF${groupHeaderColor[0].toString(16).padStart(2, '0')}${groupHeaderColor[1].toString(16).padStart(2, '0')}${groupHeaderColor[2].toString(16).padStart(2, '0')}` },
     }
+    groupHeader.alignment = { horizontal: 'left', vertical: 'middle' }
+    currentRow++
 
-    page.drawRectangle({
-      x: marginLeft,
-      y: currentY - 30,
-      width: contentWidth,
-      height: 30,
-      color: rgb(groupHeaderColorRgb.r, groupHeaderColorRgb.g, groupHeaderColorRgb.b),
+    const headerRow = worksheet.addRow(headers)
+    headerRow.eachCell((cell: any) => {
+      cell.font = { size: fontSize, bold: true }
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${headerColor[0].toString(16).padStart(2, '0')}${headerColor[1].toString(16).padStart(2, '0')}${headerColor[2].toString(16).padStart(2, '0')}` },
+      }
+      cell.alignment = { horizontal: 'center', vertical: 'middle' }
+      cell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      }
     })
-    page.drawText(`${groupFieldInfo.label}: ${group} (${groupRecords.length}条)`, {
-      x: marginLeft + 10,
-      y: currentY - 20,
-      font: fonts.bold,
-      size: 12,
-      color: rgb(0, 0, 0),
-    })
-    currentY -= 40
-
-    drawTableHeader()
 
     groupRecords.forEach((record: any) => {
       const data = record.data as Record<string, any> || {}
-      const row = [
+      const rowData = [
         record.id.toString(),
         ...otherFields.map(f => data[f.name]?.toString() || ''),
         statusText[record.status] || record.status,
         record.createdAt.toLocaleString('zh-CN'),
       ]
-      drawRow(row)
+      const row = worksheet.addRow(rowData)
+      row.eachCell((cell: any) => {
+        cell.font = { size: fontSize }
+        cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }
+        cell.border = {
+          top: { style: 'thin' },
+          bottom: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+        }
+      })
     })
 
-    currentY -= 10
+    currentRow++
   })
+
+  for (let i = 1; i <= headers.length; i++) {
+    worksheet.columns[i - 1].width = 15
+  }
 }
 
-async function exportFormPdf(
-  pdfDoc: PDFDocument,
-  fonts: Fonts,
+async function exportFormExcel(
+  worksheet: ExcelJS.Worksheet,
   table: any,
   fields: any[],
   records: any[],
   config: any
 ) {
-  const pageWidth = 595
-  const pageHeight = 842
-  
-  const marginLeft = 40
-  const marginRight = 40
-  const marginTop = 50
-  const marginBottom = 50
-
+  const fontSize = config?.fontSize || 12
   const columnsPerRow = config?.columnsPerRow || 1
   const labelBgColor = config?.labelBgColor || [249, 250, 251]
-  const labelBgColorRgb = { r: labelBgColor[0] / 255, g: labelBgColor[1] / 255, b: labelBgColor[2] / 255 }
 
-  records.forEach((record, recordIdx) => {
+  records.forEach((record: any) => {
     const data = record.data as Record<string, any> || {}
-    const page = pdfDoc.addPage([pageWidth, pageHeight])
+    let currentRow = 1
 
-    let currentY = pageHeight - marginTop
+    worksheet.mergeCells(`A${currentRow}:${String.fromCharCode(65 + columnsPerRow - 1)}${currentRow}`)
+    const titleCell = worksheet.getCell(`A${currentRow}`)
+    titleCell.value = table.label
+    titleCell.font = { size: 18, bold: true }
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+    currentRow++
 
-    page.drawText(table.label, {
-      x: marginLeft,
-      y: currentY,
-      font: fonts.bold,
-      size: 18,
-      color: rgb(0, 0, 0),
-    })
-    currentY -= 30
+    worksheet.getCell(`A${currentRow}`).value = `记录编号: #${record.id}`
+    worksheet.getCell(`A${currentRow}`).font = { size: 12, color: { argb: 'FF6B7280' } }
+    worksheet.getCell(`B${currentRow}`).value = `状态: ${statusText[record.status] || record.status}`
+    worksheet.getCell(`B${currentRow}`).font = { size: 12, color: { argb: 'FF6B7280' } }
+    currentRow++
 
-    page.drawText(`记录编号: #${record.id}`, {
-      x: marginLeft,
-      y: currentY,
-      font: fonts.regular,
-      size: 12,
-      color: rgb(107 / 255, 114 / 255, 128 / 255),
-    })
-    page.drawText(`状态: ${statusText[record.status] || record.status}`, {
-      x: 300,
-      y: currentY,
-      font: fonts.regular,
-      size: 12,
-      color: rgb(107 / 255, 114 / 255, 128 / 255),
-    })
-    currentY -= 20
+    currentRow++
 
-    page.drawLine({
-      start: { x: marginLeft, y: currentY },
-      end: { x: pageWidth - marginRight, y: currentY },
-      color: rgb(229 / 255, 231 / 255, 235 / 255),
-      thickness: 0.5,
-    })
-    currentY -= 30
-
-    const colWidth = (pageWidth - marginLeft - marginRight - (columnsPerRow - 1) * 30) / columnsPerRow
-
-    fields.forEach((field, fieldIdx) => {
+    fields.forEach((field: any, fieldIdx: number) => {
       const colIdx = fieldIdx % columnsPerRow
       const rowIdx = Math.floor(fieldIdx / columnsPerRow)
 
       if (colIdx === 0 && rowIdx > 0) {
-        currentY -= 55
+        currentRow++
       }
 
-      if (currentY - 45 < marginBottom) {
-        const newPage = pdfDoc.addPage([pageWidth, pageHeight])
-        currentY = pageHeight - marginTop
+      const colLetter = String.fromCharCode(65 + colIdx)
+
+      const labelCell = worksheet.getCell(`${colLetter}${currentRow}`)
+      labelCell.value = field.label
+      labelCell.font = { size: fontSize, bold: true }
+      labelCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${labelBgColor[0].toString(16).padStart(2, '0')}${labelBgColor[1].toString(16).padStart(2, '0')}${labelBgColor[2].toString(16).padStart(2, '0')}` },
       }
+      labelCell.alignment = { horizontal: 'left', vertical: 'middle' }
+      labelCell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      }
+      currentRow++
 
-      const x = marginLeft + colIdx * (colWidth + 30)
-
-      page.drawRectangle({
-        x,
-        y: currentY - 20,
-        width: colWidth,
-        height: 20,
-        color: rgb(labelBgColorRgb.r, labelBgColorRgb.g, labelBgColorRgb.b),
-      })
-      page.drawText(field.label, {
-        x: x + 10,
-        y: currentY - 14,
-        font: fonts.bold,
-        size: 10,
-        color: rgb(0, 0, 0),
-      })
-
-      page.drawRectangle({
-        x,
-        y: currentY - 45,
-        width: colWidth,
-        height: 25,
-        color: rgb(1, 1, 1),
-        borderColor: config?.showBorder ? rgb(229 / 255, 231 / 255, 235 / 255) : undefined,
-        borderWidth: config?.showBorder ? 0.5 : 0,
-      })
-
-      const value = data[field.name]?.toString() || '-'
-      const maxTextWidth = colWidth - 20
-      const lines = wrapText(value, fonts.regular, 11, maxTextWidth)
-      lines.forEach((line, idx) => {
-        page.drawText(line, {
-          x: x + 10,
-          y: currentY - 30 - idx * 14,
-          font: fonts.regular,
-          size: 11,
-          color: rgb(0, 0, 0),
-        })
-      })
-
-      if (config?.showBorder) {
-        page.drawRectangle({
-          x,
-          y: currentY - 45,
-          width: colWidth,
-          height: 45,
-          borderColor: rgb(229 / 255, 231 / 255, 235 / 255),
-          borderWidth: 0.5,
-        })
+      const valueCell = worksheet.getCell(`${colLetter}${currentRow}`)
+      valueCell.value = data[field.name]?.toString() || '-'
+      valueCell.font = { size: fontSize }
+      valueCell.alignment = { horizontal: 'left', vertical: 'middle' }
+      valueCell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
       }
     })
 
-    currentY -= 50
+    currentRow += 2
 
-    const footerY = currentY
-    page.drawLine({
-      start: { x: marginLeft, y: footerY + 20 },
-      end: { x: pageWidth - marginRight, y: footerY + 20 },
-      color: rgb(229 / 255, 231 / 255, 235 / 255),
-      thickness: 0.5,
-    })
-
-    page.drawText(`创建时间: ${record.createdAt.toLocaleString('zh-CN')}`, {
-      x: marginLeft,
-      y: footerY,
-      font: fonts.regular,
-      size: 10,
-      color: rgb(107 / 255, 114 / 255, 128 / 255),
-    })
-    page.drawText(`更新时间: ${record.updatedAt.toLocaleString('zh-CN')}`, {
-      x: 300,
-      y: footerY,
-      font: fonts.regular,
-      size: 10,
-      color: rgb(107 / 255, 114 / 255, 128 / 255),
-    })
+    worksheet.getCell(`A${currentRow}`).value = `创建时间: ${record.createdAt.toLocaleString('zh-CN')}`
+    worksheet.getCell(`A${currentRow}`).font = { size: 10, color: { argb: 'FF6B7280' } }
+    worksheet.getCell(`B${currentRow}`).value = `更新时间: ${record.updatedAt.toLocaleString('zh-CN')}`
+    worksheet.getCell(`B${currentRow}`).font = { size: 10, color: { argb: 'FF6B7280' } }
+    currentRow += 5
   })
+
+  for (let i = 0; i < columnsPerRow; i++) {
+    worksheet.columns[i].width = 35
+  }
 }
 
-async function exportTemplatePdf(
-  pdfDoc: PDFDocument,
-  fonts: Fonts,
+async function exportTemplateExcel(
+  worksheet: ExcelJS.Worksheet,
   table: any,
   records: any[],
   config: any,
@@ -926,33 +590,8 @@ async function exportTemplatePdf(
   const rowHeights = config.rowHeights || []
   const pageSetup = config.pageSetup || {}
 
-  const isLandscape = pageSetup.orientation === 'landscape'
-  let pageWidth = isLandscape ? 842 : 595
-  let pageHeight = isLandscape ? 595 : 842
-
-  const marginLeft = (pageSetup.marginLeft || 0.5) * 72
-  const marginRight = (pageSetup.marginRight || 0.5) * 72
-  const marginTop = (pageSetup.marginTop || 0.5) * 72
-  const marginBottom = (pageSetup.marginBottom || 0.5) * 72
-
   const maxRow = grid.length
   const maxCol = grid[0]?.length || 0
-
-  let contentWidth = pageWidth - marginLeft - marginRight
-  const totalColWidth = colWidths.reduce((sum: number, w: number) => sum + (w || 100), 0) || maxCol * 100
-
-  if (totalColWidth > contentWidth && !isLandscape) {
-    pageWidth = 842
-    pageHeight = 595
-    contentWidth = pageWidth - marginLeft - marginRight
-  }
-  const scaleFactor = contentWidth / totalColWidth
-
-  let page = pdfDoc.addPage([pageWidth, pageHeight])
-  let currentY = pageHeight - marginTop
-
-  const firstRecord = records[0]
-  const firstData = firstRecord?.data as Record<string, any> || {}
 
   const fillGridData = (record: any, recordData: any) => {
     const filledGrid: any[] = []
@@ -1000,130 +639,75 @@ async function exportTemplatePdf(
     return filledGrid
   }
 
-  const filledGrid = fillGridData(firstRecord, firstData)
-
-  const drawCell = (cellData: any, x: number, y: number, width: number, height: number) => {
-    if (cellData.bgColor) {
-      const { r, g, b } = hexToRgb(cellData.bgColor)
-      page.drawRectangle({
-        x,
-        y,
-        width,
-        height,
-        color: rgb(r, g, b),
-      })
-    }
-
-    const textColor = cellData.textColor 
-      ? hexToRgb(cellData.textColor) 
-      : { r: 0, g: 0, b: 0 }
-
-    let fontSize = cellData.fontSize || 11
-    fontSize = Math.max(8, fontSize * 0.75)
-
-    const font = cellData.bold ? fonts.bold : fonts.regular
-    const align = cellData.align || 'left'
-    const text = cellData.value || ''
-    const maxTextWidth = width - 10
-    const lines = wrapText(text, font, fontSize, maxTextWidth)
-    const lineHeight = fontSize * 1.2
-
-    const totalTextHeight = lines.length * lineHeight
-    let textY = y + (height - totalTextHeight) / 2 + fontSize * 0.7
-
-    lines.forEach((line) => {
-      let textX = x + 5
-      if (align === 'center') {
-        const textWidth = font.widthOfTextAtSize(line, fontSize)
-        textX = x + width / 2 - textWidth / 2
-      } else if (align === 'right') {
-        const textWidth = font.widthOfTextAtSize(line, fontSize)
-        textX = x + width - 5 - textWidth
-      }
-
-      page.drawText(line, {
-        x: textX,
-        y: textY,
-        font,
-        size: fontSize,
-        color: rgb(textColor.r, textColor.g, textColor.b),
-      })
-      textY -= lineHeight
-    })
-
-    if (cellData.borderTop || cellData.borderBottom || cellData.borderLeft || cellData.borderRight) {
-      const borderColor = rgb(200 / 255, 200 / 255, 200 / 255)
-      const borderWidth = 0.5
-
-      if (cellData.borderTop) {
-        page.drawLine({
-          start: { x, y: y + height },
-          end: { x: x + width, y: y + height },
-          color: borderColor,
-          thickness: borderWidth,
-        })
-      }
-      if (cellData.borderBottom) {
-        page.drawLine({
-          start: { x, y },
-          end: { x: x + width, y },
-          color: borderColor,
-          thickness: borderWidth,
-        })
-      }
-      if (cellData.borderLeft) {
-        page.drawLine({
-          start: { x, y },
-          end: { x, y: y + height },
-          color: borderColor,
-          thickness: borderWidth,
-        })
-      }
-      if (cellData.borderRight) {
-        page.drawLine({
-          start: { x: x + width, y },
-          end: { x: x + width, y: y + height },
-          color: borderColor,
-          thickness: borderWidth,
-        })
-      }
-    } else {
-      // 默认添加边框
-      const borderColor = rgb(200 / 255, 200 / 255, 200 / 255)
-      const borderWidth = 0.5
-      page.drawRectangle({
-        x,
-        y,
-        width,
-        height,
-        borderColor,
-        borderWidth,
-      })
-    }
+  for (let c = 0; c < maxCol; c++) {
+    worksheet.columns[c].width = (colWidths[c] || 100) / 8
   }
 
   for (let r = 0; r < maxRow; r++) {
-    const rowHeight = (rowHeights[r] || 24) * 0.75
-    if (currentY - rowHeight < marginBottom) {
-      page = pdfDoc.addPage([pageWidth, pageHeight])
-      currentY = pageHeight - marginTop
-    }
-    let currentX = marginLeft
+    worksheet.getRow(r + 1).height = rowHeights[r] || 24
+  }
 
+  const firstRecord = records[0]
+  const firstData = firstRecord?.data as Record<string, any> || {}
+  const filledGrid = fillGridData(firstRecord, firstData)
+
+  for (let r = 0; r < maxRow; r++) {
     for (let c = 0; c < maxCol; c++) {
       const cellData = filledGrid[r]?.[c]
-      const cellWidth = (colWidths[c] || 100) * scaleFactor
+      if (!cellData || cellData.mergeHidden) continue
 
-      if (!cellData || cellData.mergeHidden) {
-        currentX += cellWidth
-        continue
+      const cell = worksheet.getCell(r + 1, c + 1)
+      cell.value = cellData.value || ''
+
+      if (cellData.bgColor) {
+        const rgb = hexToRgb(cellData.bgColor)
+        if (rgb) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: `FF${rgb.r.toString(16).padStart(2, '0')}${rgb.g.toString(16).padStart(2, '0')}${rgb.b.toString(16).padStart(2, '0')}` },
+          }
+        }
       }
 
-      drawCell(cellData, currentX, currentY - rowHeight, cellWidth, rowHeight)
-      currentX += cellWidth
-    }
+      if (cellData.textColor) {
+        const rgb = hexToRgb(cellData.textColor)
+        if (rgb) {
+          cell.font = {
+            ...cell.font,
+            color: { argb: `FF${rgb.r.toString(16).padStart(2, '0')}${rgb.g.toString(16).padStart(2, '0')}${rgb.b.toString(16).padStart(2, '0')}` },
+          }
+        }
+      }
 
-    currentY -= rowHeight
+      if (cellData.fontSize) {
+        cell.font = { ...cell.font, size: cellData.fontSize }
+      }
+
+      if (cellData.bold) {
+        cell.font = { ...cell.font, bold: true }
+      }
+
+      if (cellData.align) {
+        cell.alignment = { ...cell.alignment, horizontal: cellData.align }
+      }
+
+      if (cellData.borderTop || cellData.borderBottom || cellData.borderLeft || cellData.borderRight) {
+        cell.border = {
+          top: cellData.borderTop ? { style: 'thin' } : undefined,
+          bottom: cellData.borderBottom ? { style: 'thin' } : undefined,
+          left: cellData.borderLeft ? { style: 'thin' } : undefined,
+          right: cellData.borderRight ? { style: 'thin' } : undefined,
+        }
+      } else {
+        cell.border = {
+          top: { style: 'thin' },
+          bottom: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+        }
+      }
+    }
   }
 
   if (records.length > 1) {
@@ -1147,27 +731,62 @@ async function exportTemplatePdf(
         const recordFilledGrid = fillGridData(record, data)
 
         for (let r = dataStartRow; r <= dataEndRow; r++) {
-          const rowHeight = (rowHeights[r] || 24) * 0.75
-          if (currentY - rowHeight < marginBottom) {
-            page = pdfDoc.addPage([pageWidth, pageHeight])
-            currentY = pageHeight - marginTop
-          }
-          let currentX = marginLeft
-
           for (let c = 0; c < maxCol; c++) {
             const cellData = recordFilledGrid[r]?.[c]
-            const cellWidth = (colWidths[c] || 100) * scaleFactor
+            if (!cellData || cellData.mergeHidden) continue
 
-            if (!cellData || cellData.mergeHidden) {
-              currentX += cellWidth
-              continue
+            const cell = worksheet.getCell(r + 1 + (i - 1) * (dataEndRow - dataStartRow + 1), c + 1)
+            cell.value = cellData.value || ''
+
+            if (cellData.bgColor) {
+              const rgb = hexToRgb(cellData.bgColor)
+              if (rgb) {
+                cell.fill = {
+                  type: 'pattern',
+                  pattern: 'solid',
+                  fgColor: { argb: `FF${rgb.r.toString(16).padStart(2, '0')}${rgb.g.toString(16).padStart(2, '0')}${rgb.b.toString(16).padStart(2, '0')}` },
+                }
+              }
             }
 
-            drawCell(cellData, currentX, currentY - rowHeight, cellWidth, rowHeight)
-            currentX += cellWidth
-          }
+            if (cellData.textColor) {
+              const rgb = hexToRgb(cellData.textColor)
+              if (rgb) {
+                cell.font = {
+                  ...cell.font,
+                  color: { argb: `FF${rgb.r.toString(16).padStart(2, '0')}${rgb.g.toString(16).padStart(2, '0')}${rgb.b.toString(16).padStart(2, '0')}` },
+                }
+              }
+            }
 
-          currentY -= rowHeight
+            if (cellData.fontSize) {
+              cell.font = { ...cell.font, size: cellData.fontSize }
+            }
+
+            if (cellData.bold) {
+              cell.font = { ...cell.font, bold: true }
+            }
+
+            if (cellData.align) {
+              cell.alignment = { ...cell.alignment, horizontal: cellData.align }
+            }
+
+            if (cellData.borderTop || cellData.borderBottom || cellData.borderLeft || cellData.borderRight) {
+              cell.border = {
+                top: cellData.borderTop ? { style: 'thin' } : undefined,
+                bottom: cellData.borderBottom ? { style: 'thin' } : undefined,
+                left: cellData.borderLeft ? { style: 'thin' } : undefined,
+                right: cellData.borderRight ? { style: 'thin' } : undefined,
+              }
+            } else {
+              cell.border = {
+                top: { style: 'thin' },
+                bottom: { style: 'thin' },
+                left: { style: 'thin' },
+                right: { style: 'thin' },
+              }
+            }
+          }
         }
       }
     }

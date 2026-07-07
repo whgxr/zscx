@@ -10,7 +10,10 @@ local_base = r"D:\开发征收项目\zscx\web"
 remote_base = "/vol3/1000/docker/zscx/web"
 
 files_to_upload = [
-    "app/api/export-templates/[id]/route.ts",
+    "app/api/export/[tableName]/pdf/route.ts",
+    "Dockerfile",
+    "package.json",
+    "package-lock.json",
 ]
 
 sftp = ssh.open_sftp()

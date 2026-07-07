@@ -15,7 +15,7 @@ RUN npx prisma generate
 RUN npm run build
 
 FROM node:18-alpine AS runner
-RUN apk add --no-cache openssl libc6-compat
+RUN apk add --no-cache openssl libc6-compat libreoffice
 WORKDIR /app
 
 ENV NODE_ENV=production
