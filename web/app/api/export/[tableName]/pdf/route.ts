@@ -1019,7 +1019,7 @@ async function exportTemplatePdf(
       : { r: 0, g: 0, b: 0 }
 
     let fontSize = cellData.fontSize || 11
-    fontSize = Math.max(6, fontSize * scaleFactor * 0.8)
+    fontSize = Math.max(8, fontSize * 0.75)
 
     const font = cellData.bold ? fonts.bold : fonts.regular
     const align = cellData.align || 'left'
@@ -1103,12 +1103,11 @@ async function exportTemplatePdf(
   }
 
   for (let r = 0; r < maxRow; r++) {
-    if (currentY - (rowHeights[r] || 24) * scaleFactor * 0.7 < marginBottom) {
+    const rowHeight = (rowHeights[r] || 24) * 0.75
+    if (currentY - rowHeight < marginBottom) {
       page = pdfDoc.addPage([pageWidth, pageHeight])
       currentY = pageHeight - marginTop
     }
-
-    const rowHeight = (rowHeights[r] || 24) * scaleFactor * 0.7
     let currentX = marginLeft
 
     for (let c = 0; c < maxCol; c++) {
@@ -1148,12 +1147,11 @@ async function exportTemplatePdf(
         const recordFilledGrid = fillGridData(record, data)
 
         for (let r = dataStartRow; r <= dataEndRow; r++) {
-          if (currentY - (rowHeights[r] || 24) * scaleFactor * 0.7 < marginBottom) {
+          const rowHeight = (rowHeights[r] || 24) * 0.75
+          if (currentY - rowHeight < marginBottom) {
             page = pdfDoc.addPage([pageWidth, pageHeight])
             currentY = pageHeight - marginTop
           }
-
-          const rowHeight = (rowHeights[r] || 24) * scaleFactor * 0.7
           let currentX = marginLeft
 
           for (let c = 0; c < maxCol; c++) {

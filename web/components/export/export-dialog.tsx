@@ -26,6 +26,7 @@ import {
   Printer,
 } from 'lucide-react'
 import { DataTable, TableField, ExportType } from '@prisma/client'
+import * as XLSX from 'xlsx'
 
 interface ExportDialogProps {
   open: boolean
@@ -142,16 +143,24 @@ export function ExportDialog({ open, onOpenChange, table, search, status, initia
     try {
       const url = buildExportUrl() + '&preview=true'
       if (format === 'EXCEL') {
-        const previewApiUrl = `/api/export/${table.name}/preview?${new URLSearchParams({
-          templateId: selectedTemplate,
-          useTemplate: 'true',
-          search: search || '',
-          status: status || '',
-        })}`
-        const res = await fetch(previewApiUrl)
+        const res = await fetch(url)
         if (res.ok) {
-          const data = await res.json()
-          setPreviewData(data)
+          const blob = await res.blob()
+          const arrayBuffer = await blob.arrayBuffer()
+          const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' })
+          const firstSheetName = workbook.SheetNames[0]
+          const worksheet = workbook.Sheets[firstSheetName]
+          const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' })
+
+          const headers = jsonData[0] || []
+          const rows = jsonData.slice(1) || []
+
+          setPreviewData({
+            headers,
+            rows,
+            tableName: table.label,
+            total: rows.length,
+          })
           setPreviewUrl(null)
           setPreviewOpen(true)
         } else {
