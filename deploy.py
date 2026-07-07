@@ -62,7 +62,7 @@ print(f"\nUploaded {success_count}/{len(files_to_upload)} files")
 print("\n=== Starting Docker rebuild ===")
 print("This will take 2-5 minutes...")
 
-cmd = "echo 'Thomas009865' | sudo -S bash -c 'cd /vol3/1000/docker/zscx/docker && docker compose up -d --build' 2>&1"
+cmd = "echo 'Thomas009865' | sudo -S bash -c 'cd /vol3/1000/docker/zscx/docker && docker compose up -d --build --force-recreate' 2>&1"
 stdin, stdout, stderr = ssh.exec_command(cmd)
 
 output = ""

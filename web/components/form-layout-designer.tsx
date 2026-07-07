@@ -20,6 +20,7 @@ import {
   Move,
   PanelLeft,
   LayoutGrid,
+  Type,
 } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
@@ -38,6 +39,7 @@ export interface FieldLayoutItem extends BaseLayoutItem {
   type: 'field'
   fieldId: number
   fieldName: string
+  labelWidth?: number // 标签宽度，像素值
 }
 
 export interface SubGroupLayoutItem extends BaseLayoutItem {
@@ -509,6 +511,29 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
     }))
   }
 
+  const handleLabelWidthChange = (groupId: string, itemId: string, delta: number) => {
+    setConfig(prev => ({
+      ...prev,
+      groups: prev.groups.map(g => {
+        if (g.id !== groupId) return g
+        const updateLabelWidth = (items: LayoutItem[]): LayoutItem[] => {
+          return items.map(item => {
+            if (item.id === itemId && item.type === 'field') {
+              const currentLabelWidth = item.labelWidth || 100
+              const newLabelWidth = Math.max(60, Math.min(300, currentLabelWidth + delta))
+              return { ...item, labelWidth: newLabelWidth }
+            }
+            if (item.type === 'subgroup') {
+              return { ...item, items: updateLabelWidth(item.items) }
+            }
+            return item
+          })
+        }
+        return { ...g, items: updateLabelWidth(g.items) }
+      }),
+    }))
+  }
+
   const pathToContainer = (groupId: string, path: string[], callback: (path: string[]) => number): number => {
     if (path.length === 0) {
       const group = config.groups.find(g => g.id === groupId)
@@ -661,6 +686,19 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
             </Button>
           </div>
 
+          <div className="flex items-center gap-0.5 bg-white border rounded px-1.5 py-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Type className="w-3 h-3 text-gray-500" />
+            <button
+              onClick={() => handleLabelWidthChange(groupId, item.id, -10)}
+              className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
+            >-</button>
+            <span className="text-xs font-medium text-gray-600 w-10 text-center">{item.labelWidth || 100}px</span>
+            <button
+              onClick={() => handleLabelWidthChange(groupId, item.id, 10)}
+              className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded text-xs font-bold"
+            >+</button>
+          </div>
+
           <Button
             variant="ghost"
             size="sm"
@@ -801,10 +839,11 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
               ) : (
                 <>
                   {item.items.map((childItem, childIndex) => (
-                    <div key={childItem.id} className="contents">
+                    <>
                       <div
+                        key={`sub-drop-before-${childItem.id}`}
                         className={cn(
-                          'h-8 mb-1 rounded-lg transition-all',
+                          'h-8 rounded-lg transition-all col-span-full',
                           dropTarget?.groupId === groupId &&
                             arraysEqual(dropTarget.path, newPath) &&
                             dropTarget.index === childIndex
@@ -823,11 +862,12 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
                       ) : (
                         renderSubGroup(childItem, groupId, newPath, childIndex, depth + 1)
                       )}
-                    </div>
+                    </>
                   ))}
                   <div
+                    key="sub-drop-after-last"
                     className={cn(
-                      'h-8 mt-1 rounded-lg transition-all col-span-full',
+                      'h-8 rounded-lg transition-all col-span-full',
                       dropTarget?.groupId === groupId &&
                         arraysEqual(dropTarget.path, newPath) &&
                         dropTarget.index === item.items.length
@@ -954,33 +994,33 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
             ) : (
               <>
                 {group.items.map((item, index) => (
-                  <div key={item.id} className="contents">
-                    <div
-                      className={cn(
-                        'h-10 mb-1 rounded-lg transition-all',
-                        dropTarget?.groupId === group.id &&
-                          arraysEqual(dropTarget.path, groupPath) &&
-                          dropTarget.index === index
-                          ? 'bg-primary/10 border-2 border-dashed border-primary'
-                          : dragging && 'bg-gray-50 border border-dashed border-gray-200'
-                      )}
-                      onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
-                      onDrop={e => handleDrop(e, group.id, groupPath, index)}
-                    />
-                    {item.type === 'field' ? (
-                      (() => {
-                        const field = getFieldById(item.fieldId)
-                        if (!field) return null
-                        return renderFieldCard(field, item, group.id, groupPath, index)
-                      })()
-                    ) : (
-                      renderSubGroup(item, group.id, groupPath, index)
+                  <div
+                    key={`drop-before-${item.id}`}
+                    className={cn(
+                      'h-10 rounded-lg transition-all col-span-full',
+                      dropTarget?.groupId === group.id &&
+                        arraysEqual(dropTarget.path, groupPath) &&
+                        dropTarget.index === index
+                        ? 'bg-primary/10 border-2 border-dashed border-primary'
+                        : dragging && 'bg-gray-50 border border-dashed border-gray-200'
                     )}
-                  </div>
+                    onDragOver={e => handleDragOver(e, group.id, groupPath, index)}
+                    onDrop={e => handleDrop(e, group.id, groupPath, index)}
+                  />
+                  {item.type === 'field' ? (
+                    (() => {
+                      const field = getFieldById(item.fieldId)
+                      if (!field) return null
+                      return renderFieldCard(field, item, group.id, groupPath, index)
+                    })()
+                  ) : (
+                    renderSubGroup(item, group.id, groupPath, index)
+                  )}
                 ))}
                 <div
+                  key="drop-after-last"
                   className={cn(
-                    'h-10 mt-1 rounded-lg transition-all col-span-full',
+                    'h-10 rounded-lg transition-all col-span-full',
                     dropTarget?.groupId === group.id &&
                       arraysEqual(dropTarget.path, groupPath) &&
                       dropTarget.index === group.items.length
