@@ -412,27 +412,11 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
 
     if (!dragging) return
 
-    const newItem: LayoutItem =
-      dragging.itemType === 'field'
-        ? {
-            id: generateId(),
-            type: 'field',
-            fieldId: dragging.fieldId!,
-            fieldName: dragging.fieldName!,
-            width: dragging.width || 1,
-          }
-        : {
-            id: dragging.itemId!,
-            type: 'subgroup',
-            title: '子分组',
-            columns: 2,
-            width: dragging.width || 1,
-            items: [],
-          }
-
     setConfig(prev => {
       let newConfig = { ...prev }
+      let movedItem: LayoutItem | null = null
 
+      // 1. 从源位置移除并获取完整数据
       if (dragging.sourcePath.length >= 1) {
         const sourceGroupId = dragging.sourcePath[0]
         const sourceSubPath = dragging.sourcePath.slice(1)
@@ -446,17 +430,31 @@ export function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: F
             const newSourceItems = [...sourceItems]
             const [removed] = newSourceItems.splice(sourceIndex, 1)
             if (!removed) return g
+            movedItem = removed  // 保存完整数据（子分组的 title/columns/items 都保留）
             return { ...g, items: updateItemsAtPath(g.items, sourceSubPath, () => newSourceItems) }
           }),
         }
+      } else {
+        // 从左侧未分配区域拖入的新字段
+        movedItem = {
+          id: generateId(),
+          type: 'field',
+          fieldId: dragging.fieldId!,
+          fieldName: dragging.fieldName!,
+          width: dragging.width || 1,
+        }
       }
 
-      newConfig = {
-        ...newConfig,
-        groups: newConfig.groups.map(g => {
-          if (g.id !== targetGroupId) return g
-          return { ...g, items: insertItemAtPath(g.items, targetPath, targetIndex, newItem) }
-        }),
+      // 2. 插入到目标位置（保留完整的子分组数据）
+      if (movedItem) {
+        const itemToInsert = movedItem as LayoutItem
+        newConfig = {
+          ...newConfig,
+          groups: newConfig.groups.map(g => {
+            if (g.id !== targetGroupId) return g
+            return { ...g, items: insertItemAtPath(g.items, targetPath, targetIndex, itemToInsert) }
+          }),
+        }
       }
 
       return newConfig
