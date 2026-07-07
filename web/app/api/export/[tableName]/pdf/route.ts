@@ -927,24 +927,28 @@ async function exportTemplatePdf(
   const pageSetup = config.pageSetup || {}
 
   const isLandscape = pageSetup.orientation === 'landscape'
-  const pageWidth = isLandscape ? 842 : 595
-  const pageHeight = isLandscape ? 595 : 842
-  
-  let page = pdfDoc.addPage([pageWidth, pageHeight])
+  let pageWidth = isLandscape ? 842 : 595
+  let pageHeight = isLandscape ? 595 : 842
 
-  const marginLeft = (pageSetup.marginLeft || 20) * 2.83
-  const marginRight = (pageSetup.marginRight || 20) * 2.83
-  const marginTop = (pageSetup.marginTop || 20) * 2.83
-  const marginBottom = (pageSetup.marginBottom || 20) * 2.83
-
-  const contentWidth = pageWidth - marginLeft - marginRight
+  const marginLeft = (pageSetup.marginLeft || 0.5) * 72
+  const marginRight = (pageSetup.marginRight || 0.5) * 72
+  const marginTop = (pageSetup.marginTop || 0.5) * 72
+  const marginBottom = (pageSetup.marginBottom || 0.5) * 72
 
   const maxRow = grid.length
   const maxCol = grid[0]?.length || 0
 
+  let contentWidth = pageWidth - marginLeft - marginRight
   const totalColWidth = colWidths.reduce((sum: number, w: number) => sum + (w || 100), 0) || maxCol * 100
+
+  if (totalColWidth > contentWidth && !isLandscape) {
+    pageWidth = 842
+    pageHeight = 595
+    contentWidth = pageWidth - marginLeft - marginRight
+  }
   const scaleFactor = contentWidth / totalColWidth
 
+  let page = pdfDoc.addPage([pageWidth, pageHeight])
   let currentY = pageHeight - marginTop
 
   const firstRecord = records[0]
@@ -1083,6 +1087,18 @@ async function exportTemplatePdf(
           thickness: borderWidth,
         })
       }
+    } else {
+      // 默认添加边框
+      const borderColor = rgb(200 / 255, 200 / 255, 200 / 255)
+      const borderWidth = 0.5
+      page.drawRectangle({
+        x,
+        y,
+        width,
+        height,
+        borderColor,
+        borderWidth,
+      })
     }
   }
 

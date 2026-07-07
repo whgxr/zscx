@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { prisma } from './prisma'
 import { Role } from '@prisma/client'
 
@@ -135,7 +135,16 @@ export async function invalidateUserSessions(userId: number): Promise<void> {
 
 export async function getCurrentUser() {
   const cookieStore = cookies()
-  const token = cookieStore.get('token')?.value
+  let token = cookieStore.get('token')?.value
+
+  // 小程序通过 Authorization header 发送 token
+  if (!token) {
+    const headerStore = headers()
+    const authHeader = headerStore.get('authorization')
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7)
+    }
+  }
 
   if (!token) return null
 

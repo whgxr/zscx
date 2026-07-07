@@ -575,6 +575,14 @@ async function exportTemplateExcel(
           left: cellData.borderLeft ? { style: 'thin' } : undefined,
           right: cellData.borderRight ? { style: 'thin' } : undefined,
         }
+      } else {
+        // 默认添加边框
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+          bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+          left: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+          right: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+        }
       }
 
       if (cellData.formula) {

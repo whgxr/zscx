@@ -17,7 +17,8 @@ import { Button } from '@/components/ui/button'
 import { Upload, X, Image as ImageIcon, File, Loader2 } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
-import { FormLayoutConfig } from './form-layout-designer'
+import { FormLayoutConfig, LayoutItem, SubGroupLayoutItem, FieldLayoutItem } from './form-layout-designer'
+import { FolderOpen } from 'lucide-react'
 
 interface ImageInfo {
   url: string
@@ -388,12 +389,19 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
     }
   }
 
-  const renderFieldWithLabel = (field: TableField, span?: 1 | 2) => (
-    <div key={field.id} className={cn(
-      "space-y-2",
-      span === 2 ? "col-span-2" : "",
-      field.type === FieldType.UPLOAD_IMAGE || field.type === FieldType.UPLOAD_FILE ? "col-span-2" : ""
-    )}>
+  const renderFieldWithLabel = (field: TableField, width?: number) => (
+    <div
+      key={field.id}
+      className={cn(
+        "space-y-2",
+        (field.type === FieldType.UPLOAD_IMAGE || field.type === FieldType.UPLOAD_FILE) && "col-span-full"
+      )}
+      style={
+        width && field.type !== FieldType.UPLOAD_IMAGE && field.type !== FieldType.UPLOAD_FILE && width > 1
+          ? { gridColumn: `span ${width}`, minWidth: '140px' }
+          : { minWidth: '140px' }
+      }
+    >
       <Label className="flex items-center gap-1">
         {field.label}
         {field.required && <span className="text-red-500">*</span>}
@@ -405,27 +413,111 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
     </div>
   )
 
+  /** 渲染子分组 */
+  const renderSubGroup = (subGroup: SubGroupLayoutItem) => {
+    return (
+      <div
+        key={subGroup.id}
+        className="border rounded-lg bg-gray-50/50"
+        style={{
+          gridColumn: subGroup.width && subGroup.width > 1 ? `span ${subGroup.width}` : undefined,
+          minWidth: '200px',
+        }}
+      >
+        {subGroup.title && (
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b bg-gray-100/40 rounded-t-lg">
+            <FolderOpen className="w-4 h-4 text-amber-600" />
+            <span className="text-sm font-medium">{subGroup.title}</span>
+          </div>
+        )}
+        <div className="p-4">
+          <div
+            className="gap-3"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${subGroup.columns || 2}, minmax(0, 1fr))`,
+            }}
+          >
+            {renderItems(subGroup.items)}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  /** 渲染 items 列表（递归） */
+  const renderItems = (items: LayoutItem[]): React.ReactNode[] => {
+    return items.map(item => {
+      if (item.type === 'field') {
+        const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
+        if (!field || !field.showInForm) return null
+        return renderFieldWithLabel(field, item.width)
+      } else {
+        return renderSubGroup(item)
+      }
+    }).filter(Boolean)
+  }
+
+  /** 检测是否是新版配置 */
+  const isNewFormat = (config: any): boolean => {
+    if (!config || !config.groups) return false
+    return config.groups.some((g: any) => Array.isArray(g.items))
+  }
+
+  /** 旧版兼容渲染 */
+  const renderLegacyGroup = (group: any) => {
+    return (
+      <Card key={group.id}>
+        {group.title && (
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">{group.title}</CardTitle>
+          </CardHeader>
+        )}
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {group.fields.map((fieldConfig: any) => {
+              const field = getFieldById(fieldConfig.fieldId) || getFieldByName(fieldConfig.fieldName)
+              if (!field || !field.showInForm) return null
+              return renderFieldWithLabel(field, fieldConfig.span === 2 ? 12 : 6)
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  /** 新版渲染 */
+  const renderNewGroup = (group: any) => {
+    return (
+      <Card key={group.id}>
+        {group.title && (
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">{group.title}</CardTitle>
+          </CardHeader>
+        )}
+        <CardContent>
+          <div
+            className="gap-3"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${group.columns || 2}, minmax(0, 1fr))`,
+            }}
+          >
+            {renderItems(group.items || [])}
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (hasValidLayout) {
     return (
       <div className="space-y-6">
-        {layoutConfig!.groups.map((group) => (
-          <Card key={group.id}>
-            {group.title && (
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{group.title}</CardTitle>
-              </CardHeader>
-            )}
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {group.fields.map((fieldConfig) => {
-                  const field = getFieldById(fieldConfig.fieldId) || getFieldByName(fieldConfig.fieldName)
-                  if (!field || !field.showInForm) return null
-                  return renderFieldWithLabel(field, fieldConfig.span)
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        {layoutConfig!.groups.map((group: any) =>
+          isNewFormat(layoutConfig)
+            ? renderNewGroup(group)
+            : renderLegacyGroup(group)
+        )}
       </div>
     )
   }

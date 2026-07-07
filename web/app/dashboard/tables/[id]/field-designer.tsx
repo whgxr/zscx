@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { FormLayoutDesigner, FormLayoutConfig } from '@/components/form-layout-designer'
+import { TestLayout } from '@/components/test-layout'
 import {
   Dialog,
   DialogContent,
@@ -140,6 +141,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const [showOptions, setShowOptions] = useState(false)
   const [newOptionLabel, setNewOptionLabel] = useState('')
   const [newOptionValue, setNewOptionValue] = useState('')
+  const [activeTab, setActiveTab] = useState('layout')
 
   const hasOptions = (type: FieldType) => {
     return ['SELECT', 'MULTISELECT', 'CHECKBOX', 'RADIO'].includes(type)
@@ -680,13 +682,13 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
         )}
       </div>
 
-      <Tabs defaultValue="fields" className="w-full">
-        <TabsList>
-          <TabsTrigger value="fields">字段设计</TabsTrigger>
-          <TabsTrigger value="layout">表单布局</TabsTrigger>
-        </TabsList>
+      <div className="flex gap-2 mb-4">
+        <Button onClick={() => setActiveTab('fields')} variant={activeTab === 'fields' ? 'default' : 'outline'}>字段设计</Button>
+        <Button onClick={() => setActiveTab('layout')} variant={activeTab === 'layout' ? 'default' : 'outline'}>表单布局</Button>
+      </div>
 
-        <TabsContent value="fields" className="mt-6">
+      {activeTab === 'fields' && (
+        <div className="mt-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
               <Card>
@@ -1215,17 +1217,19 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
               </Card>
             </div>
           </div>
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="layout" className="mt-6">
+      {activeTab === 'layout' && (
+        <div className="mt-6">
           <FormLayoutDesigner
             tableId={table.id}
             fields={fields}
             initialConfig={table.formLayoutConfig as FormLayoutConfig | null}
             onSave={handleSaveFormLayout}
           />
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
     </div>
   )
 }
