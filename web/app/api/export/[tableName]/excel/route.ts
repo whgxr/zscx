@@ -12,6 +12,36 @@ const statusText: Record<string, string> = {
   ARCHIVED: '已归档',
 }
 
+const DANGEROUS_FORMULA_FUNCTIONS = [
+  'WEBSERVICE', 'FILTERXML', 'DDE', 'HYPERLINK', 'EXEC', 'CMD',
+  'SHELL', 'SYSTEM', 'OPEN', 'RUN', 'CALL', 'REGISTER',
+  'GETPIVOTDATA', 'EVALUATE', 'ENCODEURL', 'ALERTS',
+  'SENDKEYS', 'WAIT', 'SHELL', 'SPLIT',
+]
+
+function sanitizeCellValue(value: any): string {
+  const str = String(value ?? '')
+  if (str.length === 0) return str
+  const firstChar = str.charAt(0)
+  if (['=', '+', '-', '@'].includes(firstChar)) {
+    return "'" + str
+  }
+  return str
+}
+
+function isSafeFormula(formula: string): boolean {
+  const upperFormula = formula.toUpperCase().replace(/\s+/g, '')
+  for (const dangerous of DANGEROUS_FORMULA_FUNCTIONS) {
+    if (upperFormula.includes(dangerous + '(')) {
+      return false
+    }
+  }
+  if (/['"]\s*[|&;`$()<>\r\n]/.test(formula)) {
+    return false
+  }
+  return true
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { tableName: string } }
@@ -217,7 +247,7 @@ async function exportStandardExcel(
       createdAt: record.createdAt.toLocaleString('zh-CN'),
     }
     fields.forEach((field, fieldIdx) => {
-      rowData[`field_${fieldIdx}`] = data[field.name]?.toString() || ''
+      rowData[`field_${fieldIdx}`] = sanitizeCellValue(data[field.name] ?? '')
     })
     const row = worksheet.addRow(rowData)
     row.alignment = { vertical: 'middle' }
@@ -298,7 +328,7 @@ async function exportCardExcel(
         rowOffset + 2 + fieldIdx,
         colOffset + 2
       )
-      valueCell.value = data[field.name]?.toString() || ''
+      valueCell.value = sanitizeCellValue(data[field.name] ?? '')
     })
 
     const timeRow = rowOffset + 2 + fields.length
@@ -404,7 +434,7 @@ async function exportGroupedExcel(
         createdAt: record.createdAt.toLocaleString('zh-CN'),
       }
       otherFields.forEach((field, idx) => {
-        rowData[`field_${idx}`] = data[field.name]?.toString() || ''
+        rowData[`field_${idx}`] = sanitizeCellValue(data[field.name] ?? '')
       })
       const row = detailSheet.addRow(rowData)
       if (config?.zebraStripes && rowIdx % 2 === 1) {
@@ -458,7 +488,7 @@ async function exportFormExcel(
       labelCell.alignment = { vertical: 'middle' }
 
       const valueCell = worksheet.getCell(row, col + 1)
-      valueCell.value = data[field.name]?.toString() || ''
+      valueCell.value = sanitizeCellValue(data[field.name] ?? '')
       valueCell.alignment = { vertical: 'middle' }
 
       const valueRow = worksheet.getRow(row)
@@ -586,9 +616,14 @@ async function exportTemplateExcel(
       }
 
       if (cellData.formula) {
-        cell.value = { formula: cellData.formula.replace('=', '') }
+        const formula = cellData.formula.replace('=', '')
+        if (isSafeFormula(formula)) {
+          cell.value = { formula }
+        } else {
+          cell.value = "'=" + formula
+        }
       } else {
-        cell.value = cellValue
+        cell.value = sanitizeCellValue(cellValue)
       }
 
       if ((cellData.rowSpan && cellData.rowSpan > 1) || (cellData.colSpan && cellData.colSpan > 1)) {
@@ -635,7 +670,7 @@ async function exportTemplateExcel(
           value = value.replace(placeholder, fieldValue)
         })
 
-        cell.value = value
+        cell.value = sanitizeCellValue(value)
       }
     }
   }
@@ -707,7 +742,7 @@ async function exportTemplateExcel(
               })
             }
 
-            targetCell.value = value
+            targetCell.value = sanitizeCellValue(value)
 
             if (sourceCellData && ((sourceCellData.rowSpan && sourceCellData.rowSpan > 1) || (sourceCellData.colSpan && sourceCellData.colSpan > 1))) {
               const mergeRow = targetRowIdx - 1
