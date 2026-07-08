@@ -24,7 +24,6 @@ const MAGIC_BYTES: Record<string, string[]> = {
     '47494638',
     '424d',
     '52494646',
-    '3c3f786d',
   ],
   pdf: [
     '25504446',
@@ -102,10 +101,6 @@ function verifyMagicBytes(buffer: Buffer, ext: string): boolean {
   }
   if (extLower === '.7z') {
     return magic.startsWith('377abcaf')
-  }
-  if (extLower === '.svg') {
-    const header = buffer.slice(0, 200).toString('utf-8').toLowerCase()
-    return header.includes('<svg')
   }
 
   return true
