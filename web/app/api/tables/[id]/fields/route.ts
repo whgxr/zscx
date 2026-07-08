@@ -117,3 +117,54 @@ export async function POST(
     return NextResponse.json({ message: '创建字段失败' }, { status: 500 })
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const user = await getCurrentUser()
+    if (!user || (user.role?.name !== 'ADMIN' && user.role?.name !== 'MANAGER')) {
+      return NextResponse.json({ message: '无权限' }, { status: 403 })
+    }
+
+    const tableId = parseInt(params.id)
+    if (isNaN(tableId)) {
+      return NextResponse.json({ message: '无效的表ID' }, { status: 400 })
+    }
+
+    const body = await req.json()
+    const { ids } = body
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json({ message: '请选择要删除的字段' }, { status: 400 })
+    }
+
+    const systemFields = await prisma.tableField.findMany({
+      where: { id: { in: ids }, isSystem: true },
+    })
+
+    if (systemFields.length > 0) {
+      return NextResponse.json({ message: '无法删除系统字段' }, { status: 400 })
+    }
+
+    await prisma.tableField.deleteMany({
+      where: { id: { in: ids }, tableId },
+    })
+
+    await prisma.operationLog.create({
+      data: {
+        userId: user.id,
+        action: 'BATCH_DELETE_FIELDS',
+        module: 'TABLE',
+        tableId,
+        detail: { count: ids.length },
+      },
+    })
+
+    return NextResponse.json({ message: '批量删除成功' })
+  } catch (error) {
+    console.error('Batch delete fields error:', error)
+    return NextResponse.json({ message: '批量删除失败' }, { status: 500 })
+  }
+}

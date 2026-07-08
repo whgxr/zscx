@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { generateToken, setTokenCookie } from '@/lib/auth'
 import crypto from 'crypto'
 
-const weChatLoginStates = new Map<string, {
-  status: 'pending' | 'scanned' | 'confirmed' | 'expired'
-  openid?: string
-  unionid?: string
-  nickname?: string
-  avatar?: string
-  createdAt: Date
-}>()
+declare global {
+  var weChatLoginStates: Map<string, {
+    status: 'pending' | 'scanned' | 'confirmed' | 'expired'
+    openid?: string
+    unionid?: string
+    nickname?: string
+    avatar?: string
+    createdAt: Date
+  }> | undefined
+}
 
 const WECHAT_QRCODE_EXPIRE_TIME = 5 * 60 * 1000
 
@@ -21,23 +21,16 @@ export async function GET(req: NextRequest) {
     const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/wechat/callback`
 
     if (!appId) {
-      weChatLoginStates.set(state, {
-        status: 'pending',
-        createdAt: new Date(),
-      })
-
-      const qrcodeDataUrl = generateMockQrcode(state)
       return NextResponse.json({
-        success: true,
-        qrcode: qrcodeDataUrl,
-        state,
-        message: '微信登录功能尚未配置，此为演示模式',
-      })
+        success: false,
+        message: '微信登录功能未配置，请联系管理员',
+      }, { status: 400 })
     }
 
     const authUrl = `https://open.weixin.qq.com/connect/qrconnect?appid=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=snsapi_login&state=${state}#wechat_redirect`
 
-    weChatLoginStates.set(state, {
+    global.weChatLoginStates = global.weChatLoginStates || new Map()
+    global.weChatLoginStates.set(state, {
       status: 'pending',
       createdAt: new Date(),
     })
@@ -54,9 +47,4 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     )
   }
-}
-
-function generateMockQrcode(state: string): string {
-  const qrcodeContent = `https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=${encodeURIComponent(state)}`
-  return qrcodeContent
 }

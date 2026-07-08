@@ -137,6 +137,46 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const [printPreviewUrl, setPrintPreviewUrl] = useState<string | null>(null)
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false)
   const [refreshKey, setRefreshKey] = useState(Date.now())
+  const [selectedRecordIds, setSelectedRecordIds] = useState<number[]>([])
+
+  const canEdit = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canEdit
+  const canDelete = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canDelete
+
+  const toggleSelectAll = () => {
+    if (selectedRecordIds.length === records.length) {
+      setSelectedRecordIds([])
+    } else {
+      setSelectedRecordIds(records.map(r => r.id))
+    }
+  }
+
+  const toggleSelectRecord = (id: number) => {
+    setSelectedRecordIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    )
+  }
+
+  const handleBatchDelete = async () => {
+    if (selectedRecordIds.length === 0) return
+    if (!confirm(`确定要删除选中的 ${selectedRecordIds.length} 条记录吗？`)) return
+    
+    try {
+      const res = await fetch(`/api/data/${table.name}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedRecordIds }),
+      })
+      if (res.ok) {
+        setSelectedRecordIds([])
+        setRefreshKey(Date.now())
+      } else {
+        const data = await res.json()
+        alert(data.message || '批量删除失败')
+      }
+    } catch (err) {
+      alert('批量删除失败')
+    }
+  }
 
   const defaultListFields = table.fields.filter((f: any) => f.showInList)
 
@@ -375,6 +415,20 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
 
   return (
     <div className="space-y-6">
+      {selectedRecordIds.length > 0 && (
+        <div className="flex items-center gap-4 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+          <span className="text-sm text-gray-600">已选择 {selectedRecordIds.length} 条记录</span>
+          {canDelete && (
+            <Button variant="destructive" size="sm" onClick={handleBatchDelete}>
+              <Trash2 className="w-4 h-4 mr-2" />
+              批量删除
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setSelectedRecordIds([])}>
+            取消选择
+          </Button>
+        </div>
+      )}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => router.back()}>
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -462,6 +516,14 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    checked={records.length > 0 && selectedRecordIds.length === records.length}
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                </TableHead>
                 <TableHead className="w-16">ID</TableHead>
                 {listFields.map((field) => (
                   <TableHead key={field.id}>{field.label}</TableHead>
@@ -474,15 +536,24 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={listFields.length + 4} className="text-center py-12">
+                  <TableCell colSpan={listFields.length + 5} className="text-center py-12">
                     加载中...
                   </TableCell>
                 </TableRow>
               ) : records.length > 0 ? (
                 records.map((record) => {
                   const statusInfo = statusMap[record.status as RecordStatus]
+                  const isSelected = selectedRecordIds.includes(record.id)
                   return (
                     <TableRow key={record.id}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectRecord(record.id)}
+                          className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        />
+                      </TableCell>
                       <TableCell className="font-mono text-sm">#{record.id}</TableCell>
                       {listFields.map((field) => (
                         <TableCell key={field.id}>
@@ -655,6 +726,16 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                   onClick={() => setVisibleFields(defaultListFields.map(f => f.name))}
                 >
                   全选
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const allFieldNames = defaultListFields.map(f => f.name)
+                    setVisibleFields(allFieldNames.filter(name => !visibleFields.includes(name)))
+                  }}
+                >
+                  反选
                 </Button>
                 <Button
                   variant="ghost"

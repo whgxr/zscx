@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, Fragment, useRef, useEffect } from 'react'
+import { useState, Fragment } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -18,6 +18,7 @@ import {
   Move,
   PanelLeft,
   Type,
+  Search,
 } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
@@ -102,6 +103,7 @@ const fieldTypeIcons: Record<FieldType, string> = {
   SWITCH: '🔄',
   RICHTEXT: '📝',
   RELATION: '🔗',
+  DETAIL_TABLE: '📊',
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 11)
@@ -110,6 +112,8 @@ function arraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false
   return a.every((val, index) => val === b[index])
 }
+
+
 
 export default function FormLayoutDesigner({ tableId, fields, initialConfig, onSave }: FormLayoutDesignerProps) {
   const [config, setConfig] = useState<FormLayoutConfig>(() => {
@@ -139,6 +143,7 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
 
   const [saving, setSaving] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const [searchQuery, setSearchQuery] = useState('')
   const [dragging, setDragging] = useState<{
     sourcePath: string[]
     sourceIndex: number
@@ -153,24 +158,6 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
     path: string[]
     index: number
   } | null>(null)
-  const dragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      if (dragTimeoutRef.current) {
-        clearTimeout(dragTimeoutRef.current)
-        dragTimeoutRef.current = null
-      }
-      setDragging(null)
-      setDropTarget(null)
-    }
-    document.addEventListener('mouseup', handleGlobalMouseUp)
-    document.addEventListener('touchend', handleGlobalMouseUp)
-    return () => {
-      document.removeEventListener('mouseup', handleGlobalMouseUp)
-      document.removeEventListener('touchend', handleGlobalMouseUp)
-    }
-  }, [])
 
   const unassignedFields = fields.filter(field => {
     if (!field.showInForm) return false
@@ -225,44 +212,79 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
   }
 
   const handleDragStart = (e: React.DragEvent, data: typeof dragging) => {
-    if (dragTimeoutRef.current) {
-      clearTimeout(dragTimeoutRef.current)
-    }
-    dragTimeoutRef.current = setTimeout(() => {
-      setDragging(data)
-    }, 100)
     e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', '')
+    setDragging(data)
   }
 
   const handleDragEnd = () => {
-    if (dragTimeoutRef.current) {
-      clearTimeout(dragTimeoutRef.current)
-      dragTimeoutRef.current = null
-    }
     setDragging(null)
     setDropTarget(null)
   }
 
   const handleDragOver = (e: React.DragEvent, groupId: string, path: string[], index: number) => {
     e.preventDefault()
+    e.stopPropagation()
     e.dataTransfer.dropEffect = 'move'
     setDropTarget({ groupId, path, index })
   }
 
   const handleDrop = (e: React.DragEvent, targetGroupId: string, targetPath: string[], targetIndex: number) => {
     e.preventDefault()
+    e.stopPropagation()
     setDropTarget(null)
 
     if (!dragging) return
 
+    const isSameContainer = dragging.sourcePath.length >= 1 && 
+      dragging.sourcePath[0] === targetGroupId &&
+      arraysEqual(dragging.sourcePath.slice(1), targetPath)
+
+    if (isSameContainer && dragging.sourceIndex === targetIndex) {
+      setDragging(null)
+      return
+    }
+
+    let movedItem: LayoutItem | null = null
+
+    if (dragging.sourcePath.length === 0) {
+      if (dragging.fieldId === undefined || dragging.fieldName === undefined) {
+        setDragging(null)
+        return
+      }
+      movedItem = {
+        id: generateId(),
+        type: 'field',
+        fieldId: dragging.fieldId,
+        fieldName: dragging.fieldName,
+        width: dragging.width || 1,
+      }
+    }
+
     setConfig(prev => {
       let newConfig = { ...prev }
-      let movedItem: LayoutItem | null = null
 
       if (dragging.sourcePath.length >= 1) {
         const sourceGroupId = dragging.sourcePath[0]
         const sourceSubPath = dragging.sourcePath.slice(1)
         const sourceIndex = dragging.sourceIndex
+
+        if (isSameContainer) {
+          newConfig = {
+            ...newConfig,
+            groups: newConfig.groups.map(g => {
+              if (g.id !== sourceGroupId) return g
+              return { ...g, items: updateItemsAtPath(g.items, sourceSubPath, items => {
+                const newItems = [...items]
+                const [removed] = newItems.splice(sourceIndex, 1)
+                if (!removed) return items
+                newItems.splice(targetIndex, 0, removed)
+                return newItems
+              })}
+            }),
+          }
+          return newConfig
+        }
 
         newConfig = {
           ...newConfig,
@@ -275,14 +297,6 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
             movedItem = removed
             return { ...g, items: updateItemsAtPath(g.items, sourceSubPath, () => newSourceItems) }
           }),
-        }
-      } else {
-        movedItem = {
-          id: generateId(),
-          type: 'field',
-          fieldId: dragging.fieldId!,
-          fieldName: dragging.fieldName!,
-          width: dragging.width || 1,
         }
       }
 
@@ -483,6 +497,16 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
     }))
   }
 
+  const handleGroupColumnsChange = (groupId: string, columns: number) => {
+    setConfig(prev => ({
+      ...prev,
+      groups: prev.groups.map(g => {
+        if (g.id !== groupId) return g
+        return { ...g, columns }
+      }),
+    }))
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -508,7 +532,8 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
       <div
         key={item.id}
         draggable
-        onDragStart={e =>
+        onDragStart={e => {
+          e.stopPropagation()
           handleDragStart(e, {
             sourcePath: [groupId, ...path],
             sourceIndex: index,
@@ -518,7 +543,7 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
             itemId: item.id,
             width: item.width,
           })
-        }
+        }}
         onDragEnd={handleDragEnd}
         onDragOver={e => handleDragOver(e, groupId, path, index)}
         onDrop={e => handleDrop(e, groupId, path, index)}
@@ -614,7 +639,8 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
       <div
         key={item.id}
         draggable
-        onDragStart={e =>
+        onDragStart={e => {
+          e.stopPropagation()
           handleDragStart(e, {
             sourcePath: [groupId, ...path],
             sourceIndex: index,
@@ -622,7 +648,7 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
             itemId: item.id,
             width: item.width,
           })
-        }
+        }}
         onDragEnd={handleDragEnd}
         onDragOver={e => handleDragOver(e, groupId, path, index)}
         onDrop={e => handleDrop(e, groupId, path, index)}
@@ -696,9 +722,12 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
         <div className="p-3">
           <div
             className="min-h-[60px] gap-3"
+            onDragOver={e => handleDragOver(e, groupId, newPath, item.items.length)}
+            onDrop={e => handleDrop(e, groupId, newPath, item.items.length)}
             style={{
               display: 'grid',
               gridTemplateColumns: `repeat(${item.columns}, minmax(0, 1fr))`,
+              gridAutoRows: 'min-content',
             }}
           >
             {item.items.length === 0 ? (
@@ -713,17 +742,9 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
             ) : (
               <>
                 {item.items.map((childItem, childIndex) => {
-                  const isChildDragging = dragging?.itemId === childItem.id
                   return (
                     <Fragment key={`sub-item-${childItem.id}`}>
-                      {isChildDragging ? (
-                        <div
-                          className="h-16 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary opacity-50"
-                          style={{ gridColumn: childItem.width > 1 ? `span ${childItem.width}` : undefined }}
-                        >
-                          拖动中...
-                        </div>
-                      ) : childItem.type === 'field' ? (
+                      {childItem.type === 'field' ? (
                         (() => {
                           const field = getFieldById(childItem.fieldId)
                           if (!field) return null
@@ -837,10 +858,13 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
         {isExpanded && (
           <CardContent className="pt-0">
             <div
-              className="gap-3"
+              className="gap-3 min-h-[80px]"
+              onDragOver={e => handleDragOver(e, group.id, groupPath, group.items.length)}
+              onDrop={e => handleDrop(e, group.id, groupPath, group.items.length)}
               style={{
                 display: 'grid',
                 gridTemplateColumns: `repeat(${group.columns}, minmax(0, 1fr))`,
+                gridAutoRows: 'min-content',
               }}
             >
               {group.items.length === 0 ? (
@@ -855,17 +879,9 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
               ) : (
                 <>
                   {group.items.map((item, itemIndex) => {
-                    const isItemDragging = dragging?.itemId === item.id
                     return (
                       <Fragment key={`group-item-${item.id}`}>
-                        {isItemDragging ? (
-                          <div
-                            className="h-20 rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center text-xs text-primary opacity-50"
-                            style={{ gridColumn: item.width > 1 ? `span ${item.width}` : undefined }}
-                          >
-                            拖动中...
-                          </div>
-                        ) : item.type === 'field' ? (
+                        {item.type === 'field' ? (
                           (() => {
                             const field = getFieldById(item.fieldId)
                             if (!field) return null
@@ -932,6 +948,15 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
               </CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="mb-3 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Input
+                  placeholder="搜索字段..."
+                  className="pl-9 h-8 text-sm"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
               <div
                 className={cn(
                   'space-y-2 min-h-[200px] p-2 border-2 border-dashed rounded-lg transition-colors',
@@ -941,10 +966,12 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
                 )}
                 onDragOver={e => {
                   e.preventDefault()
+                  e.stopPropagation()
                   e.dataTransfer.dropEffect = 'move'
                 }}
                 onDrop={e => {
                   e.preventDefault()
+                  e.stopPropagation()
                   if (!dragging || dragging.sourcePath.length === 0) return
                   setConfig(prev => ({
                     ...prev,
@@ -960,12 +987,19 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
                   setDragging(null)
                 }}
               >
-                {unassignedFields.length === 0 ? (
-                  <div className="text-center py-8 text-gray-400 text-sm">
-                    所有字段已分配
-                  </div>
-                ) : (
-                  unassignedFields.map(field => (
+                {(() => {
+                  const filteredFields = searchQuery
+                    ? unassignedFields.filter(f => 
+                        f.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                        f.label.toLowerCase().includes(searchQuery.toLowerCase())
+                      )
+                    : unassignedFields
+                  return filteredFields.length === 0 ? (
+                    <div className="text-center py-8 text-gray-400 text-sm">
+                      {searchQuery ? '未找到匹配字段' : '所有字段已分配'}
+                    </div>
+                  ) : (
+                    filteredFields.map(field => (
                     <div
                       key={field.id}
                       draggable
@@ -993,8 +1027,9 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
                         </Badge>
                       )}
                     </div>
-                  ))
-                )}
+                    ))
+                  )
+                  })()}
               </div>
             </CardContent>
           </Card>

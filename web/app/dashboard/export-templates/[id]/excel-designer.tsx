@@ -141,7 +141,7 @@ function CellDisplay({ value, fields }: { value: string; fields: TableField[] })
   }
 
   return (
-    <div className="truncate whitespace-nowrap">
+    <div className="truncate whitespace-nowrap" style={{ fontSize: 'inherit' }}>
       {parts.map((part, i) => {
         if (part.isField) {
           const fieldName = part.text.slice(2, -2)
@@ -256,6 +256,18 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
 
   const setRangeStyle = (style: Partial<CellData>) => {
     if (!selection) return
+    if (style.fontSize !== undefined) {
+      setRowHeights(prev => {
+        const newHeights = { ...prev }
+        const neededHeight = Math.max(24, (style.fontSize ?? 11) * 1.6)
+        for (let r = selection.start.row; r <= selection.end.row; r++) {
+          if (!newHeights[r] || newHeights[r] < neededHeight) {
+            newHeights[r] = neededHeight
+          }
+        }
+        return newHeights
+      })
+    }
     setGrid(prev => {
       const newGrid = prev.map(r => r.map(c => ({ ...c })))
       for (let r = selection.start.row; r <= selection.end.row; r++) {
@@ -709,7 +721,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                 </DialogDescription>
               </DialogHeader>
               <div className="border rounded-lg overflow-auto">
-                <table className="text-xs w-full border-collapse">
+                <table className="w-full border-collapse">
                   <tbody>
                     {grid.map((row, rIdx) => (
                       <tr key={rIdx} style={{ height: rowHeights[rIdx] || 24 }}>
@@ -722,7 +734,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                               key={cIdx}
                               rowSpan={rowSpan}
                               colSpan={colSpan}
-                              className="border border-gray-200 px-2 py-1 min-w-[80px]"
+                              className="border border-black px-2 py-1 min-w-[80px]"
                               style={{
                                 fontWeight: cell.bold ? 'bold' : 'normal',
                                 fontStyle: cell.italic ? 'italic' : 'normal',
@@ -843,23 +855,21 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
             </div>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-1">
-              <Select
-                value={activeCellStyle.fontSize?.toString() || '11'}
-                onValueChange={(v) => setRangeStyle({ fontSize: parseInt(v) })}
-              >
-                <SelectTrigger className="w-20 h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="9">9px</SelectItem>
-                  <SelectItem value="10">10px</SelectItem>
-                  <SelectItem value="11">11px</SelectItem>
-                  <SelectItem value="12">12px</SelectItem>
-                  <SelectItem value="14">14px</SelectItem>
-                  <SelectItem value="16">16px</SelectItem>
-                  <SelectItem value="18">18px</SelectItem>
-                </SelectContent>
-              </Select>
+              <Type className="w-4 h-4 text-gray-400" />
+              <Input
+                type="number"
+                min={6}
+                max={72}
+                value={activeCellStyle.fontSize ?? 11}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value)
+                  if (!isNaN(v) && v >= 1) {
+                    setRangeStyle({ fontSize: v })
+                  }
+                }}
+                className="w-16 h-8 text-center"
+                title="字体大小（可直接输入）"
+              />
             </div>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-1">
@@ -891,7 +901,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                 size="icon"
                 className="h-8 w-8"
                 title="全部边框"
-                onClick={() => setAllBorders('1px solid #d1d5db')}
+                onClick={() => setAllBorders('1px solid #000000')}
                 disabled={!selection}
               >
                 <Grid3x3 className="w-4 h-4" />
@@ -1266,7 +1276,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
               className="overflow-auto max-h-[70vh]"
               onMouseUp={handleMouseUp}
             >
-              <table className="border-collapse text-xs" style={{ tableLayout: 'fixed' }}>
+              <table className="border-collapse" style={{ tableLayout: 'fixed' }}>
                 <thead className="sticky top-0 z-10">
                   <tr>
                     <th className="w-10 h-6 bg-gray-100 border border-gray-300 text-gray-500 font-normal text-xs sticky left-0 z-20">

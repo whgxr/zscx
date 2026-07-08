@@ -68,6 +68,7 @@ interface TableWithFields extends DataTable {
 interface ExportTemplatesClientProps {
   initialTemplates: TemplateWithTable[]
   tables: TableWithFields[]
+  userRole?: string | null
 }
 
 const typeIcons: Record<string, any> = {
@@ -105,7 +106,7 @@ function hasCategory(template: ExportTemplate, cat: string): boolean {
   return parseCategories(template.category).includes(cat)
 }
 
-export function ExportTemplatesClient({ initialTemplates, tables }: ExportTemplatesClientProps) {
+export function ExportTemplatesClient({ initialTemplates, tables, userRole }: ExportTemplatesClientProps) {
   const router = useRouter()
   const [templates, setTemplates] = useState<TemplateWithTable[]>(initialTemplates)
   const [activeCategory, setActiveCategory] = useState<string>('EXPORT')
@@ -297,6 +298,8 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
     if (updated.length === 0) return
     setter({ ...target, categories: updated } as any)
   }
+
+  const isAdmin = userRole === 'ADMIN'
 
   const filteredTemplates = templates.filter(t => hasCategory(t, activeCategory))
 
@@ -496,7 +499,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                         <button
                           onClick={() => handleSetDefault(template.id, template.isDefault)}
                           className={template.isDefault ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}
-                          disabled={template.isSystem}
+                          disabled={template.isSystem && !isAdmin}
                         >
                           {template.isDefault ? <Star className="w-4 h-4 fill-current" /> : <StarOff className="w-4 h-4" />}
                         </button>
@@ -514,7 +517,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
-                          {!template.isSystem && (
+                          {(!template.isSystem || isAdmin) && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -524,7 +527,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                               <Settings2 className="w-4 h-4" />
                             </Button>
                           )}
-                          {!template.isSystem && (
+                          {(!template.isSystem || isAdmin) && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -534,7 +537,7 @@ export function ExportTemplatesClient({ initialTemplates, tables }: ExportTempla
                               <Share2 className="w-4 h-4" />
                             </Button>
                           )}
-                          {!template.isSystem && (
+                          {(!template.isSystem || isAdmin) && (
                             <Button
                               variant="ghost"
                               size="sm"

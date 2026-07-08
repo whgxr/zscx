@@ -4,25 +4,20 @@ import { cookies, headers } from 'next/headers'
 import { prisma } from './prisma'
 import { Role } from '@prisma/client'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-me'
+const DEFAULT_JWT_SECRET = 'zscx-default-jwt-secret-change-in-production-env-2024'
+const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET
+
+if (!process.env.JWT_SECRET) {
+  console.warn('[WARNING] JWT_SECRET environment variable not set. Using default secret. This is insecure for production!')
+}
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 
-let cachedSessionTimeout: number | null = null
-let cachedSessionTimeoutAt = 0
-const CACHE_TTL = 60 * 1000
-
 async function getSessionTimeoutMinutes(): Promise<number> {
-  const now = Date.now()
-  if (cachedSessionTimeout !== null && now - cachedSessionTimeoutAt < CACHE_TTL) {
-    return cachedSessionTimeout
-  }
   try {
     const setting = await prisma.systemSetting.findUnique({
       where: { key: 'sessionTimeout' },
     })
     const timeout = parseInt(setting?.value || '30', 10)
-    cachedSessionTimeout = timeout
-    cachedSessionTimeoutAt = now
     return timeout
   } catch {
     return 30

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -56,11 +56,14 @@ import {
   ToggleLeft,
   AlignLeft,
   Pencil,
+  Search,
   Upload,
   Download,
   ChevronDown,
   ChevronUp,
   Settings,
+  Table2,
+  Layers,
 } from 'lucide-react'
 import { FieldType, DataTable, TableField, Role } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
@@ -95,6 +98,7 @@ const fieldTypeConfig: Record<FieldType, { label: string; icon: any }> = {
   SWITCH: { label: '开关', icon: ToggleLeft },
   RICHTEXT: { label: '富文本', icon: AlignLeft },
   RELATION: { label: '关联表', icon: Table },
+  DETAIL_TABLE: { label: '明细表单', icon: Layers },
 }
 
 interface ImportField {
@@ -127,6 +131,66 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const [importText, setImportText] = useState('')
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedFieldIds, setSelectedFieldIds] = useState<number[]>([])
+
+  const toggleSelectAllFields = () => {
+    const filteredFields = searchQuery
+      ? fields.filter(f => 
+          f.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+          f.label.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      : fields
+    const nonSystemFields = filteredFields.filter(f => !f.isSystem)
+    if (selectedFieldIds.length === nonSystemFields.length) {
+      setSelectedFieldIds([])
+    } else {
+      setSelectedFieldIds(nonSystemFields.map(f => f.id))
+    }
+  }
+
+  const toggleSelectField = (id: number) => {
+    setSelectedFieldIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    )
+  }
+
+  useEffect(() => {
+    const fetchTables = async () => {
+      try {
+        const res = await fetch('/api/tables?includeDetail=true')
+        if (res.ok) {
+          const data = await res.json()
+          setAvailableTables((data.tables || []).map((t: any) => ({ id: t.id, name: t.name, label: t.label, isDetailTable: t.isDetailTable })))
+        }
+      } catch (err) {
+        // 静默失败
+      }
+    }
+    fetchTables()
+  }, [])
+
+  const handleBatchDelete = async () => {
+    if (selectedFieldIds.length === 0) return
+    if (!confirm(`确定要删除选中的 ${selectedFieldIds.length} 个字段吗？`)) return
+    
+    try {
+      setLoading(true)
+      const newFields = fields.filter(f => !selectedFieldIds.includes(f.id))
+      setFields(newFields)
+      await fetch(`/api/tables/${table.id}/fields`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedFieldIds }),
+      })
+      setSelectedFieldIds([])
+    } catch (error) {
+      console.error('Batch delete fields error:', error)
+      alert('批量删除失败')
+    } finally {
+      setLoading(false)
+    }
+  }
   const [formData, setFormData] = useState({
     name: '',
     label: '',
@@ -142,6 +206,11 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const [newOptionLabel, setNewOptionLabel] = useState('')
   const [newOptionValue, setNewOptionValue] = useState('')
   const [activeTab, setActiveTab] = useState('layout')
+  const [availableTables, setAvailableTables] = useState<Array<{ id: number; name: string; label: string; isDetailTable?: boolean }>>([])
+  const [detailConfig, setDetailConfig] = useState<{ detailTableId?: number; detailTableName?: string; minRows?: number; maxRows?: number }>({})
+  const [createDetailTableDialogOpen, setCreateDetailTableDialogOpen] = useState(false)
+  const [newDetailTableName, setNewDetailTableName] = useState('')
+  const [newDetailTableLabel, setNewDetailTableLabel] = useState('')
 
   const hasOptions = (type: FieldType) => {
     return ['SELECT', 'MULTISELECT', 'CHECKBOX', 'RADIO'].includes(type)
@@ -160,10 +229,59 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       showInSearch: true,
       options: [],
     })
+    setDetailConfig({})
     setShowOptions(false)
     setNewOptionLabel('')
     setNewOptionValue('')
     setDialogOpen(true)
+  }
+
+  const handleCreateDetailTable = async () => {
+    if (!newDetailTableName.trim() || !newDetailTableLabel.trim()) {
+      alert('请填写表名和显示名称')
+      return
+    }
+    const nameRegex = /^[a-zA-Z][a-zA-Z0-9_]*$/
+    if (!nameRegex.test(newDetailTableName.trim())) {
+      alert('表名只能包含字母、数字和下划线，且以字母开头')
+      return
+    }
+
+    try {
+      const res = await fetch('/api/tables', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newDetailTableName.trim(),
+          label: newDetailTableLabel.trim(),
+          description: `${table.label}的明细子表`,
+          isDetailTable: true,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        const newTable = data.table
+        setAvailableTables(prev => [
+          ...prev,
+          { id: newTable.id, name: newTable.name, label: newTable.label, isDetailTable: true }
+        ])
+        setDetailConfig({
+          ...detailConfig,
+          detailTableId: newTable.id,
+          detailTableName: newTable.name,
+        })
+        setCreateDetailTableDialogOpen(false)
+        setNewDetailTableName('')
+        setNewDetailTableLabel('')
+        alert(`子表「${newTable.label}」创建成功，已自动关联到明细子表列表`)
+      } else {
+        const data = await res.json()
+        alert(data.message || '创建子表失败')
+      }
+    } catch (err) {
+      alert('创建子表失败')
+    }
   }
 
   const openEditDialog = (field: TableField) => {
@@ -183,6 +301,17 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
     setShowOptions(hasOptions(field.type) && fieldOptions.length > 0)
     setNewOptionLabel('')
     setNewOptionValue('')
+    if (field.type === 'DETAIL_TABLE' && field.config) {
+      const cfg = field.config as any
+      setDetailConfig({
+        detailTableId: cfg.detailTableId,
+        detailTableName: cfg.detailTableName,
+        minRows: cfg.minRows,
+        maxRows: cfg.maxRows,
+      })
+    } else {
+      setDetailConfig({})
+    }
     setDialogOpen(true)
   }
 
@@ -224,6 +353,10 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
 
   const handleSubmit = async () => {
     if (!formData.name || !formData.label) return
+    if (formData.type === 'DETAIL_TABLE' && !detailConfig.detailTableId) {
+      alert('请选择明细子表')
+      return
+    }
 
     setLoading(true)
     try {
@@ -232,9 +365,19 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
         : `/api/tables/${table.id}/fields`
       const method = editingField ? 'PUT' : 'POST'
 
-      const submitData = { ...formData }
+      const submitData: any = { ...formData }
       if (!hasOptions(formData.type)) {
         submitData.options = []
+      }
+      if (formData.type === 'DETAIL_TABLE') {
+        submitData.config = {
+          detailTableId: detailConfig.detailTableId,
+          detailTableName: detailConfig.detailTableName,
+          minRows: detailConfig.minRows ?? 0,
+          maxRows: detailConfig.maxRows ?? 100,
+        }
+      } else {
+        submitData.config = null
       }
 
       const res = await fetch(url, {
@@ -538,6 +681,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       { type: 'ADDRESS', label: '地址', description: '地址文本输入' },
       { type: 'RICHTEXT', label: '富文本', description: '富文本编辑器，支持图文混排' },
       { type: 'RELATION', label: '关联表', description: '关联其他数据表的记录' },
+      { type: 'DETAIL_TABLE', label: '明细表单', description: '明细表单（一对多），可录入多条子记录' },
     ]
 
     fieldTypeDescriptions.forEach(item => {
@@ -1022,6 +1166,91 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                               )}
                             </div>
                           )}
+                          {formData.type === 'DETAIL_TABLE' && (
+                            <div className="col-span-2 space-y-3 pt-2 border-t">
+                              <div className="flex items-center gap-2">
+                                <Layers className="w-4 h-4 text-gray-500" />
+                                <span className="font-medium text-sm">明细表单配置</span>
+                                <Badge variant="secondary" className="text-xs">一对多</Badge>
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="detail-table-select">关联子表 *</Label>
+                                <div className="flex gap-2">
+                                  <div className="flex-1">
+                                    <Select
+                                      value={detailConfig.detailTableId ? String(detailConfig.detailTableId) : ''}
+                                      onValueChange={(v) => {
+                                        const tbl = availableTables.find(t => t.id === Number(v))
+                                        setDetailConfig({
+                                          ...detailConfig,
+                                          detailTableId: Number(v),
+                                          detailTableName: tbl?.name,
+                                        })
+                                      }}
+                                    >
+                                      <SelectTrigger id="detail-table-select">
+                                        <SelectValue placeholder="请选择明细子表" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {availableTables
+                                          .filter(t => t.id !== table.id && t.isDetailTable)
+                                          .map(t => (
+                                            <SelectItem key={t.id} value={String(t.id)}>
+                                              {t.label} ({t.name})
+                                            </SelectItem>
+                                          ))}
+                                        {availableTables.filter(t => t.id !== table.id && t.isDetailTable).length === 0 && (
+                                          <div className="px-3 py-2 text-sm text-gray-500">
+                                            还没有明细子表，请点击右侧"新建子表"创建
+                                          </div>
+                                        )}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCreateDetailTableDialogOpen(true)}
+                                  >
+                                    <Plus className="w-3 h-3 mr-1" />
+                                    新建子表
+                                  </Button>
+                                </div>
+                                <p className="text-xs text-gray-500">
+                                  记录中可添加多条子表记录（如：家庭成员、明细物品等）
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-2">
+                                  <Label htmlFor="min-rows">最少行数</Label>
+                                  <Input
+                                    id="min-rows"
+                                    type="number"
+                                    min={0}
+                                    value={detailConfig.minRows ?? 0}
+                                    onChange={(e) => setDetailConfig({
+                                      ...detailConfig,
+                                      minRows: parseInt(e.target.value) || 0,
+                                    })}
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label htmlFor="max-rows">最多行数</Label>
+                                  <Input
+                                    id="max-rows"
+                                    type="number"
+                                    min={1}
+                                    value={detailConfig.maxRows ?? 100}
+                                    onChange={(e) => setDetailConfig({
+                                      ...detailConfig,
+                                      maxRows: parseInt(e.target.value) || 100,
+                                    })}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
                           <div className="col-span-2 space-y-4 pt-2">
                             <div className="flex items-center justify-between">
                               <div>
@@ -1075,12 +1304,81 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
+
+                    <Dialog open={createDetailTableDialogOpen} onOpenChange={setCreateDetailTableDialogOpen}>
+                      <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>新建明细子表</DialogTitle>
+                          <DialogDescription>
+                            创建一个新的数据表作为明细子表，创建后会自动关联到当前字段
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="new-detail-table-name">表名 *</Label>
+                            <Input
+                              id="new-detail-table-name"
+                              placeholder="如：family_member"
+                              value={newDetailTableName}
+                              onChange={(e) => setNewDetailTableName(e.target.value)}
+                            />
+                            <p className="text-xs text-gray-500">只能包含字母、数字和下划线，且以字母开头</p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="new-detail-table-label">显示名称 *</Label>
+                            <Input
+                              id="new-detail-table-label"
+                              placeholder="如：家庭成员"
+                              value={newDetailTableLabel}
+                              onChange={(e) => setNewDetailTableLabel(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setCreateDetailTableDialogOpen(false)}>
+                            取消
+                          </Button>
+                          <Button onClick={handleCreateDetailTable}>
+                            创建子表
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                 </CardHeader>
                 <CardContent>
+                  {selectedFieldIds.length > 0 && (
+                    <div className="flex items-center gap-4 p-3 bg-primary/5 border border-primary/20 rounded-lg mb-4">
+                      <span className="text-sm text-gray-600">已选择 {selectedFieldIds.length} 个字段</span>
+                      <Button variant="destructive" size="sm" onClick={handleBatchDelete}>
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        批量删除
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setSelectedFieldIds([])}>
+                        取消选择
+                      </Button>
+                    </div>
+                  )}
+                  <div className="mb-4 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      placeholder="搜索字段名称或显示名称..."
+                      className="pl-9"
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-10">
+                          <input
+                            type="checkbox"
+                            checked={selectedFieldIds.length > 0 && 
+                              fields.filter(f => !f.isSystem).length === selectedFieldIds.length}
+                            onChange={toggleSelectAllFields}
+                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                          />
+                        </TableHead>
                         <TableHead className="w-10"></TableHead>
                         <TableHead>字段名</TableHead>
                         <TableHead>显示名称</TableHead>
@@ -1091,20 +1389,28 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {fields.length > 0 ? (
-                        fields.map((field, index) => {
-                          const ft = fieldTypeConfig[field.type]
-                          const FIcon = ft?.icon || Type
-                          const isDragging = draggedIndex === index
-                          const isDragOver = dragOverIndex === index
-                          return (
+                      {(() => {
+                        const filteredFields = searchQuery
+                          ? fields.filter(f => 
+                              f.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                              f.label.toLowerCase().includes(searchQuery.toLowerCase())
+                            )
+                          : fields
+                        return filteredFields.length > 0 ? (
+                          filteredFields.map((field, index) => {
+                            const originalIndex = fields.indexOf(field)
+                            const ft = fieldTypeConfig[field.type]
+                            const FIcon = ft?.icon || Type
+                            const isDragging = draggedIndex === originalIndex
+                            const isDragOver = dragOverIndex === originalIndex
+                            return (
                             <TableRow
                               key={field.id}
                               draggable={!field.isSystem}
-                              onDragStart={(e) => !field.isSystem && handleDragStart(e, index)}
-                              onDragOver={(e) => handleDragOver(e, index)}
+                              onDragStart={(e) => !field.isSystem && handleDragStart(e, originalIndex)}
+                              onDragOver={(e) => handleDragOver(e, originalIndex)}
                               onDragLeave={handleDragLeave}
-                              onDrop={(e) => handleDrop(e, index)}
+                              onDrop={(e) => handleDrop(e, originalIndex)}
                               onDragEnd={handleDragEnd}
                               className={
                                 (isDragging ? 'opacity-50 ' : '') +
@@ -1112,6 +1418,16 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                                 'cursor-move'
                               }
                             >
+                              <TableCell>
+                                {!field.isSystem && (
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedFieldIds.includes(field.id)}
+                                    onChange={() => toggleSelectField(field.id)}
+                                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                  />
+                                )}
+                              </TableCell>
                               <TableCell>
                                 <GripVertical className={"w-4 h-4 " + (field.isSystem ? 'text-gray-300' : 'text-gray-400 cursor-grab')} />
                               </TableCell>
@@ -1173,7 +1489,8 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                             <p>暂无字段，点击上方添加字段</p>
                           </TableCell>
                         </TableRow>
-                      )}
+                      )
+                      })()}
                     </TableBody>
                   </Table>
                 </CardContent>
@@ -1187,7 +1504,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {Object.entries(fieldTypeConfig).slice(0, 10).map(([key, config]) => {
+                    {Object.entries(fieldTypeConfig).map(([key, config]) => {
                       const Icon = config.icon
                       return (
                         <div key={key} className="flex items-center gap-2 text-sm">

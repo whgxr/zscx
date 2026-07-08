@@ -12,6 +12,7 @@ const updateTableSchema = z.object({
   sortOrder: z.number().optional(),
   status: z.enum(['ACTIVE', 'ARCHIVED', 'DRAFT']).optional(),
   formLayoutConfig: z.any().optional(),
+  isDetailTable: z.boolean().optional(),
 })
 
 export async function GET(
