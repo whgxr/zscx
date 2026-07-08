@@ -151,3 +151,61 @@ export async function POST(
     return NextResponse.json({ message: '创建数据失败' }, { status: 500 })
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { tableName: string } }
+) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) {
+      return NextResponse.json({ message: '未登录' }, { status: 401 })
+    }
+
+    const table = await prisma.dataTable.findUnique({
+      where: { name: params.tableName },
+    })
+
+    if (!table) {
+      return NextResponse.json({ message: '数据表不存在' }, { status: 404 })
+    }
+
+    if (user.role?.name === 'USER' || user.role?.name === 'VIEWER') {
+      const permission = await prisma.tablePermission.findUnique({
+        where: { userId_tableId: { userId: user.id, tableId: table.id } },
+      })
+      if (!permission || !permission.canDelete) {
+        return NextResponse.json({ message: '无权限删除数据' }, { status: 403 })
+      }
+    }
+
+    const body = await req.json()
+    const { ids } = body
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json({ message: '请选择要删除的记录' }, { status: 400 })
+    }
+
+    await prisma.dataRecord.deleteMany({
+      where: {
+        id: { in: ids },
+        tableId: table.id,
+      },
+    })
+
+    await prisma.operationLog.create({
+      data: {
+        userId: user.id,
+        action: 'BATCH_DELETE_RECORDS',
+        module: 'DATA',
+        tableId: table.id,
+        detail: { count: ids.length },
+      },
+    })
+
+    return NextResponse.json({ message: '批量删除成功' })
+  } catch (error) {
+    console.error('Batch delete error:', error)
+    return NextResponse.json({ message: '批量删除失败' }, { status: 500 })
+  }
+}

@@ -46,10 +46,12 @@ import {
   ChevronDown,
   Layers,
   Upload,
+  ListPlus,
 } from 'lucide-react'
 import { formatDate, cn } from '@/lib/utils'
 import { TableStatus, Role, TableField } from '@prisma/client'
 import { ImportDialog } from '@/components/import/import-dialog'
+import { Switch } from '@/components/ui/switch'
 
 interface TableItem {
   id: number
@@ -64,6 +66,7 @@ interface TableItem {
   } | null
   status: TableStatus
   sortOrder: number
+  isDetailTable: boolean
   createdAt: Date
   _count: {
     fields: number
@@ -130,8 +133,8 @@ function getCategoryAndDescendantIds(node: CategoryNode): number[] {
 export function TablesClient({ initialTables, initialCategories, userRole }: TablesClientProps) {
   const router = useRouter()
   const [tables, setTables] = useState<TableItem[]>(initialTables)
-  const [categories] = useState<CategoryItem[]>(initialCategories)
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null | 'all' | 'uncategorized'>('all')
+  const [categories, setCategories] = useState<CategoryItem[]>(initialCategories)
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null | 'all' | 'uncategorized' | 'detailTables'>('all')
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<number>>(new Set())
   const [dialogOpen, setDialogOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -141,6 +144,7 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
     description: '',
     icon: '',
     categoryId: '',
+    isDetailTable: false,
   })
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false)
   const [cloneLoading, setCloneLoading] = useState(false)
@@ -162,14 +166,16 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
     description: '',
     icon: '',
     categoryId: '',
+    isDetailTable: false,
   })
 
   const categoryTree = useMemo(() => buildCategoryTree(categories), [categories])
 
   const filteredTables = useMemo(() => {
-    if (selectedCategoryId === 'all') return tables
-    if (selectedCategoryId === 'uncategorized') return tables.filter(t => !t.categoryId)
-    
+    if (selectedCategoryId === 'all') return tables.filter(t => !t.isDetailTable)
+    if (selectedCategoryId === 'uncategorized') return tables.filter(t => !t.categoryId && !t.isDetailTable)
+    if (selectedCategoryId === 'detailTables') return tables.filter(t => t.isDetailTable)
+
     const findNode = (nodes: CategoryNode[], id: number): CategoryNode | null => {
       for (const node of nodes) {
         if (node.id === id) return node
@@ -179,10 +185,10 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
       return null
     }
     const selectedNode = findNode(categoryTree, selectedCategoryId as number)
-    if (!selectedNode) return tables
+    if (!selectedNode) return tables.filter(t => !t.isDetailTable)
 
     const categoryIds = getCategoryAndDescendantIds(selectedNode)
-    return tables.filter(t => t.categoryId && categoryIds.includes(t.categoryId))
+    return tables.filter(t => t.categoryId && categoryIds.includes(t.categoryId) && !t.isDetailTable)
   }, [tables, selectedCategoryId, categoryTree])
 
   const toggleCategoryExpand = (id: number) => {
@@ -217,7 +223,10 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
         const data = await res.json()
         setTables(prev => [...prev, data.table])
         setDialogOpen(false)
-        setFormData({ name: '', label: '', description: '', icon: '', categoryId: '' })
+        setFormData({ name: '', label: '', description: '', icon: '', categoryId: '', isDetailTable: false })
+        if (router) {
+          router.refresh()
+        }
       } else {
         const data = await res.json()
         alert(data.message || '创建失败')
@@ -238,7 +247,18 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
       })
 
       if (res.ok) {
+        const deletedTable = tables.find(t => t.id === id)
         setTables(prev => prev.filter(t => t.id !== id))
+        if (deletedTable?.categoryId) {
+          setCategories(prev => prev.map(cat =>
+            cat.id === deletedTable.categoryId
+              ? { ...cat, _count: { ...cat._count, tables: Math.max(0, cat._count.tables - 1) } }
+              : cat
+          ))
+        }
+        if (router) {
+          router.refresh()
+        }
       } else {
         const data = await res.json()
         alert(data.message || '删除失败')
@@ -282,6 +302,7 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
       description: table.description || '',
       icon: table.icon || '',
       categoryId: table.categoryId ? table.categoryId.toString() : '',
+      isDetailTable: table.isDetailTable,
     })
     setEditDialogOpen(true)
   }
@@ -307,6 +328,9 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
         setTables(prev => prev.map(t => t.id === editingTable.id ? data.table : t))
         setEditDialogOpen(false)
         setEditingTable(null)
+        if (router) {
+          router.refresh()
+        }
       } else {
         const data = await res.json()
         alert(data.message || '更新失败')
@@ -333,6 +357,9 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
         const data = await res.json()
         setTables(prev => [...prev, data.table])
         setCloneDialogOpen(false)
+        if (router) {
+          router.refresh()
+        }
       } else {
         const data = await res.json()
         alert(data.message || '复制失败')
@@ -402,7 +429,7 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
           <span className="flex-1 text-sm truncate">{node.name}</span>
 
           <Badge variant="outline" className="text-xs">
-            {node._count.tables}
+            {getCategoryTableCount(node.id)}
           </Badge>
         </div>
 
@@ -415,7 +442,12 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
     )
   }
 
-  const uncategorizedCount = tables.filter(t => !t.categoryId).length
+  const uncategorizedCount = tables.filter(t => !t.categoryId && !t.isDetailTable).length
+  const detailTablesCount = tables.filter(t => t.isDetailTable).length
+
+  const getCategoryTableCount = (categoryId: number): number => {
+    return tables.filter(t => t.categoryId === categoryId && !t.isDetailTable).length
+  }
 
   return (
     <div className="flex gap-6">
@@ -458,6 +490,43 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
                 </Badge>
               </div>
 
+              <div
+                className={cn(
+                  "flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors group",
+                  selectedCategoryId === 'detailTables'
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "hover:bg-gray-100 text-gray-700"
+                )}
+                onClick={() => setSelectedCategoryId('detailTables')}
+              >
+                <Layers className="w-4 h-4" />
+                <span className="flex-1 text-sm">明细子表</span>
+                <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                  {detailTablesCount}
+                </Badge>
+                {(userRole?.name === 'ADMIN' || userRole?.name === 'MANAGER') && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setFormData({
+                        name: '',
+                        label: '',
+                        description: '',
+                        icon: '',
+                        categoryId: '',
+                        isDetailTable: true,
+                      })
+                      setDialogOpen(true)
+                    }}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-blue-200 rounded text-blue-600"
+                    title="新建明细子表"
+                  >
+                    <ListPlus className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
               {categoryTree.length > 0 && (
                 <div className="pt-2 mt-2 border-t">
                   {categoryTree.map(node => renderCategoryNode(node))}
@@ -471,97 +540,145 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
       <div className="flex-1 space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">项目管理</h1>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {selectedCategoryId === 'detailTables' ? '明细子表管理' : '项目管理'}
+            </h1>
             <p className="text-gray-500 mt-1">
               {selectedCategoryId === 'all' && '管理系统中的所有项目数据表'}
               {selectedCategoryId === 'uncategorized' && '未分类的项目数据表'}
+              {selectedCategoryId === 'detailTables' && '管理可被其他项目作为一对多明细字段关联的子表'}
               {typeof selectedCategoryId === 'number' && `分类下的项目数据表`}
             </p>
           </div>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
-              <Button>
-                <Plus className="w-4 h-4 mr-2" />
-                新建项目
-              </Button>
+              {selectedCategoryId === 'detailTables' ? (
+                <Button
+                  onClick={() => setFormData({
+                    name: '',
+                    label: '',
+                    description: '',
+                    icon: '',
+                    categoryId: '',
+                    isDetailTable: true,
+                  })}
+                >
+                  <ListPlus className="w-4 h-4 mr-2" />
+                  新建明细子表
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => setFormData({
+                    name: '',
+                    label: '',
+                    description: '',
+                    icon: '',
+                    categoryId: '',
+                    isDetailTable: false,
+                  })}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  新建项目
+                </Button>
+              )}
             </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>新建项目</DialogTitle>
-                <DialogDescription>
-                  创建一个新项目，之后可以添加字段。
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">项目名（英文标识）</Label>
-                  <Input
-                    id="name"
-                    placeholder="如：household_info"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  />
-                  <p className="text-xs text-gray-500">
-                    只能包含字母、数字和下划线，且以字母开头
-                  </p>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{formData.isDetailTable ? '新建明细子表' : '新建项目'}</DialogTitle>
+                  <DialogDescription>
+                    {formData.isDetailTable
+                      ? '创建一个明细子表，可被其他项目作为一对多明细字段关联。'
+                      : '创建一个新项目，之后可以添加字段。'}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">项目名（英文标识）</Label>
+                    <Input
+                      id="name"
+                      placeholder="如：household_info"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    />
+                    <p className="text-xs text-gray-500">
+                      只能包含字母、数字和下划线，且以字母开头
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="label">显示名称</Label>
+                    <Input
+                      id="label"
+                      placeholder="如：住户信息表"
+                      value={formData.label}
+                      onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="category">所属分类</Label>
+                    <Select
+                      value={formData.categoryId}
+                      onValueChange={(value) => setFormData({ ...formData, categoryId: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择分类（可选）" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">无分类</SelectItem>
+                        {categories.map(cat => (
+                          <SelectItem key={cat.id} value={cat.id.toString()}>
+                            {'　'.repeat(cat.level - 1)}{cat.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="description">描述（可选）</Label>
+                    <Input
+                      id="description"
+                      placeholder="项目描述"
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="icon">图标（可选）</Label>
+                    <Input
+                      id="icon"
+                      placeholder="图标名称"
+                      value={formData.icon}
+                      onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-3 border rounded-lg bg-blue-50/40 border-blue-100">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <Layers className="w-3.5 h-3.5 text-blue-600" />
+                        <Label htmlFor="is-detail-table" className="text-sm font-medium cursor-pointer">
+                          标记为明细子表
+                        </Label>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        开启后可在"明细子表"分类中查看，并被其他项目作为一对多明细字段关联
+                      </p>
+                    </div>
+                    <Switch
+                      id="is-detail-table"
+                      checked={formData.isDetailTable}
+                      onCheckedChange={(v) => setFormData({ ...formData, isDetailTable: v })}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="label">显示名称</Label>
-                  <Input
-                    id="label"
-                    placeholder="如：住户信息表"
-                    value={formData.label}
-                    onChange={(e) => setFormData({ ...formData, label: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="category">所属分类</Label>
-                  <Select
-                    value={formData.categoryId}
-                    onValueChange={(value) => setFormData({ ...formData, categoryId: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择分类（可选）" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">无分类</SelectItem>
-                      {categories.map(cat => (
-                        <SelectItem key={cat.id} value={cat.id.toString()}>
-                          {'　'.repeat(cat.level - 1)}{cat.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">描述（可选）</Label>
-                  <Input
-                    id="description"
-                    placeholder="项目描述"
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="icon">图标（可选）</Label>
-                  <Input
-                    id="icon"
-                    placeholder="图标名称"
-                    value={formData.icon}
-                    onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                  取消
-                </Button>
-                <Button onClick={handleCreate} disabled={loading}>
-                  {loading ? '创建中...' : '创建'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                    取消
+                  </Button>
+                  <Button onClick={handleCreate} disabled={loading}>
+                    {loading ? '创建中...' : '创建'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
         </div>
 
         <Dialog open={cloneDialogOpen} onOpenChange={setCloneDialogOpen}>
@@ -653,7 +770,17 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
                           {table.name}
                         </div>
                       </TableCell>
-                      <TableCell>{table.label}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {table.label}
+                          {table.isDetailTable && (
+                            <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                              <Layers className="w-3 h-3 mr-1" />
+                              明细子表
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         {table.category ? (
                           <Badge variant="outline">{table.category.name}</Badge>
@@ -819,6 +946,24 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
                   placeholder="图标名称"
                   value={editFormData.icon}
                   onChange={(e) => setEditFormData({ ...editFormData, icon: e.target.value })}
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 border rounded-lg bg-blue-50/40 border-blue-100">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-blue-600" />
+                    <Label htmlFor="edit-is-detail-table" className="text-sm font-medium cursor-pointer">
+                      标记为明细子表
+                    </Label>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    开启后可在"明细子表"分类中查看，并被其他项目作为一对多明细字段关联
+                  </p>
+                </div>
+                <Switch
+                  id="edit-is-detail-table"
+                  checked={editFormData.isDetailTable}
+                  onCheckedChange={(v) => setEditFormData({ ...editFormData, isDetailTable: v })}
                 />
               </div>
             </div>

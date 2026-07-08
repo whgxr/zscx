@@ -47,5 +47,5 @@ export default async function ExportTemplatesPage() {
     },
   })
 
-  return <ExportTemplatesClient initialTemplates={templates as any} tables={tables as any} />
+  return <ExportTemplatesClient initialTemplates={templates as any} tables={tables as any} userRole={user.role?.name} />
 }

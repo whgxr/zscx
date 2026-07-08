@@ -26,12 +26,31 @@ export default async function TablesPage() {
 
   const categories = await prisma.tableCategory.findMany({
     orderBy: { sortOrder: 'asc' },
-    include: {
-      _count: {
-        select: { tables: true },
-      },
+  })
+
+  const tableCounts = await prisma.dataTable.groupBy({
+    by: ['categoryId'],
+    _count: {
+      id: true,
+    },
+    where: {
+      isDetailTable: false,
     },
   })
 
-  return <TablesClient initialTables={tables} initialCategories={categories} userRole={user.role} />
+  const categoryCountMap = new Map<number, number>()
+  tableCounts.forEach(item => {
+    if (item.categoryId !== null) {
+      categoryCountMap.set(item.categoryId, item._count.id)
+    }
+  })
+
+  const categoriesWithCount = categories.map(cat => ({
+    ...cat,
+    _count: {
+      tables: categoryCountMap.get(cat.id) || 0,
+    },
+  }))
+
+  return <TablesClient initialTables={tables} initialCategories={categoriesWithCount} userRole={user.role} />
 }

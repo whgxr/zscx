@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,10 +14,11 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Button } from '@/components/ui/button'
-import { Upload, X, Image as ImageIcon, File, Loader2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Upload, X, Image as ImageIcon, File, Loader2, Plus, Trash2, Layers } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
-import { FormLayoutConfig, LayoutItem, SubGroupLayoutItem, FieldLayoutItem } from './form-layout-designer'
+import { FormLayoutConfig, SubGroupLayoutItem, FieldLayoutItem } from './form-layout-designer'
 import { FolderOpen } from 'lucide-react'
 
 interface ImageInfo {
@@ -37,6 +38,41 @@ const formatFileSize = (bytes: number): string => {
 const getFileExtension = (url: string): string => {
   const ext = url.split('.').pop()?.split('?')[0] || ''
   return ext.toUpperCase()
+}
+
+/** 将项目按行分组，每行总宽度不超过 columns */
+const groupItemsIntoRows = (items: any[], columns: number = 2): any[][] => {
+  const maxColumns = Math.max(1, columns || 2)
+  const rows: any[][] = []
+  let currentRow: any[] = []
+  let currentWidth = 0
+
+  for (const item of items) {
+    const width = item.width || 1
+    if (width >= maxColumns) {
+      if (currentRow.length > 0) {
+        rows.push(currentRow)
+        currentRow = []
+        currentWidth = 0
+      }
+      rows.push([item])
+    } else {
+      if (currentWidth + width > maxColumns) {
+        rows.push(currentRow)
+        currentRow = [item]
+        currentWidth = width
+      } else {
+        currentRow.push(item)
+        currentWidth += width
+      }
+    }
+  }
+
+  if (currentRow.length > 0) {
+    rows.push(currentRow)
+  }
+
+  return rows
 }
 
 interface ImageUploadFieldProps {
@@ -195,6 +231,142 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
       console.error('Upload error:', err)
       alert('上传失败')
     }
+  }
+
+  // 明细表单字段渲染
+  const renderDetailTableField = (field: TableField) => {
+    const value = values[field.name] || []
+    const detailRows: Array<Record<string, any>> = Array.isArray(value) ? value : []
+    const config = (field.config as any) || {}
+    const minRows: number = config.minRows ?? 0
+    const maxRows: number = config.maxRows ?? 100
+    const detailTableName: string = config.detailTableName || ''
+    const detailTableId: number | undefined = config.detailTableId
+
+    const [detailFields, setDetailFields] = useState<TableField[]>([])
+    const [loadingFields, setLoadingFields] = useState(false)
+
+    useEffect(() => {
+      if (detailTableId) {
+        setLoadingFields(true)
+        fetch(`/api/tables/${detailTableId}/fields`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data?.fields) {
+              setDetailFields(data.fields.filter((f: TableField) => f.showInForm))
+            }
+          })
+          .catch(() => {})
+          .finally(() => setLoadingFields(false))
+      }
+    }, [detailTableId])
+
+    const addDetailRow = () => {
+      if (detailRows.length >= maxRows) {
+        alert(`最多只能添加 ${maxRows} 条明细记录`)
+        return
+      }
+      handleChange(field.name, [...detailRows, {}])
+    }
+
+    const removeDetailRow = (idx: number) => {
+      if (detailRows.length <= minRows) {
+        if (minRows > 0) {
+          alert(`至少需要保留 ${minRows} 条明细记录`)
+          return
+        }
+      }
+      handleChange(field.name, detailRows.filter((_, i) => i !== idx))
+    }
+
+    const updateDetailRow = (idx: number, key: string, val: any) => {
+      const newRows = [...detailRows]
+      newRows[idx] = { ...newRows[idx], [key]: val }
+      handleChange(field.name, newRows)
+    }
+
+    if (!detailTableId) {
+      return (
+        <div className="p-3 border border-dashed border-amber-300 bg-amber-50 rounded-md text-sm text-amber-700">
+          请先在字段设计中为此字段配置关联子表
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-3 border rounded-md p-3 bg-gray-50/50">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <Layers className="w-4 h-4" />
+            <span>明细记录（{detailRows.length} 条）</span>
+            {detailTableName && <Badge variant="secondary" className="text-xs">{detailTableName}</Badge>}
+          </div>
+          {!disabled && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addDetailRow}
+              disabled={detailRows.length >= maxRows}
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              添加明细
+            </Button>
+          )}
+        </div>
+
+        {loadingFields ? (
+          <div className="text-center py-4 text-sm text-gray-500">加载子表字段中...</div>
+        ) : detailFields.length === 0 ? (
+          <div className="text-center py-4 text-sm text-gray-400 border border-dashed rounded">
+            关联子表没有可录入的字段
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {detailRows.map((row, idx) => (
+              <div key={idx} className="border rounded-md p-3 bg-white">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-gray-500">第 {idx + 1} 条</span>
+                  {!disabled && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-red-500"
+                      onClick={() => removeDetailRow(idx)}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {detailFields.map(df => (
+                    <div key={df.id} className="space-y-1">
+                      <Label className="text-xs text-gray-600">
+                        {df.label}{df.required && <span className="text-red-500 ml-1">*</span>}
+                      </Label>
+                      <Input
+                        type="text"
+                        placeholder={df.placeholder || `请输入${df.label}`}
+                        value={row[df.name] || ''}
+                        onChange={(e) => updateDetailRow(idx, df.name, e.target.value)}
+                        disabled={disabled}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {detailRows.length === 0 && (
+              <div className="text-center py-4 text-sm text-gray-400 border border-dashed rounded">
+                {minRows > 0 ? `至少需要添加 ${minRows} 条明细` : '点击"添加明细"按钮录入子记录'}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
   }
 
   const renderField = (field: TableField) => {
@@ -376,6 +548,9 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
           </div>
         )
 
+      case FieldType.DETAIL_TABLE:
+        return renderDetailTableField(field)
+
       default:
         return (
           <Input
@@ -389,45 +564,75 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
     }
   }
 
-  const renderFieldWithLabel = (field: TableField, width?: number, labelWidth?: number) => (
-    <div
-      key={field.id}
-      className={cn(
-        (field.type === FieldType.UPLOAD_IMAGE || field.type === FieldType.UPLOAD_FILE) && "col-span-full"
-      )}
-      style={
-        width && field.type !== FieldType.UPLOAD_IMAGE && field.type !== FieldType.UPLOAD_FILE && width > 1
-          ? { gridColumn: `span ${width}`, minWidth: '140px' }
-          : { minWidth: '140px' }
-      }
-    >
-      <div className="flex items-start gap-3">
+  const renderFieldWithLabel = (field: TableField, width?: number, labelWidth?: number) => {
+    const fieldWidth = width || 1
+    const useHorizontalLayout = fieldWidth >= 2 &&
+      field.type !== 'TEXTAREA' && 
+      field.type !== 'UPLOAD_IMAGE' && 
+      field.type !== 'UPLOAD_FILE' && 
+      field.type !== 'DETAIL_TABLE' &&
+      field.type !== 'MULTISELECT' &&
+      field.type !== 'CHECKBOX'
+    
+    if (useHorizontalLayout) {
+      const labelW = labelWidth || 100
+      return (
+        <div key={field.id} className="w-full min-w-0 flex gap-2 items-start">
+          <Label
+            className="text-xs text-gray-600 font-medium flex-shrink-0"
+            style={{ 
+              width: `${labelW}px`, 
+              minWidth: `${labelW}px`,
+              textAlign: 'right',
+              paddingRight: '4px',
+              lineHeight: '32px',
+            }}
+          >
+            {field.label}
+            {field.required && <span className="text-red-500 ml-0.5">*</span>}
+          </Label>
+          <div className="flex-1 min-w-0">
+            {renderField(field)}
+            {field.description && (
+              <p className="text-xs text-gray-500 mt-1">{field.description}</p>
+            )}
+          </div>
+        </div>
+      )
+    }
+    
+    return (
+      <div key={field.id} className="w-full min-w-0 space-y-1.5">
         <Label
-          className="flex-shrink-0 pt-2 flex items-center gap-1"
-          style={{ width: labelWidth ? `${labelWidth}px` : '100px', textAlign: 'right' }}
+          className="block text-xs text-gray-600 font-medium"
+          style={{ textAlign: 'left' }}
         >
-          <span className="flex-1 truncate">{field.label}</span>
-          {field.required && <span className="text-red-500 flex-shrink-0">*</span>}
+          {field.label}
+          {field.required && <span className="text-red-500 ml-0.5">*</span>}
         </Label>
-        <div className="flex-1 min-w-0 space-y-2">
+        <div className="w-full">
           {renderField(field)}
           {field.description && (
-            <p className="text-xs text-gray-500">{field.description}</p>
+            <p className="text-xs text-gray-500 mt-1">{field.description}</p>
           )}
         </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   /** 渲染子分组 */
-  const renderSubGroup = (subGroup: SubGroupLayoutItem) => {
+  const renderSubGroup = (subGroup: SubGroupLayoutItem, parentColumns: number = 2) => {
+    const columns = subGroup.columns || 2
+
     return (
       <div
         key={subGroup.id}
         className="border rounded-lg bg-gray-50/50"
         style={{
-          gridColumn: subGroup.width && subGroup.width > 1 ? `span ${subGroup.width}` : undefined,
-          minWidth: '200px',
+          flex: subGroup.width || 1,
+          minWidth: 0,
+          alignSelf: 'flex-start',
+          height: 'fit-content',
         }}
       >
         {subGroup.title && (
@@ -436,32 +641,35 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             <span className="text-sm font-medium">{subGroup.title}</span>
           </div>
         )}
-        <div className="p-4">
-          <div
-            className="gap-3"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: `repeat(${subGroup.columns || 2}, minmax(0, 1fr))`,
-            }}
-          >
-            {renderItems(subGroup.items)}
-          </div>
+        <div className="p-4 space-y-3">
+          {groupItemsIntoRows(subGroup.items || [], columns).map((row, rowIndex) => (
+            <div key={rowIndex} className="flex gap-3 items-start">
+              {row.map(item => {
+                const itemWidth = item.width || 1
+                return (
+                  <div
+                  key={item.id}
+                  style={{
+                    flex: itemWidth,
+                    minWidth: 0,
+                  }}
+                >
+                    {item.type === 'field'
+                      ? (() => {
+                          const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
+                          if (!field || !field.showInForm) return null
+                          return renderFieldWithLabel(field, item.width, (item as FieldLayoutItem).labelWidth)
+                        })()
+                      : renderSubGroup(item as SubGroupLayoutItem, columns)
+                    }
+                  </div>
+                )
+              })}
+            </div>
+          ))}
         </div>
       </div>
     )
-  }
-
-  /** 渲染 items 列表（递归） */
-  const renderItems = (items: LayoutItem[]): React.ReactNode[] => {
-    return items.map(item => {
-      if (item.type === 'field') {
-        const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
-        if (!field || !field.showInForm) return null
-        return renderFieldWithLabel(field, item.width, item.labelWidth)
-      } else {
-        return renderSubGroup(item)
-      }
-    }).filter(Boolean)
   }
 
   /** 检测是否是新版配置 */
@@ -472,6 +680,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
 
   /** 旧版兼容渲染 */
   const renderLegacyGroup = (group: any) => {
+    const columns = group.columns || 2
     return (
       <Card key={group.id}>
         {group.title && (
@@ -479,14 +688,27 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             <CardTitle className="text-base">{group.title}</CardTitle>
           </CardHeader>
         )}
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {group.fields.map((fieldConfig: any) => {
-              const field = getFieldById(fieldConfig.fieldId) || getFieldByName(fieldConfig.fieldName)
-              if (!field || !field.showInForm) return null
-              return renderFieldWithLabel(field, fieldConfig.span === 2 ? 12 : 6)
-            })}
-          </div>
+        <CardContent className="space-y-3">
+          {groupItemsIntoRows((group.fields || []).map((f: any) => ({ ...f, type: 'field', width: f.span === 2 ? 2 : 1, id: f.fieldId || f.fieldName })), columns).map((row, rowIndex) => (
+            <div key={rowIndex} className="flex gap-6 items-start">
+              {row.map(fieldConfig => {
+                const fieldWidth = fieldConfig.width || 1
+                const field = getFieldById(fieldConfig.fieldId) || getFieldByName(fieldConfig.fieldName)
+                if (!field || !field.showInForm) return null
+                return (
+                  <div
+                    key={fieldConfig.id}
+                    style={{
+                      flex: fieldWidth,
+                      minWidth: 0,
+                    }}
+                  >
+                    {renderFieldWithLabel(field, fieldConfig.width, fieldConfig.labelWidth)}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
         </CardContent>
       </Card>
     )
@@ -494,6 +716,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
 
   /** 新版渲染 */
   const renderNewGroup = (group: any) => {
+    const columns = group.columns || 2
     return (
       <Card key={group.id}>
         {group.title && (
@@ -501,16 +724,32 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             <CardTitle className="text-base">{group.title}</CardTitle>
           </CardHeader>
         )}
-        <CardContent>
-          <div
-            className="gap-3"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: `repeat(${group.columns || 2}, minmax(0, 1fr))`,
-            }}
-          >
-            {renderItems(group.items || [])}
-          </div>
+        <CardContent className="space-y-3">
+          {groupItemsIntoRows(group.items || [], columns).map((row, rowIndex) => (
+            <div key={rowIndex} className="flex gap-3 items-start">
+              {row.map(item => {
+                const itemWidth = item.width || 1
+                return (
+                  <div
+                    key={item.id}
+                    style={{
+                      flex: itemWidth,
+                      minWidth: 0,
+                    }}
+                  >
+                    {item.type === 'field'
+                      ? (() => {
+                          const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
+                          if (!field || !field.showInForm) return null
+                          return renderFieldWithLabel(field, item.width, (item as FieldLayoutItem).labelWidth)
+                        })()
+                      : renderSubGroup(item as SubGroupLayoutItem, columns)
+                    }
+                  </div>
+                )
+              })}
+            </div>
+          ))}
         </CardContent>
       </Card>
     )

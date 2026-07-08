@@ -21,6 +21,22 @@ export function NewRecordClient({ table }: NewRecordClientProps) {
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (status: RecordStatus = RecordStatus.DRAFT) => {
+    const requiredFields = table.fields.filter(f => f.required && f.showInForm)
+    const missingFields: string[] = []
+
+    requiredFields.forEach(field => {
+      const value = formData[field.name]
+      if (value === undefined || value === null || value === '' || 
+          (Array.isArray(value) && value.length === 0)) {
+        missingFields.push(field.label)
+      }
+    })
+
+    if (missingFields.length > 0) {
+      alert(`以下必填项为空，请填写：\n${missingFields.join('\n')}`)
+      return
+    }
+
     setLoading(true)
     try {
       const res = await fetch(`/api/data/${table.name}`, {

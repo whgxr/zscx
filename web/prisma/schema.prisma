@@ -186,6 +186,7 @@ model DataTable {
   categoryId        Int?             // 分类ID
   status            TableStatus      @default(ACTIVE)
   sortOrder         Int              @default(0)
+  isDetailTable     Boolean          @default(false) // 是否为明细子表
   formLayoutConfig  Json?            // 表单布局配置（分组、列宽等）
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -262,6 +263,7 @@ enum FieldType {
   SWITCH         // 开关/是否
   RICHTEXT       // 富文本
   RELATION       // 关联其他表
+  DETAIL_TABLE   // 明细表单
 }
 
 // ==================== 数据记录 ====================

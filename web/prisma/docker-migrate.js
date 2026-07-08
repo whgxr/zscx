@@ -172,6 +172,20 @@ async function main() {
       console.log('   给 DataTable 添加 formLayoutConfig 字段')
       await prisma.$executeRawUnsafe('ALTER TABLE `DataTable` ADD COLUMN `formLayoutConfig` JSON NULL')
     }
+    if (!dtColNames.includes('isDetailTable')) {
+      console.log('   给 DataTable 添加 isDetailTable 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `DataTable` ADD COLUMN `isDetailTable` TINYINT(1) NOT NULL DEFAULT 0')
+    }
+  }
+
+  // TableField type 枚举添加 DETAIL_TABLE
+  if (tableNames.includes('tablefield')) {
+    const tfCols = await prisma.$queryRaw`DESCRIBE \`TableField\``
+    const typeCol = tfCols.find(c => c.Field === 'type')
+    if (typeCol && typeCol.Type && !typeCol.Type.includes('DETAIL_TABLE')) {
+      console.log('   给 TableField.type 添加 DETAIL_TABLE 枚举值')
+      await prisma.$executeRawUnsafe("ALTER TABLE `TableField` MODIFY COLUMN `type` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION','DETAIL_TABLE') NOT NULL")
+    }
   }
 
   // ExportTemplate 添加 category 字段（支持多分类逗号分隔）
@@ -251,6 +265,7 @@ async function createDataTable(prisma) {
       \`categoryId\` INT NULL,
       \`status\` ENUM('ACTIVE','ARCHIVED','DRAFT') NOT NULL DEFAULT 'ACTIVE',
       \`sortOrder\` INT NOT NULL DEFAULT 0,
+      \`isDetailTable\` TINYINT(1) NOT NULL DEFAULT 0,
       \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
       \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
       \`createdBy\` INT NULL,
@@ -268,7 +283,7 @@ async function createTableField(prisma) {
       \`tableId\` INT NOT NULL,
       \`name\` VARCHAR(191) NOT NULL,
       \`label\` VARCHAR(191) NOT NULL,
-      \`type\` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION') NOT NULL,
+      \`type\` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION','DETAIL_TABLE') NOT NULL,
       \`required\` TINYINT(1) NOT NULL DEFAULT 0,
       \`unique\` TINYINT(1) NOT NULL DEFAULT 0,
       \`sortOrder\` INT NOT NULL DEFAULT 0,

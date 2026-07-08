@@ -10,6 +10,7 @@ const createTableSchema = z.object({
   icon: z.string().optional(),
   categoryId: z.number().nullable().optional(),
   sortOrder: z.number().optional().default(0),
+  isDetailTable: z.boolean().optional().default(false),
 })
 
 export async function GET(req: NextRequest) {

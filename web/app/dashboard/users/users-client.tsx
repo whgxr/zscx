@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -166,8 +166,13 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
       })
 
       if (res.ok) {
+        const data = await res.json()
+        if (editingUser) {
+          setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, ...data.user } : u))
+        } else {
+          setUsers(prev => [data.user, ...prev])
+        }
         setDialogOpen(false)
-        router.refresh()
       } else {
         const data = await res.json()
         alert(data.message || '操作失败')
@@ -187,7 +192,7 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
         method: 'DELETE',
       })
       if (res.ok) {
-        router.refresh()
+        setUsers(prev => prev.filter(u => u.id !== id))
       } else {
         const data = await res.json()
         alert(data.message || '删除失败')
@@ -207,7 +212,8 @@ export function UsersClient({ initialUsers, currentUserRole }: UsersClientProps)
         }),
       })
       if (res.ok) {
-        router.refresh()
+        const data = await res.json()
+        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, status: data.user.status } : u))
       }
     } catch (err) {
       console.error(err)

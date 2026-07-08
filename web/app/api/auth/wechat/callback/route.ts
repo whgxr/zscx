@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { createUserSession, setTokenCookie } from '@/lib/auth'
+import { createUserSession, setTokenCookie, hashPassword } from '@/lib/auth'
 
 declare global {
   var weChatLoginStates: Map<string, {
@@ -39,20 +39,11 @@ export async function GET(req: NextRequest) {
       const appSecret = process.env.WECHAT_APP_SECRET || ''
 
       if (!appId || !appSecret) {
-        const mockUser = await handleMockLogin(state)
-        if (mockUser) {
-          setTokenCookie(mockUser.token)
-          return NextResponse.json({
-            success: true,
-            user: {
-              id: mockUser.user.id,
-              username: mockUser.user.username,
-              realName: mockUser.user.realName,
-              role: mockUser.user.role,
-            },
-          })
-        }
-        return NextResponse.json({ success: false, status: 'pending', message: '等待扫码' })
+        return NextResponse.json({ 
+          success: false, 
+          status: 'error', 
+          message: '微信登录功能未配置，请联系管理员' 
+        })
       }
 
       try {
@@ -92,41 +83,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function handleMockLogin(state: string) {
-  try {
-    const user = await prisma.user.findFirst({
-      where: { status: 'ACTIVE' },
-      include: { role: true },
-    })
-
-    if (!user) {
-      return null
-    }
-
-    const { token } = await createUserSession(
-      user.id,
-      user.username,
-      user.roleId,
-      undefined,
-      undefined
-    )
-
-    await prisma.operationLog.create({
-      data: {
-        userId: user.id,
-        action: 'LOGIN',
-        module: 'AUTH',
-        detail: { method: 'wechat_mock' },
-      },
-    })
-
-    return { user, token }
-  } catch (err) {
-    console.error('Mock login error:', err)
-    return null
-  }
-}
-
 async function handleWeChatUser(wechatData: any) {
   let user = await prisma.user.findFirst({
     where: {
@@ -139,10 +95,13 @@ async function handleWeChatUser(wechatData: any) {
   })
 
   if (!user) {
+    const randomPassword = require('crypto').randomBytes(32).toString('hex')
+    const passwordHash = await hashPassword(randomPassword)
+    
     user = await prisma.user.create({
       data: {
         username: wechatData.openid,
-        passwordHash: '',
+        passwordHash,
         realName: wechatData.nickname || '微信用户',
         phone: '',
         roleId: 3,

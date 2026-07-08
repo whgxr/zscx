@@ -28,11 +28,11 @@ miniprogram/project.private.config.json
 
 # Docker
 docker/.env
+docker-nas/.env
 
-# GitHub Actions workflow (需要 workflow scope 权限，暂不提交)
-.github/workflows/
-
-.sync_temp_dir/
+# TypeScript构建缓存
+*.tsbuildinfo
+web/tsconfig.tsbuildinfo
 
 # 临时部署/测试脚本
 *.py
@@ -52,3 +52,13 @@ docker/.env
 !deploy-fix.py
 !deploy-permission.py
 !deploy-refresh-fix.py
+!deploy_fast.py
+!verify_deploy.py
+
+# 临时文件
+*.tmp
+*.temp
+server_chunk_*.js
+
+# 同步工具临时目录
+.sync_temp_dir/

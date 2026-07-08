@@ -1,4 +1,4 @@
-const fs = require('fs')
+﻿const fs = require('fs')
 const path = require('path')
 
 const envPath = path.join(__dirname, '..', '.env')
@@ -36,7 +36,7 @@ async function main() {
   console.log('MySQL 版本:', version[0].v)
   
   const [tables] = await conn.execute('SHOW TABLES')
-  const tableNames = tables.map(t => Object.values(t)[0])
+  const tableNames = tables.map(t => Object.values(t)[0].toLowerCase())
   console.log('现有表:', tableNames.join(', ') || '无')
   
   // helper: 创建 updatedAt 触发器
@@ -95,7 +95,7 @@ async function main() {
   // ==================== 2. User 表 ====================
   console.log('\n2. 处理 User 表...')
   
-  if (tableNames.includes('User')) {
+  if (tableNames.includes('user')) {
     const [cols] = await conn.execute('DESCRIBE `User`')
     const colNames = cols.map(c => c.Field)
     console.log('   User 表列:', colNames.join(', '))
@@ -137,7 +137,7 @@ async function main() {
   console.log('   ✅ User 表完成')
   
   // ==================== 3. DataTable ====================
-  if (!tableNames.includes('DataTable')) {
+  if (!tableNames.includes('datatable')) {
     console.log('3. 创建 DataTable 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`DataTable\` (
@@ -149,6 +149,7 @@ async function main() {
         \`categoryId\` INT NULL,
         \`status\` ENUM('ACTIVE','ARCHIVED','DRAFT') NOT NULL DEFAULT 'ACTIVE',
         \`sortOrder\` INT NOT NULL DEFAULT 0,
+        \`isDetailTable\` TINYINT(1) NOT NULL DEFAULT 0,
         \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         \`updatedAt\` DATETIME NULL,
         \`createdBy\` INT NULL,
@@ -165,10 +166,13 @@ async function main() {
       await conn.execute('ALTER TABLE `DataTable` ADD COLUMN `categoryId` INT NULL')
       await conn.execute('ALTER TABLE `DataTable` ADD INDEX `DataTable_categoryId_idx` (`categoryId`)')
     }
+    if (!dtColNames.includes('isDetailTable')) {
+      await conn.execute('ALTER TABLE `DataTable` ADD COLUMN `isDetailTable` TINYINT(1) NOT NULL DEFAULT 0')
+    }
   }
   
   // ==================== 4. TableField ====================
-  if (!tableNames.includes('TableField')) {
+  if (!tableNames.includes('tablefield')) {
     console.log('4. 创建 TableField 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`TableField\` (
@@ -176,7 +180,7 @@ async function main() {
         \`tableId\` INT NOT NULL,
         \`name\` VARCHAR(191) NOT NULL,
         \`label\` VARCHAR(191) NOT NULL,
-        \`type\` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION') NOT NULL,
+        \`type\` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION','DETAIL_TABLE') NOT NULL,
         \`required\` TINYINT(1) NOT NULL DEFAULT 0,
         \`unique\` TINYINT(1) NOT NULL DEFAULT 0,
         \`sortOrder\` INT NOT NULL DEFAULT 0,
@@ -201,7 +205,7 @@ async function main() {
   }
   
   // ==================== 5. TablePermission ====================
-  if (!tableNames.includes('TablePermission')) {
+  if (!tableNames.includes('tablepermission')) {
     console.log('5. 创建 TablePermission 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`TablePermission\` (
@@ -247,7 +251,7 @@ async function main() {
   }
   
   // ==================== 6. DataRecord ====================
-  if (!tableNames.includes('DataRecord')) {
+  if (!tableNames.includes('datarecord')) {
     console.log('6. 创建 DataRecord 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`DataRecord\` (
@@ -271,7 +275,7 @@ async function main() {
   }
   
   // ==================== 7. UploadedFile ====================
-  if (!tableNames.includes('UploadedFile')) {
+  if (!tableNames.includes('uploadedfile')) {
     console.log('7. 创建 UploadedFile 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`UploadedFile\` (
@@ -298,7 +302,7 @@ async function main() {
   }
   
   // ==================== 8. OperationLog ====================
-  if (!tableNames.includes('OperationLog')) {
+  if (!tableNames.includes('operationlog')) {
     console.log('8. 创建 OperationLog 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`OperationLog\` (
@@ -321,7 +325,7 @@ async function main() {
   }
   
   // ==================== 9. ExportTemplate ====================
-  if (!tableNames.includes('ExportTemplate')) {
+  if (!tableNames.includes('exporttemplate')) {
     console.log('9. 创建 ExportTemplate 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`ExportTemplate\` (
@@ -366,7 +370,7 @@ async function main() {
   }
   
   // ==================== 10. SystemSetting ====================
-  if (!tableNames.includes('SystemSetting')) {
+  if (!tableNames.includes('systemsetting')) {
     console.log('10. 创建 SystemSetting 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`SystemSetting\` (
@@ -402,7 +406,7 @@ async function main() {
   
   // ==================== 12. TableCategory 分类表 ====================
   console.log('\n12. 检查 TableCategory 表...')
-  if (!tableNames.includes('TableCategory')) {
+  if (!tableNames.includes('tablecategory')) {
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`TableCategory\` (
         \`id\` INT AUTO_INCREMENT PRIMARY KEY,
@@ -427,7 +431,7 @@ async function main() {
   
   // ==================== 13. UserDashboardConfig 用户仪表盘配置 ====================
   console.log('\n13. 检查 UserDashboardConfig 表...')
-  if (!tableNames.includes('UserDashboardConfig')) {
+  if (!tableNames.includes('userdashboardconfig')) {
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`UserDashboardConfig\` (
         \`id\` INT AUTO_INCREMENT PRIMARY KEY,
@@ -447,7 +451,7 @@ async function main() {
   
   // ==================== 14. VersionLog 版本变更记录 ====================
   console.log('\n14. 检查 VersionLog 表...')
-  if (!tableNames.includes('VersionLog')) {
+  if (!tableNames.includes('versionlog')) {
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`VersionLog\` (
         \`id\` INT AUTO_INCREMENT PRIMARY KEY,
@@ -471,7 +475,7 @@ async function main() {
   
   // ==================== 15. UserSession 用户会话表 ====================
   console.log('\n15. 检查 UserSession 表...')
-  if (!tableNames.includes('UserSession')) {
+  if (!tableNames.includes('usersession')) {
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`UserSession\` (
         \`id\` INT AUTO_INCREMENT PRIMARY KEY,
