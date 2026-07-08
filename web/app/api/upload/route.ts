@@ -9,7 +9,7 @@ import { FileType } from '@prisma/client'
 export const runtime = 'nodejs'
 
 const ALLOWED_EXTENSIONS = [
-  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg',
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
   '.txt', '.csv',
   '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm',
