@@ -1,10 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { unlink } from 'fs/promises'
+import { unlink, readFile } from 'fs/promises'
 import path from 'path'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 
 export const runtime = 'nodejs'
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) {
+      return NextResponse.json({ message: '未登录' }, { status: 401 })
+    }
+
+    const id = parseInt(params.id)
+    if (isNaN(id)) {
+      return NextResponse.json({ message: '无效的附件ID' }, { status: 400 })
+    }
+
+    const attachment = await prisma.recordAttachment.findUnique({
+      where: { id },
+    })
+
+    if (!attachment) {
+      return NextResponse.json({ message: '附件不存在' }, { status: 404 })
+    }
+
+    const filePath = path.join(process.cwd(), 'public', attachment.filePath)
+    
+    try {
+      const fileBuffer = await readFile(filePath)
+      
+      const headers = new Headers()
+      headers.set('Content-Type', attachment.mimeType)
+      headers.set('Content-Disposition', `inline; filename="${encodeURIComponent(attachment.originalName)}"`)
+      headers.set('Content-Length', attachment.fileSize.toString())
+      
+      return new NextResponse(fileBuffer, { headers })
+    } catch (e) {
+      console.error('Read attachment file error:', e)
+      return NextResponse.json({ message: '文件不存在' }, { status: 404 })
+    }
+  } catch (error) {
+    console.error('Download attachment error:', error)
+    return NextResponse.json({ message: '下载失败' }, { status: 500 })
+  }
+}
 
 export async function DELETE(
   req: NextRequest,

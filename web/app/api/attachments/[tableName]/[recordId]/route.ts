@@ -106,7 +106,7 @@ export async function POST(
       return NextResponse.json({ message: '文件内容与扩展名不符' }, { status: 400 })
     }
 
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'attachments')
+    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'record-attachments')
     const dateDir = new Date().toISOString().slice(0, 7).replace('-', '/')
     const fullDir = path.join(uploadDir, dateDir)
 
@@ -116,7 +116,7 @@ export async function POST(
 
     const fileName = `${generateId()}${ext}`
     const filePath = path.join(fullDir, fileName)
-    const relativePath = `/uploads/attachments/${dateDir}/${fileName}`.replace(/\\/g, '/')
+    const relativePath = `/uploads/record-attachments/${dateDir}/${fileName}`.replace(/\\/g, '/')
 
     await writeFile(filePath, buffer)
 

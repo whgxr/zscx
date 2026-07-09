@@ -32,6 +32,7 @@ model User {
   tablePermissions TablePermission[]
   dataRecords      DataRecord[]      @relation("CreatedRecords")
   uploadedFiles    UploadedFile[]
+  recordAttachments RecordAttachment[]
   sessions         UserSession[]
 
   @@index([username])
