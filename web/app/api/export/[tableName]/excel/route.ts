@@ -121,7 +121,7 @@ export async function GET(
 
     const workbook = new ExcelJS.Workbook()
 
-    if (useTemplate && templateConfig?.grid) {
+    if (useTemplate && (templateConfig?.univerData || templateConfig?.grid)) {
       await exportTemplateExcel(workbook, table, records, templateConfig, exportTemplate)
     } else {
       switch (type) {
@@ -516,9 +516,101 @@ async function exportTemplateExcel(
   config: any,
   templateMeta: any
 ) {
-  const grid = config.grid || []
-  const colWidths = config.colWidths || []
-  const rowHeights = config.rowHeights || []
+  // Support new Univer IWorkbookData format
+  let grid = config.grid || []
+  let colWidths = config.colWidths || []
+  let rowHeights = config.rowHeights || []
+  
+  if (!grid.length && config.univerData) {
+    // Convert Univer IWorkbookData to grid format
+    const univerData = config.univerData
+    const sheetId = univerData.sheetOrder?.[0]
+    if (sheetId && univerData.sheets?.[sheetId]) {
+      const sheet = univerData.sheets[sheetId]
+      const cellData = sheet.cellData || {}
+      const styles: Record<string, any> = (univerData as any).styles || {}
+      const merges = (sheet as any).mergeData || []
+      
+      // Determine dimensions
+      let maxRow = sheet.rowCount || 50
+      let maxCol = sheet.columnCount || 20
+      for (const r of Object.keys(cellData)) {
+        const rowNum = Number(r)
+        if (rowNum >= maxRow) maxRow = rowNum + 1
+        const row = cellData[rowNum]
+        if (row) {
+          for (const c of Object.keys(row)) {
+            const colNum = Number(c)
+            if (colNum >= maxCol) maxCol = colNum + 1
+          }
+        }
+      }
+      
+      // Build merge map
+      const mergeMap: Record<string, { rowSpan: number; colSpan: number }> = {}
+      const mergeHiddenSet = new Set<string>()
+      for (const merge of merges) {
+        if (merge.startRow !== undefined) {
+          const key = `${merge.startRow},${merge.startColumn}`
+          mergeMap[key] = { rowSpan: merge.endRow - merge.startRow + 1, colSpan: merge.endColumn - merge.startColumn + 1 }
+          for (let r = merge.startRow; r <= merge.endRow; r++) {
+            for (let c = merge.startColumn; c <= merge.endColumn; c++) {
+              if (r !== merge.startRow || c !== merge.startColumn) {
+                mergeHiddenSet.add(`${r},${c}`)
+              }
+            }
+          }
+        }
+      }
+      
+      // Build grid
+      grid = []
+      for (let r = 0; r < maxRow; r++) {
+        grid[r] = []
+        for (let c = 0; c < maxCol; c++) {
+          const univerCell = cellData[r]?.[c]
+          const mergeKey = `${r},${c}`
+          const merge = mergeMap[mergeKey]
+          const mergeHidden = mergeHiddenSet.has(mergeKey)
+          
+          if (!univerCell && !merge && !mergeHidden) continue
+          
+          const style = univerCell?.s !== undefined ? styles[String(univerCell.s)] : undefined
+          
+          grid[r][c] = {
+            value: univerCell?.v != null ? String(univerCell.v) : '',
+            bold: style?.bd ? true : false,
+            italic: style?.it === 1 || style?.it === true,
+            underline: style?.ul?.s === 1 || style?.ul?.s === true,
+            align: style?.ht === 2 ? 'center' : style?.ht === 3 ? 'right' : 'left',
+            verticalAlign: style?.vt === 2 ? 'middle' : style?.vt === 3 ? 'bottom' : 'top',
+            bgColor: style?.bg?.rgb ? `#${style.bg.rgb}` : undefined,
+            textColor: style?.cl?.rgb ? `#${style.cl.rgb}` : undefined,
+            fontSize: style?.fs || undefined,
+            wrapText: style?.tb === 2,
+            rowSpan: merge?.rowSpan,
+            colSpan: merge?.colSpan,
+            mergeHidden,
+          }
+        }
+      }
+      
+      // Build colWidths
+      const colData = (sheet as any).colData || {}
+      colWidths = []
+      for (let c = 0; c < maxCol; c++) {
+        colWidths[c] = colData[c]?.w || sheet.defaultColumnWidth || 100
+      }
+      
+      // Build rowHeights
+      const rowData = (sheet as any).rowData || {}
+      rowHeights = []
+      for (let r = 0; r < maxRow; r++) {
+        rowHeights[r] = rowData[r]?.h || sheet.defaultRowHeight || 24
+      }
+    }
+  }
+  
   const pageSetup = config.pageSetup || {}
   
   const worksheet = workbook.addWorksheet(templateMeta?.name || table.label)

@@ -37,11 +37,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { 
-  Plus, 
-  Search, 
-  Edit, 
-  Trash2, 
+import {
+  Plus,
+  Search,
+  Edit,
+  Trash2,
   Eye,
   Download,
   Upload,
@@ -62,6 +62,7 @@ import {
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
 import { ImportDialog } from '@/components/import/import-dialog'
+import { QrCodeButton } from '@/components/qr-code-button'
 import { formatDateTime } from '@/lib/utils'
 import { DataTable, TableField, RecordStatus, Role, FieldType } from '@prisma/client'
 import JSZip from 'jszip'
@@ -984,6 +985,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                           >
                             <Eye className="w-4 h-4" />
                           </Button>
+                          <QrCodeButton tableName={table.name} recordId={record.id} />
                           <Button
                             variant="ghost"
                             size="sm"
