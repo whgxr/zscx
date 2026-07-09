@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import FormLayoutDesigner, { FormLayoutConfig } from '@/components/form-layout-designer'
+import UniverFormDesigner, { FormLayoutConfig } from '@/components/univer-form-designer'
 import { TestLayout } from '@/components/test-layout'
 import {
   Dialog,
@@ -1539,7 +1539,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
 
       {activeTab === 'layout' && (
         <div className="mt-6">
-          <FormLayoutDesigner
+          <UniverFormDesigner
             tableId={table.id}
             fields={fields}
             initialConfig={table.formLayoutConfig as FormLayoutConfig | null}
