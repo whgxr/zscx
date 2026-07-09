@@ -13,7 +13,6 @@ import {
   Palette,
   Activity,
   FolderTree,
-  Package,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Role } from '@prisma/client'
@@ -167,18 +166,6 @@ export function Sidebar({ user, tables }: SidebarProps) {
             >
               <Palette className="w-5 h-5" />
               导出模板设计
-            </Link>
-            <Link
-              href="/dashboard/versions"
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-                pathname.startsWith('/dashboard/versions')
-                  ? "bg-primary/10 text-primary font-medium"
-                  : "text-gray-600 hover:bg-gray-100"
-              )}
-            >
-              <Package className="w-5 h-5" />
-              版本管理
             </Link>
             <Link
               href="/dashboard/settings"

@@ -403,43 +403,6 @@ async function main() {
   })
   console.log('✅ 示例查看员创建成功: viewer01 / 123456')
 
-  // 创建版本记录
-  const existingVersionLog = await prisma.versionLog.findFirst({
-    where: { version: '1.1.1' },
-  })
-  if (!existingVersionLog) {
-    await prisma.versionLog.create({
-      data: {
-        version: '1.1.1',
-        title: 'v1.1.1 功能增强与优化',
-        description: '新增多项功能，修复已知问题，优化用户体验',
-        changes: {
-          features: [
-            '导出模板分类（导出/打印二级分类）',
-            '字段选项管理',
-            '3级项目分类',
-            '数据导入功能',
-            '仪表盘自定义',
-            '版本记录',
-          ],
-          fixes: [
-            'Excel预览不显示',
-            '操作日志全中文显示',
-            '合并单元格导出异常',
-          ],
-          improvements: [
-            '导出按钮合并',
-            '权限细化（Excel/PDF分开控制）',
-          ],
-        },
-        releaseDate: new Date(),
-      },
-    })
-    console.log('✅ 版本记录创建成功: v1.1.1')
-  } else {
-    console.log('ℹ️  版本记录已存在: v1.1.1')
-  }
-
   console.log('🎉 数据库初始化完成！')
   console.log('')
   console.log('默认账号:')
