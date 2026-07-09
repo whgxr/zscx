@@ -19,10 +19,7 @@ import {
   Clock,
   AlertCircle,
   LayoutDashboard,
-  MessageSquare,
 } from 'lucide-react'
-import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { Role } from '@prisma/client'
 
 interface SettingsClientProps {
@@ -39,11 +36,7 @@ interface SettingsClientProps {
 
 export function SettingsClient({ userRole, stats }: SettingsClientProps) {
   const [sessionTimeout, setSessionTimeout] = useState(30)
-  const [feishuEnabled, setFeishuEnabled] = useState(false)
-  const [feishuWebhookUrl, setFeishuWebhookUrl] = useState('')
   const [loading, setLoading] = useState(false)
-  const [savingFeishu, setSavingFeishu] = useState(false)
-  const [testingWebhook, setTestingWebhook] = useState(false)
 
   useEffect(() => {
     fetchSettings()
@@ -56,8 +49,6 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
         const data = await res.json()
         const timeout = parseInt(data.settings?.sessionTimeout || '30')
         setSessionTimeout(timeout)
-        setFeishuEnabled(data.settings?.feishu_enabled === 'true')
-        setFeishuWebhookUrl(data.settings?.feishu_webhook_url || '')
       }
     } catch (err) {
       console.error('Fetch settings error:', err)
@@ -85,62 +76,6 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
     }
   }
 
-  const saveFeishuSettings = async () => {
-    setSavingFeishu(true)
-    try {
-      const res = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          settings: {
-            feishu_enabled: feishuEnabled.toString(),
-            feishu_webhook_url: feishuWebhookUrl,
-          },
-        }),
-      })
-      if (res.ok) {
-        alert('飞书配置保存成功')
-      } else {
-        const data = await res.json()
-        alert(data.message || '保存失败')
-      }
-    } catch (err) {
-      alert('保存失败')
-    } finally {
-      setSavingFeishu(false)
-    }
-  }
-
-  const testFeishuWebhook = async () => {
-    if (!feishuWebhookUrl) {
-      alert('请先填写Webhook地址')
-      return
-    }
-    setTestingWebhook(true)
-    try {
-      const response = await fetch(feishuWebhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          msg_type: 'text',
-          content: {
-            text: '🔔 飞书Webhook连接测试成功！\n来自：房屋征收调查系统',
-          },
-        }),
-      })
-      const result = await response.json()
-      if (result.code === 0 || result.StatusCode === 0) {
-        alert('测试消息发送成功！请检查飞书群是否收到消息')
-      } else {
-        alert('测试失败：' + (result.msg || result.ErrMsg || '未知错误'))
-      }
-    } catch (err) {
-      alert('测试失败：网络错误')
-    } finally {
-      setTestingWebhook(false)
-    }
-  }
-
   const statItems = [
     { label: '数据表', value: stats.tables, icon: Database, color: 'text-blue-500' },
     { label: '用户数', value: stats.users, icon: Users, color: 'text-green-500' },
@@ -156,13 +91,6 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
       description: '自定义仪表盘小组件和布局',
       href: '/dashboard',
       icon: LayoutDashboard,
-      adminOnly: false,
-    },
-    {
-      title: '版本管理',
-      description: '管理版本更新记录，同步到飞书群',
-      href: '/dashboard/versions',
-      icon: FileText,
       adminOnly: false,
     },
     {
@@ -305,71 +233,6 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
             <div className="flex justify-end">
               <Button onClick={saveSettings} disabled={loading}>
                 {loading ? '保存中...' : '保存设置'}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 飞书集成设置 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" />
-            飞书集成
-          </CardTitle>
-          <CardDescription>配置飞书机器人Webhook，用于版本更新通知</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4" />
-                  启用飞书通知
-                </Label>
-                <p className="text-sm text-gray-500 mt-1">
-                  开启后，新版本发布时将自动发送通知到飞书群
-                </p>
-              </div>
-              <Switch
-                checked={feishuEnabled}
-                onCheckedChange={setFeishuEnabled}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>飞书自定义机器人 Webhook 地址</Label>
-              <Textarea
-                value={feishuWebhookUrl}
-                onChange={(e) => setFeishuWebhookUrl(e.target.value)}
-                placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxxxx"
-                className="font-mono text-sm"
-                rows={2}
-              />
-              <p className="text-sm text-gray-500">
-                在飞书群设置中添加「自定义机器人」，将Webhook地址粘贴到此处。
-                <a
-                  href="https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline ml-1"
-                >
-                  查看配置指南
-                </a>
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 justify-end">
-              <Button
-                variant="outline"
-                onClick={testFeishuWebhook}
-                disabled={testingWebhook || !feishuWebhookUrl}
-              >
-                {testingWebhook ? '测试中...' : '发送测试消息'}
-              </Button>
-              <Button onClick={saveFeishuSettings} disabled={savingFeishu}>
-                {savingFeishu ? '保存中...' : '保存配置'}
               </Button>
             </div>
           </div>

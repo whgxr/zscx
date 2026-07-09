@@ -32,7 +32,6 @@ model User {
   tablePermissions TablePermission[]
   dataRecords      DataRecord[]      @relation("CreatedRecords")
   uploadedFiles    UploadedFile[]
-  versionLogs      VersionLog[]      @relation("VersionLogCreator")
   sessions         UserSession[]
 
   @@index([username])
@@ -155,26 +154,6 @@ model UserDashboardConfig {
   updatedAt DateTime  @updatedAt
 
   @@index([userId])
-}
-
-// 版本变更记录
-model VersionLog {
-  id          Int       @id @default(autoincrement())
-  version     String    // 版本号，如 1.1.1
-  title       String    // 版本标题
-  description String?   // 版本描述
-  changes     Json      // 变更详情：{ features: [], fixes: [], improvements: [] }
-  releaseDate DateTime? // 发布日期
-  createdBy   Int?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  // 关系
-  creator     User?     @relation("VersionLogCreator", fields: [createdBy], references: [id])
-
-  @@index([version])
-  @@index([releaseDate])
-  @@index([createdBy])
 }
 
 model DataTable {

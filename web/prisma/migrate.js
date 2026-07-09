@@ -1,4 +1,4 @@
-﻿const fs = require('fs')
+const fs = require('fs')
 const path = require('path')
 
 const envPath = path.join(__dirname, '..', '.env')
@@ -447,30 +447,6 @@ async function main() {
     console.log('   ✅ UserDashboardConfig 表创建完成')
   } else {
     console.log('   UserDashboardConfig 表已存在')
-  }
-  
-  // ==================== 14. VersionLog 版本变更记录 ====================
-  console.log('\n14. 检查 VersionLog 表...')
-  if (!tableNames.includes('versionlog')) {
-    await conn.execute(`
-      CREATE TABLE IF NOT EXISTS \`VersionLog\` (
-        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
-        \`version\` VARCHAR(191) NOT NULL,
-        \`title\` VARCHAR(191) NOT NULL,
-        \`description\` TEXT NULL,
-        \`changes\` LONGTEXT NULL,
-        \`releaseDate\` DATETIME NULL,
-        \`createdBy\` INT NULL,
-        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`updatedAt\` DATETIME NULL,
-        INDEX \`VersionLog_version_idx\` (\`version\`),
-        INDEX \`VersionLog_releaseDate_idx\` (\`releaseDate\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `)
-    await createUpdateTrigger('VersionLog')
-    console.log('   ✅ VersionLog 表创建完成')
-  } else {
-    console.log('   VersionLog 表已存在')
   }
   
   // ==================== 15. UserSession 用户会话表 ====================

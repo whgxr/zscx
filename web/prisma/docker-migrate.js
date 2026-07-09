@@ -116,7 +116,6 @@ async function main() {
     ['ExportTemplate', createExportTemplate],
     ['SystemSetting', createSystemSetting],
     ['UserDashboardConfig', createUserDashboardConfig],
-    ['VersionLog', createVersionLog],
     ['UserSession', createUserSession],
     ['_SharedTemplates', createSharedTemplates],
   ]
@@ -477,24 +476,6 @@ async function createUserDashboardConfig(prisma) {
       \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
       INDEX \`UserDashboardConfig_userId_idx\` (\`userId\`),
       CONSTRAINT \`UserDashboardConfig_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `)
-}
-
-async function createVersionLog(prisma) {
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS \`VersionLog\` (
-      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
-      \`version\` VARCHAR(191) NOT NULL,
-      \`title\` VARCHAR(191) NOT NULL,
-      \`description\` TEXT NULL,
-      \`changes\` JSON NULL,
-      \`releaseDate\` DATETIME(3) NULL,
-      \`createdBy\` INT NULL,
-      \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-      \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-      INDEX \`VersionLog_version_idx\` (\`version\`),
-      INDEX \`VersionLog_releaseDate_idx\` (\`releaseDate\`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `)
 }
