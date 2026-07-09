@@ -110,6 +110,7 @@ async function main() {
     ['TableField', createTableField],
     ['TablePermission', createTablePermission],
     ['DataRecord', createDataRecord],
+    ['RecordAttachment', createRecordAttachment],
     ['UploadedFile', createUploadedFile],
     ['OperationLog', createOperationLog],
     ['ErrorLog', createErrorLog],
@@ -345,6 +346,31 @@ async function createDataRecord(prisma) {
       INDEX \`DataRecord_status_idx\` (\`status\`),
       CONSTRAINT \`DataRecord_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE,
       CONSTRAINT \`DataRecord_createdBy_fkey\` FOREIGN KEY (\`createdBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `)
+}
+
+async function createRecordAttachment(prisma) {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS \`RecordAttachment\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`tableId\` INT NOT NULL,
+      \`recordId\` INT NOT NULL,
+      \`type\` ENUM('IMAGE','FILE','OTHER') NOT NULL DEFAULT 'OTHER',
+      \`displayName\` VARCHAR(191) NOT NULL,
+      \`originalName\` VARCHAR(191) NOT NULL,
+      \`fileName\` VARCHAR(191) NOT NULL,
+      \`filePath\` TEXT NOT NULL,
+      \`fileSize\` INT NOT NULL,
+      \`mimeType\` VARCHAR(191) NOT NULL,
+      \`uploadedBy\` INT NULL,
+      \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      INDEX \`RecordAttachment_tableId_idx\` (\`tableId\`),
+      INDEX \`RecordAttachment_recordId_idx\` (\`recordId\`),
+      INDEX \`RecordAttachment_createdAt_idx\` (\`createdAt\`),
+      CONSTRAINT \`RecordAttachment_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE,
+      CONSTRAINT \`RecordAttachment_recordId_fkey\` FOREIGN KEY (\`recordId\`) REFERENCES \`DataRecord\`(\`id\`) ON DELETE CASCADE,
+      CONSTRAINT \`RecordAttachment_uploadedBy_fkey\` FOREIGN KEY (\`uploadedBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `)
 }
