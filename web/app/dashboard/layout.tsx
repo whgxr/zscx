@@ -21,7 +21,7 @@ export default async function DashboardLayout({
 
   if (isAdmin) {
     tables = await prisma.dataTable.findMany({
-      where: { status: 'ACTIVE' },
+      where: { status: 'ACTIVE', isDetailTable: false },
       orderBy: { sortOrder: 'asc' },
       select: {
         id: true,
@@ -44,13 +44,14 @@ export default async function DashboardLayout({
             label: true,
             icon: true,
             status: true,
+            isDetailTable: true,
           },
         },
       },
     })
 
     tables = permissions
-      .filter(p => p.table.status === 'ACTIVE')
+      .filter(p => p.table.status === 'ACTIVE' && !p.table.isDetailTable)
       .map(p => p.table)
   }
 
