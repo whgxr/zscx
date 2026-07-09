@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -56,6 +57,7 @@ import {
   Settings2,
   Check,
   Printer,
+  FileType,
   Paperclip,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
@@ -63,6 +65,7 @@ import { ImportDialog } from '@/components/import/import-dialog'
 import { formatDateTime } from '@/lib/utils'
 import { DataTable, TableField, RecordStatus, Role, FieldType } from '@prisma/client'
 import JSZip from 'jszip'
+import jsPDF from 'jspdf'
 
 interface DataListClientProps {
   table: DataTable & {
@@ -151,6 +154,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [attachmentCounts, setAttachmentCounts] = useState<Record<number, number>>({})
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<number[]>([])
 
   const canEdit = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canEdit
   const canDelete = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canDelete
@@ -378,6 +382,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const openAttachmentDialog = async (record: any) => {
     setAttachmentRecord(record)
     setAttachmentDialogOpen(true)
+    setSelectedAttachmentIds([])
     setAttachmentLoading(true)
     try {
       const res = await fetch(`/api/attachments/${table.name}/${record.id}`)
@@ -452,7 +457,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
     if (!attachmentRecord) return
 
     try {
-      const res = await fetch(`/api/attachments/${id}`, {
+      const res = await fetch(`/api/attachments/item/${id}`, {
         method: 'DELETE',
       })
       if (res.ok) {
@@ -467,6 +472,229 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
       }
     } catch (err) {
       alert('删除失败')
+    }
+  }
+
+  const handleGeneratePDF = async () => {
+    if (selectedAttachmentIds.length === 0) {
+      alert('请先选择要生成PDF的附件')
+      return
+    }
+
+    const selectedAttachments = attachments.filter(a => selectedAttachmentIds.includes(a.id))
+    if (selectedAttachments.length === 0) return
+
+    try {
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      })
+
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const margin = 10
+      let isFirstPage = true
+
+      for (let i = 0; i < selectedAttachments.length; i++) {
+        const attachment = selectedAttachments[i]
+        const isImage = attachment.type === 'IMAGE'
+        const isPdf = attachment.mimeType === 'application/pdf' || attachment.originalName?.toLowerCase().endsWith('.pdf')
+
+        // 尝试通过预览API获取页面图片
+        let pages: { dataUrl: string }[] = []
+
+        if (isImage) {
+          // 图片直接获取
+          try {
+            const res = await fetch(`/api/attachments/item/${attachment.id}`)
+            if (res.ok) {
+              const blob = await res.blob()
+              const arrayBuffer = await blob.arrayBuffer()
+              const base64 = arrayBufferToBase64(arrayBuffer)
+              const mimeType = attachment.mimeType || 'image/jpeg'
+              pages = [{ dataUrl: `data:${mimeType};base64,${base64}` }]
+            }
+          } catch (e) {
+            console.error(`加载图片 ${attachment.displayName} 失败`, e)
+          }
+        } else if (isPdf) {
+          // PDF 通过预览API转换
+          try {
+            const res = await fetch(`/api/attachments/item/${attachment.id}/preview`)
+            if (res.ok) {
+              const data = await res.json()
+              pages = data.pages || []
+            }
+          } catch (e) {
+            console.error(`转换PDF ${attachment.displayName} 失败`, e)
+          }
+        } else {
+          // 其他文档类型尝试预览API
+          try {
+            const res = await fetch(`/api/attachments/item/${attachment.id}/preview`)
+            if (res.ok) {
+              const data = await res.json()
+              pages = data.pages || []
+            }
+          } catch (e) {
+            console.error(`转换文档 ${attachment.displayName} 失败`, e)
+          }
+        }
+
+        if (pages.length === 0) {
+          // 无法转换，添加说明页
+          if (!isFirstPage) {
+            pdf.addPage()
+          }
+          isFirstPage = false
+
+          pdf.setFontSize(16)
+          pdf.setTextColor(0, 0, 0)
+          pdf.text(`${i + 1}. ${attachment.displayName}`, margin, margin + 10)
+          pdf.setFontSize(11)
+          pdf.setTextColor(150, 150, 150)
+          pdf.text(`[此文件类型暂不支持预览]`, margin, margin + 22)
+          pdf.text(`文件: ${attachment.originalName}`, margin, margin + 32)
+          pdf.text(`大小: ${formatFileSize(attachment.fileSize)}`, margin, margin + 40)
+          continue
+        }
+
+        // 添加附件标题页（仅当有多页或第一个附件时）
+        if (!isFirstPage) {
+          pdf.addPage()
+        }
+        isFirstPage = false
+
+        // 标题
+        pdf.setFontSize(16)
+        pdf.setTextColor(0, 0, 0)
+        pdf.text(`${i + 1}. ${attachment.displayName}`, margin, margin + 10)
+
+        // 为每个页面添加到PDF
+        for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
+          if (pageIdx > 0) {
+            pdf.addPage()
+          }
+
+          const pageData = pages[pageIdx]
+          const imgWidth = pageWidth - margin * 2
+          const imgHeight = pageHeight - margin * 2 - 20 // 留出标题空间
+
+          try {
+            // 先获取图片尺寸来保持比例
+            const img = new Image()
+            await new Promise<void>((resolve, reject) => {
+              img.onload = () => resolve()
+              img.onerror = () => reject(new Error('Image load failed'))
+              img.src = pageData.dataUrl
+            })
+
+            const aspectRatio = img.naturalWidth / img.naturalHeight
+            let finalW = imgWidth
+            let finalH = imgWidth / aspectRatio
+
+            if (pageIdx === 0) {
+              // 第一页有标题，图片区域小一些
+              const availableH = pageHeight - margin - 20
+              if (finalH > availableH) {
+                finalH = availableH
+                finalW = finalH * aspectRatio
+              }
+              const yPos = margin + 20
+              const xPos = margin + (imgWidth - finalW) / 2
+              pdf.addImage(pageData.dataUrl, 'JPEG', xPos, yPos, finalW, finalH, undefined, 'FAST')
+            } else {
+              // 后续页全页显示
+              if (finalH > imgHeight) {
+                finalH = imgHeight
+                finalW = finalH * aspectRatio
+              }
+              const yPos = margin + (imgHeight - finalH) / 2
+              const xPos = margin + (imgWidth - finalW) / 2
+              pdf.addImage(pageData.dataUrl, 'JPEG', xPos, yPos, finalW, finalH, undefined, 'FAST')
+            }
+          } catch (e) {
+            console.error(`添加页面 ${pageIdx + 1} 到PDF失败`, e)
+            pdf.setFontSize(10)
+            pdf.setTextColor(200, 0, 0)
+            pdf.text('[页面加载失败]', margin, margin + 30)
+          }
+        }
+      }
+
+      pdf.save(`附件汇总_记录${attachmentRecord?.id || ''}.pdf`)
+    } catch (err) {
+      alert('生成PDF失败')
+      console.error('Generate PDF error:', err)
+    }
+  }
+
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    let binary = ''
+    const bytes = new Uint8Array(buffer)
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    return btoa(binary)
+  }
+
+  const handleBatchDownload = async () => {
+    if (selectedAttachmentIds.length === 0) {
+      alert('请先选择要下载的附件')
+      return
+    }
+
+    const selectedAttachments = attachments.filter(a => selectedAttachmentIds.includes(a.id))
+    if (selectedAttachments.length === 0) return
+
+    try {
+      if (selectedAttachments.length === 1) {
+        // 单文件直接下载
+        const attachment = selectedAttachments[0]
+        const a = document.createElement('a')
+        a.href = `/api/attachments/item/${attachment.id}`
+        a.download = attachment.originalName
+        a.click()
+      } else {
+        // 多文件打包成zip
+        const zip = new JSZip()
+        for (const attachment of selectedAttachments) {
+          try {
+            const res = await fetch(`/api/attachments/item/${attachment.id}`)
+            if (res.ok) {
+              const blob = await res.blob()
+              zip.file(attachment.originalName, blob)
+            }
+          } catch (e) {
+            console.error(`下载附件 ${attachment.displayName} 失败`, e)
+          }
+        }
+        const content = await zip.generateAsync({ type: 'blob' })
+        const url = URL.createObjectURL(content)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `附件批量下载_${attachmentRecord?.id || 'record'}.zip`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      alert('批量下载失败')
+      console.error('Batch download error:', err)
+    }
+  }
+
+  const toggleAttachmentSelection = (id: number) => {
+    setSelectedAttachmentIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    )
+  }
+
+  const selectAllAttachments = () => {
+    if (selectedAttachmentIds.length === attachments.length) {
+      setSelectedAttachmentIds([])
+    } else {
+      setSelectedAttachmentIds(attachments.map(a => a.id))
     }
   }
 
@@ -1077,6 +1305,39 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
               </div>
             </DialogTitle>
           </DialogHeader>
+          {attachments.length > 0 && (
+            <div className="flex items-center justify-between px-1 py-2 border-b">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={selectedAttachmentIds.length === attachments.length && attachments.length > 0}
+                  onCheckedChange={selectAllAttachments}
+                />
+                <span className="text-sm text-gray-600">
+                  已选 {selectedAttachmentIds.length}/{attachments.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGeneratePDF}
+                  disabled={selectedAttachmentIds.length === 0}
+                >
+                  <FileType className="w-4 h-4 mr-2" />
+                  生成PDF
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBatchDownload}
+                  disabled={selectedAttachmentIds.length === 0}
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  批量下载{selectedAttachmentIds.length > 0 ? ` (${selectedAttachmentIds.length})` : ''}
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-auto">
             {attachmentLoading ? (
               <div className="text-center py-12 text-gray-500">加载中...</div>
@@ -1091,12 +1352,16 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                 {attachments.map((attachment) => (
                   <div
                     key={attachment.id}
-                    className="flex items-center gap-4 p-3 border rounded-lg hover:bg-gray-50"
+                    className="flex items-center gap-3 p-3 border rounded-lg hover:bg-gray-50"
                   >
+                    <Checkbox
+                      checked={selectedAttachmentIds.includes(attachment.id)}
+                      onCheckedChange={() => toggleAttachmentSelection(attachment.id)}
+                    />
                     <div className="w-12 h-12 flex-shrink-0 border rounded overflow-hidden bg-gray-50 flex items-center justify-center">
                       {attachment.type === 'IMAGE' ? (
                         <img
-                          src={attachment.filePath}
+                          src={`/api/attachments/item/${attachment.id}`}
                           alt={attachment.displayName}
                           className="w-full h-full object-cover"
                           onError={(e) => {
@@ -1122,23 +1387,10 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => window.open(attachment.filePath, '_blank')}
+                        onClick={() => window.open(`/api/attachments/item/${attachment.id}`, '_blank')}
                         title="查看/下载"
                       >
                         <Eye className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          const a = document.createElement('a')
-                          a.href = attachment.filePath
-                          a.download = attachment.originalName
-                          a.click()
-                        }}
-                        title="下载"
-                      >
-                        <Download className="w-4 h-4" />
                       </Button>
                       <Button
                         variant="ghost"
