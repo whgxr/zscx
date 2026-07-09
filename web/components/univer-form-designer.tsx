@@ -186,7 +186,7 @@ function configToUniverData(config: FormLayoutConfig): IWorkbookData {
     cellData[row][col] = data
   }
 
-  config.groups.forEach((group, groupIndex) => {
+  config.groups?.forEach((group, groupIndex) => {
     // Group header row
     const groupMeta: GroupHeaderMeta = {
       kind: 'group-header',
@@ -556,15 +556,29 @@ export default function UniverFormDesigner({
 }: UniverFormDesignerProps) {
   const [saving, setSaving] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [config, setConfig] = useState<FormLayoutConfig>(() => {
-    if (!initialConfig) {
+  const normalizeConfig = (raw: any): FormLayoutConfig => {
+    if (!raw || !raw.groups || !Array.isArray(raw.groups)) {
       return { groups: [{ id: generateId(), title: '基本信息', columns: 2, items: [] }] }
     }
-    if ('groups' in initialConfig && initialConfig.groups.length > 0) {
-      return initialConfig as FormLayoutConfig
+    return {
+      groups: raw.groups.map((g: any) => ({
+        id: g.id || generateId(),
+        title: g.title || '未命名分组',
+        columns: g.columns || 2,
+        items: Array.isArray(g.items) ? g.items.map((item: any) => {
+          if (item.type === 'subgroup') {
+            return {
+              ...item,
+              items: Array.isArray(item.items) ? item.items : [],
+            }
+          }
+          return item
+        }) : [],
+      })),
     }
-    return { groups: [{ id: generateId(), title: '基本信息', columns: 2, items: [] }] }
-  })
+  }
+
+  const [config, setConfig] = useState<FormLayoutConfig>(() => normalizeConfig(initialConfig))
 
   const sheetRef = useRef<UniverSheetEditorHandle>(null)
 
@@ -576,7 +590,7 @@ export default function UniverFormDesigner({
       else if (item.type === 'subgroup') collectUsedFieldIds(item.items)
     }
   }
-  config.groups.forEach(g => collectUsedFieldIds(g.items))
+  config.groups?.forEach(g => collectUsedFieldIds(g.items))
 
   const unassignedFields = fields.filter(f => f.showInForm && !usedFieldIds.has(f.id))
 
@@ -791,7 +805,9 @@ export default function UniverFormDesigner({
                 onDataChange={(data) => {
                   // Sync config from Univer data changes
                   const newConfig = univerDataToConfig(data, fields)
-                  setConfig(newConfig)
+                  if (newConfig?.groups) {
+                    setConfig(normalizeConfig(newConfig))
+                  }
                 }}
               />
             </CardContent>
