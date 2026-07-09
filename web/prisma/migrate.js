@@ -274,9 +274,36 @@ async function main() {
     await createUpdateTrigger('DataRecord')
   }
   
-  // ==================== 7. UploadedFile ====================
+  // ==================== 7. RecordAttachment 记录附件 ====================
+  if (!tableNames.includes('recordattachment')) {
+    console.log('7. 创建 RecordAttachment 表...')
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`RecordAttachment\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`tableId\` INT NOT NULL,
+        \`recordId\` INT NOT NULL,
+        \`type\` ENUM('IMAGE','FILE','OTHER') NOT NULL DEFAULT 'OTHER',
+        \`displayName\` VARCHAR(191) NOT NULL,
+        \`originalName\` VARCHAR(191) NOT NULL,
+        \`fileName\` VARCHAR(191) NOT NULL,
+        \`filePath\` TEXT NOT NULL,
+        \`fileSize\` INT NOT NULL,
+        \`mimeType\` VARCHAR(191) NOT NULL,
+        \`uploadedBy\` INT NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX \`RecordAttachment_tableId_idx\` (\`tableId\`),
+        INDEX \`RecordAttachment_recordId_idx\` (\`recordId\`),
+        INDEX \`RecordAttachment_createdAt_idx\` (\`createdAt\`),
+        CONSTRAINT \`RecordAttachment_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`RecordAttachment_recordId_fkey\` FOREIGN KEY (\`recordId\`) REFERENCES \`DataRecord\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`RecordAttachment_uploadedBy_fkey\` FOREIGN KEY (\`uploadedBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+  }
+  
+  // ==================== 8. UploadedFile ====================
   if (!tableNames.includes('uploadedfile')) {
-    console.log('7. 创建 UploadedFile 表...')
+    console.log('8. 创建 UploadedFile 表...')
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS \`UploadedFile\` (
         \`id\` INT AUTO_INCREMENT PRIMARY KEY,

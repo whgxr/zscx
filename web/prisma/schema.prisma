@@ -176,6 +176,7 @@ model DataTable {
   records        DataRecord[]
   permissions    TablePermission[]
   files          UploadedFile[]
+  attachments    RecordAttachment[]
   exportTemplates ExportTemplate[]
   sharedExportTemplates ExportTemplate[] @relation("SharedTemplates")
   category       TableCategory?  @relation(fields: [categoryId], references: [id])
@@ -261,6 +262,7 @@ model DataRecord {
   table         DataTable        @relation(fields: [tableId], references: [id])
   creator       User?            @relation("CreatedRecords", fields: [createdBy], references: [id])
   files         UploadedFile[]
+  attachments   RecordAttachment[]
 
   @@index([tableId])
   @@index([createdAt])
@@ -277,6 +279,36 @@ enum RecordStatus {
 }
 
 // ==================== 文件上传 ====================
+
+model RecordAttachment {
+  id            Int              @id @default(autoincrement())
+  tableId       Int
+  recordId      Int
+  type          AttachmentType   @default(OTHER)
+  displayName   String           // 备注名称
+  originalName  String           // 原始文件名
+  fileName      String           // 存储文件名
+  filePath      String           // 文件路径
+  fileSize      Int              // 文件大小（字节）
+  mimeType      String           // MIME类型
+  uploadedBy    Int?
+  createdAt     DateTime         @default(now())
+
+  // 关系
+  table         DataTable        @relation(fields: [tableId], references: [id])
+  record        DataRecord       @relation(fields: [recordId], references: [id])
+  uploader      User?            @relation(fields: [uploadedBy], references: [id])
+
+  @@index([tableId])
+  @@index([recordId])
+  @@index([createdAt])
+}
+
+enum AttachmentType {
+  IMAGE
+  FILE
+  OTHER
+}
 
 model UploadedFile {
   id            Int              @id @default(autoincrement())

@@ -56,6 +56,7 @@ import {
   Settings2,
   Check,
   Printer,
+  Paperclip,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
 import { ImportDialog } from '@/components/import/import-dialog'
@@ -138,6 +139,18 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false)
   const [refreshKey, setRefreshKey] = useState(Date.now())
   const [selectedRecordIds, setSelectedRecordIds] = useState<number[]>([])
+
+  // 附件功能
+  const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false)
+  const [attachmentRecord, setAttachmentRecord] = useState<any>(null)
+  const [attachments, setAttachments] = useState<any[]>([])
+  const [attachmentLoading, setAttachmentLoading] = useState(false)
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [uploadType, setUploadType] = useState<'image' | 'file'>('file')
+  const [uploadDisplayName, setUploadDisplayName] = useState('')
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [attachmentCounts, setAttachmentCounts] = useState<Record<number, number>>({})
 
   const canEdit = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canEdit
   const canDelete = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canDelete
@@ -229,8 +242,12 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
       const res = await fetch(`/api/data/${table.name}?${params}`)
       if (res.ok) {
         const data = await res.json()
-        setRecords(data.records || [])
+        const recordsData = data.records || []
+        setRecords(recordsData)
         setTotal(data.total || 0)
+        if (recordsData.length > 0) {
+          fetchAttachmentCounts(recordsData.map((r: any) => r.id))
+        }
       }
     } catch (err) {
       console.error('Fetch records error:', err)
@@ -343,6 +360,120 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
       console.error('打包图片失败:', err)
       alert('打包图片失败')
     }
+  }
+
+  const fetchAttachmentCounts = async (recordIds: number[]) => {
+    if (recordIds.length === 0) return
+    try {
+      const res = await fetch(`/api/attachments/${table.name}/count?ids=${recordIds.join(',')}`)
+      if (res.ok) {
+        const data = await res.json()
+        setAttachmentCounts(prev => ({ ...prev, ...data.counts }))
+      }
+    } catch (err) {
+      console.error('Fetch attachment counts error:', err)
+    }
+  }
+
+  const openAttachmentDialog = async (record: any) => {
+    setAttachmentRecord(record)
+    setAttachmentDialogOpen(true)
+    setAttachmentLoading(true)
+    try {
+      const res = await fetch(`/api/attachments/${table.name}/${record.id}`)
+      if (res.ok) {
+        const data = await res.json()
+        setAttachments(data.attachments || [])
+      }
+    } catch (err) {
+      console.error('Fetch attachments error:', err)
+    } finally {
+      setAttachmentLoading(false)
+    }
+  }
+
+  const openUploadDialog = (type: 'image' | 'file') => {
+    setUploadType(type)
+    setUploadDisplayName('')
+    setUploadFile(null)
+    setUploadDialogOpen(true)
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setUploadFile(file)
+    }
+  }
+
+  const handleConfirmUpload = async () => {
+    if (!uploadFile || !attachmentRecord) return
+
+    if (!uploadDisplayName.trim()) {
+      alert('请填写附件名称')
+      return
+    }
+
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', uploadFile)
+      formData.append('displayName', uploadDisplayName.trim())
+      formData.append('type', uploadType)
+
+      const res = await fetch(`/api/attachments/${table.name}/${attachmentRecord.id}`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setAttachments(prev => [data.attachment, ...prev])
+        setAttachmentCounts(prev => ({
+          ...prev,
+          [attachmentRecord.id]: (prev[attachmentRecord.id] || 0) + 1,
+        }))
+        setUploadDialogOpen(false)
+        setUploadDisplayName('')
+        setUploadFile(null)
+      } else {
+        const data = await res.json()
+        alert(data.message || '上传失败')
+      }
+    } catch (err) {
+      alert('上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDeleteAttachment = async (id: number) => {
+    if (!confirm('确定要删除这个附件吗？')) return
+    if (!attachmentRecord) return
+
+    try {
+      const res = await fetch(`/api/attachments/${id}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        setAttachments(prev => prev.filter(a => a.id !== id))
+        setAttachmentCounts(prev => ({
+          ...prev,
+          [attachmentRecord.id]: Math.max(0, (prev[attachmentRecord.id] || 0) - 1),
+        }))
+      } else {
+        const data = await res.json()
+        alert(data.message || '删除失败')
+      }
+    } catch (err) {
+      alert('删除失败')
+    }
+  }
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
   const handleRecordPrint = async (record: any) => {
@@ -529,6 +660,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                   <TableHead key={field.id}>{field.label}</TableHead>
                 ))}
                 <TableHead>状态</TableHead>
+                <TableHead>附件</TableHead>
                 <TableHead>创建时间</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -536,7 +668,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={listFields.length + 5} className="text-center py-12">
+                  <TableCell colSpan={listFields.length + 6} className="text-center py-12">
                     加载中...
                   </TableCell>
                 </TableRow>
@@ -600,6 +732,17 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                       <TableCell>
                         <Badge variant={statusInfo?.variant as any}>{statusInfo?.label}</Badge>
                       </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openAttachmentDialog(record)}
+                          className="flex items-center gap-1"
+                        >
+                          <Paperclip className="w-4 h-4" />
+                          {attachmentCounts[record.id] || 0} 个
+                        </Button>
+                      </TableCell>
                       <TableCell className="text-gray-500 text-sm">
                         {formatDateTime(record.createdAt)}
                       </TableCell>
@@ -657,7 +800,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={listFields.length + 4} className="text-center py-12 text-gray-500">
+                  <TableCell colSpan={listFields.length + 6} className="text-center py-12 text-gray-500">
                     暂无数据
                   </TableCell>
                 </TableRow>
@@ -914,6 +1057,161 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
               />
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={attachmentDialogOpen} onOpenChange={setAttachmentDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>附件管理 - 记录 #{attachmentRecord?.id}</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => openUploadDialog('image')}>
+                  <ImageIcon className="w-4 h-4 mr-2" />
+                  上传图片
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => openUploadDialog('file')}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  上传文件
+                </Button>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto">
+            {attachmentLoading ? (
+              <div className="text-center py-12 text-gray-500">加载中...</div>
+            ) : attachments.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <Paperclip className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p>暂无附件</p>
+                <p className="text-sm mt-1">点击上方按钮上传图片或文件</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {attachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex items-center gap-4 p-3 border rounded-lg hover:bg-gray-50"
+                  >
+                    <div className="w-12 h-12 flex-shrink-0 border rounded overflow-hidden bg-gray-50 flex items-center justify-center">
+                      {attachment.type === 'IMAGE' ? (
+                        <img
+                          src={attachment.filePath}
+                          alt={attachment.displayName}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none'
+                          }}
+                        />
+                      ) : (
+                        <FileText className="w-6 h-6 text-gray-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-900 truncate">
+                        {attachment.displayName}
+                      </div>
+                      <div className="text-sm text-gray-500 mt-0.5">
+                        {attachment.originalName} · {formatFileSize(attachment.fileSize)}
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {attachment.uploader?.realName || attachment.uploader?.username || '未知'} · {formatDateTime(attachment.createdAt)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => window.open(attachment.filePath, '_blank')}
+                        title="查看/下载"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const a = document.createElement('a')
+                          a.href = attachment.filePath
+                          a.download = attachment.originalName
+                          a.click()
+                        }}
+                        title="下载"
+                      >
+                        <Download className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-500 hover:text-red-600"
+                        onClick={() => handleDeleteAttachment(attachment.id)}
+                        title="删除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAttachmentDialogOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>上传{uploadType === 'image' ? '图片' : '文件'}</DialogTitle>
+            <DialogDescription>
+              请填写附件名称并选择要上传的{uploadType === 'image' ? '图片' : '文件'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="displayName">附件名称 <span className="text-red-500">*</span></Label>
+              <Input
+                id="displayName"
+                value={uploadDisplayName}
+                onChange={(e) => setUploadDisplayName(e.target.value)}
+                placeholder="请输入附件名称（如：身份证正面、合同扫描件）"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="file">选择{uploadType === 'image' ? '图片' : '文件'}</Label>
+              <input
+                id="file"
+                type="file"
+                accept={uploadType === 'image' ? 'image/*' : '*'}
+                onChange={handleFileSelect}
+                className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-white hover:file:bg-primary/90 cursor-pointer"
+              />
+              {uploadFile && (
+                <p className="text-sm text-gray-600 mt-1">
+                  已选择：{uploadFile.name} ({formatFileSize(uploadFile.size)})
+                </p>
+              )}
+              <p className="text-xs text-gray-400 mt-1">
+                支持的格式：{uploadType === 'image' ? 'JPG, PNG, GIF, BMP, WebP' : 'PDF, Word, Excel, PowerPoint, 图片, 压缩包等'}，最大 10MB
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadDialogOpen(false)} disabled={uploading}>
+              取消
+            </Button>
+            <Button 
+              onClick={handleConfirmUpload}
+              disabled={uploading || !uploadDisplayName.trim() || !uploadFile}
+            >
+              {uploading ? '上传中...' : '确认上传'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
