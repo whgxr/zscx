@@ -69,28 +69,28 @@ export function H5SettingsClient({ user, stats, settings }: H5SettingsClientProp
       desc: '管理数据表、字段配置',
       icon: Database,
       color: 'bg-blue-50 text-blue-500',
-      href: '/dashboard/tables',
+      href: '/h5/admin/tables',
     },
     {
       label: '用户管理',
       desc: '管理用户账号和角色',
       icon: Users,
       color: 'bg-green-50 text-green-500',
-      href: '/dashboard/users',
+      href: '/h5/admin/users',
     },
     {
       label: '权限管理',
       desc: '配置用户访问权限',
       icon: Shield,
       color: 'bg-purple-50 text-purple-500',
-      href: '/dashboard/permissions',
+      href: '/h5/admin/permissions',
     },
     {
       label: '模板管理',
       desc: '设计导出打印模板',
       icon: Wrench,
       color: 'bg-orange-50 text-orange-500',
-      href: '/dashboard/export-templates',
+      href: '/h5/admin/templates',
     },
   ]
 
@@ -190,7 +190,7 @@ export function H5SettingsClient({ user, stats, settings }: H5SettingsClientProp
             管理功能
           </h3>
           <p className="text-xs text-gray-400 mb-3">
-            以下功能将在电脑端浏览器中打开
+            点击进入各项管理功能
           </p>
           <div className="grid grid-cols-2 gap-2">
             {manageItems.map(item => {

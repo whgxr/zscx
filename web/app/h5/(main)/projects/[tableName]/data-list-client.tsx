@@ -11,7 +11,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import {
   ArrowLeft, Plus, Search, Eye, ChevronRight,
   Paperclip, Image as ImageIcon, FileText, Upload,
-  X, Loader2, QrCode, Copy, Check
+  X, Loader2, QrCode, Copy, Check, Share2
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { FieldType, RecordStatus } from '@prisma/client'
@@ -119,11 +119,37 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
   const viewUrl = (id: number) => `${window.location.origin}/view/${table.name}/${id}`
 
   const handleCopyQrUrl = async (id: number) => {
+    const url = viewUrl(id)
+    setQrCopied(true)
     try {
-      await navigator.clipboard.writeText(viewUrl(id))
-      setQrCopied(true)
-      setTimeout(() => setQrCopied(false), 2000)
-    } catch {}
+      await navigator.clipboard.writeText(url)
+    } catch {
+      // Fallback for older browsers / non-HTTPS
+      const textarea = document.createElement('textarea')
+      textarea.value = url
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      try { document.execCommand('copy') } catch {}
+      document.body.removeChild(textarea)
+    }
+    setTimeout(() => setQrCopied(false), 2000)
+  }
+
+  const handleShare = async (id: number) => {
+    const url = viewUrl(id)
+    const title = `${table.label} - 记录 #${id}`
+    // 尝试系统分享（微信等支持）
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, url })
+        return
+      } catch {}
+    }
+    // 降级：复制链接
+    await handleCopyQrUrl(id)
+    alert('链接已复制，可粘贴分享给微信好友')
   }
 
   const fetchRecords = async () => {
@@ -454,18 +480,28 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
 
               <p className="text-sm text-gray-500">记录编号：#{qrModal.recordId}</p>
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleCopyQrUrl(qrModal.recordId!)}
-                className="w-full h-10 rounded-xl"
-              >
-                {qrCopied ? (
-                  <><Check className="w-4 h-4 mr-2" />已复制</>
-                ) : (
-                  <><Copy className="w-4 h-4 mr-2" />复制链接</>
-                )}
-              </Button>
+              <div className="flex gap-2 w-full">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCopyQrUrl(qrModal.recordId!)}
+                  className="flex-1 h-10 rounded-xl"
+                >
+                  {qrCopied ? (
+                    <><Check className="w-4 h-4 mr-2" />已复制</>
+                  ) : (
+                    <><Copy className="w-4 h-4 mr-2" />复制链接</>
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleShare(qrModal.recordId!)}
+                  className="flex-1 h-10 rounded-xl bg-green-600 hover:bg-green-700"
+                >
+                  <Share2 className="w-4 h-4 mr-2" />
+                  分享微信
+                </Button>
+              </div>
             </div>
           </div>
         </div>
