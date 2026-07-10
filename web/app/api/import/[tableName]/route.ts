@@ -252,7 +252,7 @@ export async function POST(
           },
           ipAddress:
             req.headers.get('x-forwarded-for') || req.headers.get('remote-address') || null,
-          userAgent: req.headers.get('user-agent') || null,
+          userAgent: (req.headers.get('user-agent') || null)?.slice(0, 191),
         },
       })
     } catch (logError) {
@@ -279,7 +279,7 @@ export async function POST(
           tableId: table?.id || null,
           ipAddress:
             req.headers.get('x-forwarded-for') || req.headers.get('remote-address'),
-          userAgent: req.headers.get('user-agent'),
+          userAgent: (req.headers.get('user-agent') || '').slice(0, 191) || null,
         },
       })
     } catch (logError) {
