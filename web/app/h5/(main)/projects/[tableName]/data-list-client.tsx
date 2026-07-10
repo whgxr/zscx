@@ -6,9 +6,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import { QRCodeSVG } from 'qrcode.react'
 import {
   ArrowLeft, Plus, Search, Eye, ChevronRight,
-  Paperclip, Image as ImageIcon, FileText
+  Paperclip, Image as ImageIcon, FileText, Upload,
+  X, Loader2, QrCode, Copy, Check
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { FieldType, RecordStatus } from '@prisma/client'
@@ -48,7 +51,80 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
   const pageSize = 15
 
   const canCreate = isAdmin || permission?.canCreate
+  const canEdit = isAdmin || permission?.canEdit
   const listFields = table.fields.filter((f: any) => f.showInList)
+
+  // 快速上传附件弹窗
+  const [uploadModal, setUploadModal] = useState<{ open: boolean; recordId: number | null }>({ open: false, recordId: null })
+  const [uploadName, setUploadName] = useState('')
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadType, setUploadType] = useState<'image' | 'file'>('image')
+  const [uploadNameError, setUploadNameError] = useState('')
+  const [uploading, setUploading] = useState(false)
+
+  const openUploadModal = (recordId: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setUploadModal({ open: true, recordId })
+    setUploadName('')
+    setUploadFile(null)
+    setUploadType('image')
+    setUploadNameError('')
+  }
+
+  const handleQuickUpload = async () => {
+    setUploadNameError('')
+    if (!uploadName.trim()) { setUploadNameError('请填写附件名称'); return }
+    if (!uploadFile) { setUploadNameError('请选择文件'); return }
+    if (!uploadModal.recordId) return
+
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', uploadFile)
+      fd.append('displayName', uploadName.trim())
+      fd.append('type', uploadType)
+
+      const res = await fetch(`/api/attachments/${table.name}/${uploadModal.recordId}`, {
+        method: 'POST',
+        body: fd,
+      })
+
+      if (res.ok) {
+        setUploadModal({ open: false, recordId: null })
+        setAttachmentCounts(prev => ({
+          ...prev,
+          [uploadModal.recordId!]: (prev[uploadModal.recordId!] || 0) + 1,
+        }))
+      } else {
+        const data = await res.json()
+        alert(data.message || '上传失败')
+      }
+    } catch {
+      alert('上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  // 二维码弹窗
+  const [qrModal, setQrModal] = useState<{ open: boolean; recordId: number | null }>({ open: false, recordId: null })
+  const [qrCopied, setQrCopied] = useState(false)
+
+  const openQrModal = (recordId: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setQrModal({ open: true, recordId })
+    setQrCopied(false)
+  }
+
+  const viewUrl = (id: number) => `${window.location.origin}/view/${table.name}/${id}`
+
+  const handleCopyQrUrl = async (id: number) => {
+    try {
+      await navigator.clipboard.writeText(viewUrl(id))
+      setQrCopied(true)
+      setTimeout(() => setQrCopied(false), 2000)
+    } catch {}
+  }
 
   const fetchRecords = async () => {
     setLoading(true)
@@ -207,7 +283,23 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
 
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
                       <span className="text-xs text-gray-400">{formatDateTime(record.createdAt)}</span>
-                      <ChevronRight className="w-4 h-4 text-gray-300" />
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => openQrModal(record.id, e)}
+                          className="flex items-center gap-0.5 px-2 py-1 text-xs text-gray-400 bg-gray-50 rounded-lg"
+                          title="查看二维码"
+                        >
+                          <QrCode className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={(e) => openUploadModal(record.id, e)}
+                          className="flex items-center gap-0.5 px-2 py-1 text-xs text-primary bg-primary/5 rounded-lg"
+                        >
+                          <Paperclip className="w-3 h-3" />
+                          添加附件
+                        </button>
+                        <ChevronRight className="w-4 h-4 text-gray-300" />
+                      </div>
                     </div>
                   </div>
                 </Card>
@@ -252,6 +344,130 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
           >
             <Plus className="w-6 h-6" />
           </Button>
+        </div>
+      )}
+
+      {/* 快速上传附件弹窗 */}
+      {uploadModal.open && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setUploadModal({ open: false, recordId: null })}>
+          <div className="w-full max-w-lg bg-white rounded-t-2xl p-5 animate-slide-up" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold">添加附件</h3>
+              <button onClick={() => setUploadModal({ open: false, recordId: null })} className="p-1">
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <Label className="text-sm">附件名称 <span className="text-red-500">*</span></Label>
+                <Input
+                  placeholder="如：身份证正面、合同扫描件、现场照片"
+                  value={uploadName}
+                  onChange={(e) => { setUploadName(e.target.value); setUploadNameError('') }}
+                  className="h-10 text-sm rounded-lg mt-1"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <Label className="text-sm">附件类型</Label>
+                <div className="flex gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setUploadType('image')}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border ${
+                      uploadType === 'image' ? 'bg-primary/10 border-primary text-primary' : 'bg-white border-gray-200 text-gray-600'
+                    }`}
+                  >
+                    <ImageIcon className="w-4 h-4" />图片
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUploadType('file')}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border ${
+                      uploadType === 'file' ? 'bg-primary/10 border-primary text-primary' : 'bg-white border-gray-200 text-gray-600'
+                    }`}
+                  >
+                    <FileText className="w-4 h-4" />文件
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-sm">选择文件</Label>
+                <input
+                  type="file"
+                  accept={uploadType === 'image' ? 'image/*' : '*'}
+                  capture={uploadType === 'image' ? 'environment' : undefined}
+                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                  className="mt-1 block w-full text-sm text-gray-500
+                    file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0
+                    file:text-sm file:font-medium file:bg-primary file:text-white"
+                />
+                {uploadFile && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    已选：{uploadFile.name} ({(uploadFile.size / 1024 / 1024 > 1 ? (uploadFile.size / 1024 / 1024).toFixed(1) + 'MB' : (uploadFile.size / 1024).toFixed(0) + 'KB')})
+                  </p>
+                )}
+              </div>
+
+              {uploadNameError && <p className="text-sm text-red-500">{uploadNameError}</p>}
+
+              <Button
+                onClick={handleQuickUpload}
+                disabled={uploading}
+                className="w-full h-11 rounded-xl"
+              >
+                {uploading ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />上传中...</>
+                ) : (
+                  <><Upload className="w-4 h-4 mr-2" />确认上传</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 二维码弹窗 */}
+      {qrModal.open && qrModal.recordId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setQrModal({ open: false, recordId: null })}>
+          <div className="w-[280px] bg-white rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold">记录二维码</h3>
+              <button onClick={() => setQrModal({ open: false, recordId: null })} className="p-1">
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-xs text-gray-500">扫描二维码查看记录详情</p>
+
+              <div className="p-3 bg-white rounded-xl border">
+                <QRCodeSVG
+                  value={viewUrl(qrModal.recordId)}
+                  size={200}
+                  level="M"
+                />
+              </div>
+
+              <p className="text-sm text-gray-500">记录编号：#{qrModal.recordId}</p>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleCopyQrUrl(qrModal.recordId!)}
+                className="w-full h-10 rounded-xl"
+              >
+                {qrCopied ? (
+                  <><Check className="w-4 h-4 mr-2" />已复制</>
+                ) : (
+                  <><Copy className="w-4 h-4 mr-2" />复制链接</>
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

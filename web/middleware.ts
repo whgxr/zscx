@@ -12,10 +12,10 @@ function isMobile(userAgent: string): boolean {
 }
 
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl
+  const { pathname, searchParams } = request.nextUrl
   const userAgent = request.headers.get('user-agent') || ''
 
-  // 只处理根路径 /
+  // 根路径：根据设备跳转
   if (pathname === '/') {
     if (isMobile(userAgent)) {
       return NextResponse.redirect(new URL('/h5', request.url))
@@ -23,11 +23,19 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
-  // 已登录用户从PC页面访问时，如果误入/h5，自动跳回PC
-  // 但如果明确访问/h5（非根路径），不做拦截，允许手动访问
+  // 手机访问 /login 时，跳转到 H5 登录页，保留 redirect 参数
+  if (pathname === '/login' && isMobile(userAgent)) {
+    const redirect = searchParams.get('redirect')
+    const h5LoginUrl = new URL('/h5/login', request.url)
+    if (redirect) {
+      h5LoginUrl.searchParams.set('redirect', redirect)
+    }
+    return NextResponse.redirect(h5LoginUrl)
+  }
+
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ['/'],
+  matcher: ['/', '/login'],
 }

@@ -1,13 +1,15 @@
 "use client"
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Building2, Loader2, Eye, EyeOff } from 'lucide-react'
 
-export default function H5LoginPage() {
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const redirectTo = searchParams.get('redirect') || '/h5/projects'
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [formData, setFormData] = useState({
@@ -31,7 +33,7 @@ export default function H5LoginPage() {
       const data = await res.json()
 
       if (res.ok) {
-        router.push('/h5/projects')
+        router.push(redirectTo)
         router.refresh()
       } else {
         setError(data.message || '登录失败')
@@ -44,6 +46,63 @@ export default function H5LoginPage() {
   }
 
   return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <Input
+          type="text"
+          placeholder="用户名或手机号"
+          value={formData.username}
+          onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+          required
+          className="h-12 text-base rounded-xl"
+        />
+      </div>
+      <div className="relative">
+        <Input
+          type={showPassword ? 'text' : 'password'}
+          placeholder="密码"
+          value={formData.password}
+          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+          required
+          className="h-12 text-base rounded-xl pr-12"
+        />
+        <button
+          type="button"
+          onClick={() => setShowPassword(!showPassword)}
+          className="absolute right-3 top-1/2 -translate-y-1/2 p-1"
+        >
+          {showPassword ? (
+            <EyeOff className="w-5 h-5 text-gray-400" />
+          ) : (
+            <Eye className="w-5 h-5 text-gray-400" />
+          )}
+        </button>
+      </div>
+      {error && (
+        <div className="text-sm text-red-500 bg-red-50 p-3 rounded-xl">
+          {error}
+        </div>
+      )}
+      <Button
+        type="submit"
+        className="w-full h-12 text-base rounded-xl"
+        disabled={loading}
+      >
+        {loading ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            登录中...
+          </>
+        ) : (
+          '登 录'
+        )}
+      </Button>
+    </form>
+  )
+}
+
+export default function H5LoginPage() {
+  return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-gradient-to-b from-blue-50 to-white">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
@@ -54,58 +113,9 @@ export default function H5LoginPage() {
           <p className="text-gray-500 mt-2">移动端数据录入平台</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <Input
-              type="text"
-              placeholder="用户名或手机号"
-              value={formData.username}
-              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              required
-              className="h-12 text-base rounded-xl"
-            />
-          </div>
-          <div className="relative">
-            <Input
-              type={showPassword ? 'text' : 'password'}
-              placeholder="密码"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              required
-              className="h-12 text-base rounded-xl pr-12"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1"
-            >
-              {showPassword ? (
-                <EyeOff className="w-5 h-5 text-gray-400" />
-              ) : (
-                <Eye className="w-5 h-5 text-gray-400" />
-              )}
-            </button>
-          </div>
-          {error && (
-            <div className="text-sm text-red-500 bg-red-50 p-3 rounded-xl">
-              {error}
-            </div>
-          )}
-          <Button 
-            type="submit" 
-            className="w-full h-12 text-base rounded-xl"
-            disabled={loading}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                登录中...
-              </>
-            ) : (
-              '登 录'
-            )}
-          </Button>
-        </form>
+        <Suspense fallback={<div className="text-center py-8 text-gray-400">加载中...</div>}>
+          <LoginForm />
+        </Suspense>
       </div>
     </div>
   )
