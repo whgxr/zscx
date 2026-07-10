@@ -459,7 +459,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
                       {att.originalName} · {formatFileSize(att.fileSize)}
                     </p>
                     <p className="text-xs text-gray-300">
-                      {att.uploader?.realName || att.uploader?.username} · {formatDateTime(att.createdAt)}
+                      {att.uploader?.realName || att.uploader?.username}{att.uploader?.phone ? ` (${att.uploader.phone})` : ''} · {formatDateTime(att.createdAt)}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">

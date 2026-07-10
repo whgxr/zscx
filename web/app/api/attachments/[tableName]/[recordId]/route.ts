@@ -137,7 +137,7 @@ export async function POST(
       },
       include: {
         uploader: {
-          select: { id: true, username: true, realName: true },
+          select: { id: true, username: true, realName: true, phone: true },
         },
       },
     })
@@ -179,7 +179,7 @@ export async function GET(
       orderBy: { createdAt: 'desc' },
       include: {
         uploader: {
-          select: { id: true, username: true, realName: true },
+          select: { id: true, username: true, realName: true, phone: true },
         },
       },
     })
