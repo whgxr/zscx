@@ -26,11 +26,19 @@ export function QrCodeButton({ tableName, recordId }: QrCodeButtonProps) {
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(viewUrl)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
     } catch {
-      // fallback: ignore
+      // Fallback for older browsers / non-HTTPS
+      const textarea = document.createElement('textarea')
+      textarea.value = viewUrl
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      try { document.execCommand('copy') } catch {}
+      document.body.removeChild(textarea)
     }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   return (

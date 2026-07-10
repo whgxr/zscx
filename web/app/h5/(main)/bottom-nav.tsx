@@ -35,13 +35,13 @@ export function H5BottomNav({ user, isAdmin }: H5BottomNavProps) {
       label: '设置',
       href: '/h5/settings',
       icon: Settings,
-      active: pathname.startsWith('/h5/settings'),
+      active: pathname.startsWith('/h5/settings') || pathname.startsWith('/h5/admin'),
     }] : []),
     {
       label: '我的',
-      href: '#',
+      href: '/h5/profile',
       icon: User,
-      active: false,
+      active: pathname.startsWith('/h5/profile'),
     },
   ]
 
