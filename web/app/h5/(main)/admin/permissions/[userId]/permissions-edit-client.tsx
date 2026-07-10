@@ -32,14 +32,20 @@ export function H5AdminPermissionsEditClient({
   const handleSave = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/permissions/batch`, {
-        method: 'POST',
+      const res = await fetch(`/api/permissions/${targetUser.id}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: targetUser.id,
           permissions: Object.entries(perms).map(([tableId, p]) => ({
             tableId: parseInt(tableId),
-            ...p,
+            canView: p.canView,
+            canCreate: p.canCreate,
+            canEdit: p.canEdit,
+            canDelete: p.canDelete,
+            canExportExcel: false,
+            canExportPdf: false,
+            canPrint: false,
+            canImport: false,
           })),
         }),
       })
