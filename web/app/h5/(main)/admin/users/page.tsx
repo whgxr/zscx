@@ -6,17 +6,20 @@ import { H5AdminUsersClient } from './users-client'
 export default async function H5AdminUsersPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/h5/login')
-  if (user.role?.name !== 'ADMIN') {
+
+  const currentUserRole = user.role?.name
+  if (currentUserRole !== 'ADMIN' && currentUserRole !== 'MANAGER') {
     return <div className="p-8 text-center text-gray-500">仅管理员可访问</div>
   }
 
-  const users = await prisma.user.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: { role: true },
-  })
-
-  // 角色列表
-  const roles = await prisma.role.findMany()
+  const [users, roles] = await Promise.all([
+    prisma.user.findMany({
+      where: { status: 'ACTIVE' },
+      include: { role: true },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.role.findMany({ orderBy: { name: 'asc' } }),
+  ])
 
   return <H5AdminUsersClient users={JSON.parse(JSON.stringify(users))} roles={JSON.parse(JSON.stringify(roles))} />
 }
