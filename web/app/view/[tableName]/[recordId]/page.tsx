@@ -1,4 +1,5 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
+import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { FieldType, RecordStatus } from '@prisma/client'
 
@@ -98,6 +99,12 @@ export default async function ViewRecordPage({
     notFound()
   }
 
+  // 登录验证
+  const user = await getCurrentUser()
+  if (!user) {
+    redirect(`/login?redirect=/view/${tableName}/${recordId}`)
+  }
+
   const table = await prisma.dataTable.findUnique({
     where: { name: tableName },
     include: {
@@ -122,6 +129,28 @@ export default async function ViewRecordPage({
 
   if (!record || record.tableId !== table.id) {
     notFound()
+  }
+
+  // 权限验证
+  const isAdmin = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER'
+  if (!isAdmin) {
+    const permission = await prisma.tablePermission.findFirst({
+      where: { userId: user.id, tableId: table.id, canView: true },
+    })
+    if (!permission) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center p-8">
+            <div className="text-6xl mb-4">🔒</div>
+            <h1 className="text-xl font-bold text-gray-900 mb-2">无权限访问</h1>
+            <p className="text-gray-500 mb-4">您没有查看此记录的权限，请联系管理员</p>
+            <a href="/dashboard" className="text-primary hover:underline text-sm">
+              返回首页
+            </a>
+          </div>
+        </div>
+      )
+    }
   }
 
   const data = (record.data as Record<string, any>) || {}
