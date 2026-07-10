@@ -27,7 +27,7 @@ services:
     container_name: zscx-web
     restart: always
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${WEB_PORT:-777}:3000"
     environment:
       - DATABASE_URL=mysql://${MYSQL_USER:-zscx}:${MYSQL_PASSWORD:-zscx123456}@mysql:3306/${MYSQL_DATABASE:-zscx}
       - JWT_SECRET=${JWT_SECRET:-change-this-secret-in-production}

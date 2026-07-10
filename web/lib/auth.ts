@@ -73,12 +73,15 @@ export async function createUserSession(
     roleId,
   })
 
+  // 截断 userAgent 防止超过 VARCHAR(191) 限制（微信等UA特别长）
+  const safeUserAgent = userAgent ? userAgent.slice(0, 191) : undefined
+
   const session = await prisma.userSession.create({
     data: {
       userId,
       token,
       ipAddress,
-      userAgent,
+      userAgent: safeUserAgent,
       isActive: true,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },

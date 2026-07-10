@@ -51,7 +51,8 @@ export async function POST(req: NextRequest) {
     }
 
     const ipAddress = req.ip || req.headers.get('x-forwarded-for') || undefined
-    const userAgent = req.headers.get('user-agent') || undefined
+    const rawUserAgent = req.headers.get('user-agent') || undefined
+    const userAgent = rawUserAgent ? rawUserAgent.slice(0, 191) : undefined
 
     const { token } = await createUserSession(
       user.id,
