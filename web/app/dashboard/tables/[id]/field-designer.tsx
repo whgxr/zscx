@@ -4,9 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import UniverFormDesigner, { FormLayoutConfig } from '@/components/univer-form-designer'
-import { TestLayout } from '@/components/test-layout'
+import FormLayoutDesigner, { FormLayoutConfig } from '@/components/form-layout-designer'
 import {
   Dialog,
   DialogContent,
@@ -205,7 +203,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const [showOptions, setShowOptions] = useState(false)
   const [newOptionLabel, setNewOptionLabel] = useState('')
   const [newOptionValue, setNewOptionValue] = useState('')
-  const [activeTab, setActiveTab] = useState('layout')
+  const [activeTab, setActiveTab] = useState('fields')
   const [availableTables, setAvailableTables] = useState<Array<{ id: number; name: string; label: string; isDetailTable?: boolean }>>([])
   const [detailConfig, setDetailConfig] = useState<{ detailTableId?: number; detailTableName?: string; minRows?: number; maxRows?: number }>({})
   const [createDetailTableDialogOpen, setCreateDetailTableDialogOpen] = useState(false)
@@ -1539,7 +1537,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
 
       {activeTab === 'layout' && (
         <div className="mt-6">
-          <UniverFormDesigner
+          <FormLayoutDesigner
             tableId={table.id}
             fields={fields}
             initialConfig={table.formLayoutConfig as FormLayoutConfig | null}
