@@ -14,10 +14,9 @@ import {
   Search,
 } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
-import { UniverSheetEditor, UniverSheetEditorHandle } from '@/components/univer-sheet-editor'
-import type { IWorkbookData, IWorksheetData, ICellData, IRange } from '@univerjs/core'
+import { ZCellSheetEditor, ZCellSheetEditorHandle, ZCellWorkbookData, ZCellCellData } from '@/components/zcell-sheet-editor'
 
-// ── Re-export types from form-layout-designer for compatibility ──
+// ── 类型定义 ──
 
 export type LayoutItemType = 'field' | 'subgroup'
 
@@ -56,7 +55,7 @@ export interface FormLayoutConfig {
 
 // ── Props ──
 
-interface UniverFormDesignerProps {
+interface ZCellFormDesignerProps {
   tableId: number
   fields: TableField[]
   initialConfig?: FormLayoutConfig | null
@@ -99,215 +98,126 @@ const fieldTypeIcons: Record<FieldType, string> = {
 
 const generateId = () => Math.random().toString(36).substring(2, 11)
 
-// ── Cell metadata stored in ICellData.custom ──
+// ── 转换: FormLayoutConfig → ZCellWorkbookData ──
 
-interface FieldCellMeta {
-  kind: 'field'
-  id: string
-  fieldId: number
-  fieldName: string
-  width: number
-  labelWidth?: number
-}
+function configToZCellData(config: FormLayoutConfig, fields: TableField[]): ZCellWorkbookData {
+  const cells: Record<string, ZCellCellData> = {}
+  const merges: { startRow: number; endRow: number; startCol: number; endCol: number }[] = []
+  const rowHeights: Record<number, number> = {}
+  const colWidths: Record<number, number> = {}
 
-interface SubGroupHeaderMeta {
-  kind: 'subgroup-header'
-  id: string
-  title: string
-  columns: number
-  width: number
-}
-
-interface GroupHeaderMeta {
-  kind: 'group-header'
-  id: string
-  title: string
-  columns: number
-}
-
-type CellMeta = FieldCellMeta | SubGroupHeaderMeta | GroupHeaderMeta
-
-// ── Conversion: FormLayoutConfig → IWorkbookData ──
-
-function configToUniverData(config: FormLayoutConfig): IWorkbookData {
-  const sheetId = generateId()
-  const styles: Record<string, any> = {}
-  let styleIdx = 0
-
-  const registerStyle = (style: Record<string, any>): string => {
-    const key = `s${styleIdx++}`
-    styles[key] = style
-    return key
-  }
-
-  // Pre-register common styles
-  const groupHeaderStyleId = registerStyle({
-    bl: { s: 1 },
-    fs: 13,
-    ht: 0, // left
-    vt: 2, // middle
-  })
-
-  const subgroupHeaderStyleId = registerStyle({
-    bl: { s: 1 },
-    fs: 12,
-    ht: 0,
-    vt: 2,
-  })
-
-  const fieldLabelStyleId = registerStyle({
-    ht: 2, // right
-    vt: 2,
-    cl: { rgb: '#666666' },
-  })
-
-  const fieldValueStyleId = registerStyle({
-    ht: 0,
-    vt: 2,
-    bd: {
-      b: { s: 2, cl: { rgb: '#CCCCCC' } },
-    },
-  })
-
-  const cellData: Record<number, Record<number, ICellData>> = {}
-  const mergeData: IRange[] = []
-  const rowData: Record<number, { h?: number; s?: string }> = {}
-  const columnData: Record<number, { w?: number }> = {}
-
-  // Set up 12 columns: 6 pairs of (label, value)
+  // 设置12列: 6对(label, value)
   for (let col = 0; col < GRID_COLUMNS * 2; col++) {
-    columnData[col] = { w: col % 2 === 0 ? LABEL_COL_WIDTH : VALUE_COL_WIDTH }
+    colWidths[col] = col % 2 === 0 ? LABEL_COL_WIDTH : VALUE_COL_WIDTH
   }
 
   let currentRow = 0
 
-  const setCell = (row: number, col: number, data: ICellData) => {
-    if (!cellData[row]) cellData[row] = {}
-    cellData[row][col] = data
+  const setCell = (row: number, col: number, value: string, style?: Partial<ZCellCellData>) => {
+    cells[`${row},${col}`] = {
+      value,
+      ...style,
+    }
   }
 
   config.groups?.forEach((group, groupIndex) => {
-    // Group header row
-    const groupMeta: GroupHeaderMeta = {
-      kind: 'group-header',
-      id: group.id,
-      title: group.title,
-      columns: group.columns,
-    }
-    setCell(currentRow, 0, {
-      v: `\u{1F4C1} ${group.title}`,
-      s: groupHeaderStyleId,
-      custom: groupMeta as any,
+    // 分组标题行
+    setCell(currentRow, 0, `\u{1F4C1} ${group.title}`, {
+      bold: true,
+      fontSize: 13,
+      align: 'left',
+      verticalAlign: 'middle',
+      bgColor: '#E5EDFE',
     })
-    mergeData.push({
+    merges.push({
       startRow: currentRow,
       endRow: currentRow,
-      startColumn: 0,
-      endColumn: GRID_COLUMNS * 2 - 1,
+      startCol: 0,
+      endCol: GRID_COLUMNS * 2 - 1,
     })
-    rowData[currentRow] = { h: GROUP_HEADER_ROW_HEIGHT }
-
+    rowHeights[currentRow] = GROUP_HEADER_ROW_HEIGHT
     currentRow++
 
-    // Render items within the group
+    // 渲染分组内的项目
     const renderItems = (items: LayoutItem[], groupColumns: number, startRow: number): number => {
       let row = startRow
-      let colCursor = 0 // tracks position in the grid (0..groupColumns-1)
+      let colCursor = 0
 
       const placeField = (item: FieldLayoutItem) => {
         const width = Math.min(item.width, groupColumns - colCursor)
         const labelCol = colCursor * 2
         const valueCol = colCursor * 2 + 1
+        const field = fields.find(f => f.id === item.fieldId)
+        const displayLabel = field?.label || item.fieldName
 
-        const meta: FieldCellMeta = {
-          kind: 'field',
-          id: item.id,
-          fieldId: item.fieldId,
-          fieldName: item.fieldName,
-          width: item.width,
-          labelWidth: item.labelWidth,
-        }
-
-        setCell(row, labelCol, {
-          v: item.fieldName,
-          s: fieldLabelStyleId,
-          custom: meta as any,
+        setCell(row, labelCol, displayLabel, {
+          align: 'right',
+          verticalAlign: 'middle',
+          textColor: '#666666',
         })
 
-        // Merge value cells if width > 1
         if (width > 1) {
           const endValueCol = labelCol + width * 2 - 1
-          setCell(row, valueCol, {
-            v: '',
-            s: fieldValueStyleId,
+          setCell(row, valueCol, '', {
+            verticalAlign: 'middle',
           })
           if (endValueCol > valueCol) {
-            mergeData.push({
+            merges.push({
               startRow: row,
               endRow: row,
-              startColumn: valueCol,
-              endColumn: endValueCol,
+              startCol: valueCol,
+              endCol: endValueCol,
             })
           }
         } else {
-          setCell(row, valueCol, {
-            v: '',
-            s: fieldValueStyleId,
+          setCell(row, valueCol, '', {
+            verticalAlign: 'middle',
           })
         }
 
-        rowData[row] = { h: FIELD_ROW_HEIGHT }
+        rowHeights[row] = FIELD_ROW_HEIGHT
         colCursor += width
       }
 
       for (const item of items) {
         if (item.type === 'field') {
-          // If not enough space in current row, wrap to next row
           if (colCursor + item.width > groupColumns) {
             row++
             colCursor = 0
           }
           placeField(item)
-          // If row is full, advance
           if (colCursor >= groupColumns) {
             row++
             colCursor = 0
           }
         } else {
-          // SubGroupLayoutItem
           const sub = item as SubGroupLayoutItem
-          // Wrap to next row if not at start
           if (colCursor > 0) {
             row++
             colCursor = 0
           }
 
-          // Subgroup header
-          const subMeta: SubGroupHeaderMeta = {
-            kind: 'subgroup-header',
-            id: sub.id,
-            title: sub.title,
-            columns: sub.columns,
-            width: sub.width,
-          }
+          // 子分组标题
           const subHeaderEndCol = sub.width * 2 - 1
-          setCell(row, 0, {
-            v: `\u{1F4C2} ${sub.title}`,
-            s: subgroupHeaderStyleId,
-            custom: subMeta as any,
+          setCell(row, 0, `\u{1F4C2} ${sub.title}`, {
+            bold: true,
+            fontSize: 12,
+            align: 'left',
+            verticalAlign: 'middle',
+            bgColor: '#F3F4F6',
           })
           if (subHeaderEndCol > 0) {
-            mergeData.push({
+            merges.push({
               startRow: row,
               endRow: row,
-              startColumn: 0,
-              endColumn: subHeaderEndCol,
+              startCol: 0,
+              endCol: subHeaderEndCol,
             })
           }
-          rowData[row] = { h: GROUP_HEADER_ROW_HEIGHT }
+          rowHeights[row] = GROUP_HEADER_ROW_HEIGHT
           row++
 
-          // Render subgroup items with subgroup columns
+          // 渲染子分组项目
           let subRow = row
           let subColCursor = 0
 
@@ -321,43 +231,32 @@ function configToUniverData(config: FormLayoutConfig): IWorkbookData {
               const valueCol = subColCursor * 2 + 1
               const width = Math.min(subItem.width, sub.columns - subColCursor)
 
-              const meta: FieldCellMeta = {
-                kind: 'field',
-                id: subItem.id,
-                fieldId: subItem.fieldId,
-                fieldName: subItem.fieldName,
-                width: subItem.width,
-                labelWidth: subItem.labelWidth,
-              }
-
-              setCell(subRow, labelCol, {
-                v: subItem.fieldName,
-                s: fieldLabelStyleId,
-                custom: meta as any,
+              setCell(subRow, labelCol, subItem.fieldName, {
+                align: 'right',
+                verticalAlign: 'middle',
+                textColor: '#666666',
               })
 
               if (width > 1) {
                 const endValueCol = labelCol + width * 2 - 1
-                setCell(subRow, valueCol, {
-                  v: '',
-                  s: fieldValueStyleId,
+                setCell(subRow, valueCol, '', {
+                  verticalAlign: 'middle',
                 })
                 if (endValueCol > valueCol) {
-                  mergeData.push({
+                  merges.push({
                     startRow: subRow,
                     endRow: subRow,
-                    startColumn: valueCol,
-                    endColumn: endValueCol,
+                    startCol: valueCol,
+                    endCol: endValueCol,
                   })
                 }
               } else {
-                setCell(subRow, valueCol, {
-                  v: '',
-                  s: fieldValueStyleId,
+                setCell(subRow, valueCol, '', {
+                  verticalAlign: 'middle',
                 })
               }
 
-              rowData[subRow] = { h: FIELD_ROW_HEIGHT }
+              rowHeights[subRow] = FIELD_ROW_HEIGHT
               subColCursor += width
 
               if (subColCursor >= sub.columns) {
@@ -367,86 +266,55 @@ function configToUniverData(config: FormLayoutConfig): IWorkbookData {
             }
           }
 
-          // If subgroup items didn't fill last row, advance
-          if (subColCursor > 0) {
-            subRow++
-          }
+          if (subColCursor > 0) subRow++
           row = subRow
           colCursor = 0
         }
       }
 
-      // If still mid-row, advance
-      if (colCursor > 0) {
-        row++
-      }
-
+      if (colCursor > 0) row++
       return row
     }
 
     currentRow = renderItems(group.items, group.columns, currentRow)
 
-    // Separator row between groups
+    // 分组间分隔行
     if (groupIndex < config.groups.length - 1) {
-      rowData[currentRow] = { h: EMPTY_ROW_HEIGHT }
+      rowHeights[currentRow] = EMPTY_ROW_HEIGHT
       currentRow++
     }
   })
 
-  // Calculate total rows/cols needed
   const totalRows = Math.max(currentRow + 1, 50)
   const totalCols = GRID_COLUMNS * 2
 
-  const worksheetData: Partial<IWorksheetData> = {
-    id: sheetId,
-    name: '表单布局',
-    tabColor: '',
-    hidden: 0,
-    freeze: { xSplit: 0, ySplit: 0, startRow: 0, startColumn: 0 },
-    rowCount: totalRows,
-    columnCount: totalCols,
-    zoomRatio: 1,
-    scrollTop: 0,
-    scrollLeft: 0,
-    defaultColumnWidth: VALUE_COL_WIDTH,
-    defaultRowHeight: FIELD_ROW_HEIGHT,
-    mergeData,
-    cellData,
-    rowData,
-    columnData,
-    rowHeader: { width: 46, hidden: 0 },
-    columnHeader: { height: 24, hidden: 0 },
-    showGridlines: 1,
-    rightToLeft: 0,
-  }
-
   return {
-    id: generateId(),
-    name: '表单布局设计器',
-    appVersion: '1.0.0',
-    locale: 7 as any, // LocaleType.ZH_CN
-    styles,
-    sheetOrder: [sheetId],
-    sheets: {
-      [sheetId]: worksheetData,
-    },
+    sheets: [
+      {
+        name: '表单布局',
+        rowCount: totalRows,
+        colCount: totalCols,
+        cells,
+        merges,
+        rowHeights,
+        colWidths,
+        defaultRowHeight: FIELD_ROW_HEIGHT,
+        defaultColWidth: VALUE_COL_WIDTH,
+      },
+    ],
+    activeSheetIndex: 0,
   }
 }
 
-// ── Conversion: IWorkbookData → FormLayoutConfig ──
+// ── 转换: ZCellWorkbookData → FormLayoutConfig ──
 
-function univerDataToConfig(data: IWorkbookData, fields: TableField[]): FormLayoutConfig {
+function zcellDataToConfig(data: ZCellWorkbookData, fields: TableField[]): FormLayoutConfig {
   const groups: FormLayoutGroup[] = []
 
-  // Iterate sheets (typically just one)
-  for (const sheetId of data.sheetOrder) {
-    const sheet = data.sheets[sheetId]
-    if (!sheet) continue
+  for (const sheet of data.sheets) {
+    const { cells } = sheet
+    if (!cells) continue
 
-    const { cellData } = sheet
-    if (!cellData) continue
-
-    // Scan rows to find group headers, subgroup headers, and fields
     let currentGroup: FormLayoutGroup | null = null
     let currentSubGroup: SubGroupLayoutItem | null = null
     let currentRowItems: LayoutItem[] = []
@@ -462,67 +330,80 @@ function univerDataToConfig(data: IWorkbookData, fields: TableField[]): FormLayo
       rowWidthUsed = 0
     }
 
-    // Get sorted rows
-    const rows = Object.keys(cellData).map(Number).sort((a, b) => a - b)
+    // 获取所有行号并排序
+    const rowSet = new Set<number>()
+    for (const key of Object.keys(cells)) {
+      rowSet.add(Number(key.split(',')[0]))
+    }
+    const rows = [...rowSet].sort((a, b) => a - b)
 
     for (const row of rows) {
-      const rowCells = cellData[row]
-      if (!rowCells) continue
-
-      // Get sorted columns for this row
-      const cols = Object.keys(rowCells).map(Number).sort((a, b) => a - b)
+      // 获取该行所有列
+      const colSet = new Set<number>()
+      for (const key of Object.keys(cells)) {
+        const [r, c] = key.split(',').map(Number)
+        if (r === row) colSet.add(c)
+      }
+      const cols = [...colSet].sort((a, b) => a - b)
 
       for (const col of cols) {
-        const cell = rowCells[col]
+        const cell = cells[`${row},${col}`]
         if (!cell) continue
 
-        const meta = cell.custom as CellMeta | undefined
-        if (!meta) continue
+        const value = cell.value || ''
 
-        if (meta.kind === 'group-header') {
+        // 检测分组标题
+        if (value.startsWith('\u{1F4C1} ')) {
           flushRowItems()
           currentSubGroup = null
+          const title = value.replace('\u{1F4C1} ', '')
           currentGroup = {
-            id: meta.id || generateId(),
-            title: meta.title,
-            columns: meta.columns || 2,
+            id: generateId(),
+            title,
+            columns: 2,
             items: [],
           }
           groups.push(currentGroup)
-        } else if (meta.kind === 'subgroup-header') {
+          // 跳过合并的标题行其余列
+          break
+        }
+
+        // 检测子分组标题
+        if (value.startsWith('\u{1F4C2} ')) {
           flushRowItems()
+          const title = value.replace('\u{1F4C2} ', '')
           currentSubGroup = {
-            id: meta.id || generateId(),
+            id: generateId(),
             type: 'subgroup',
-            title: meta.title,
-            columns: meta.columns || 2,
-            width: meta.width || 1,
+            title,
+            columns: 2,
+            width: 1,
             items: [],
           }
           if (currentGroup) {
             currentGroup.items.push(currentSubGroup)
           }
-        } else if (meta.kind === 'field') {
-          // Resolve field label from fields list if possible
-          const resolvedField = fields.find(f => f.id === meta.fieldId || f.name === meta.fieldName)
-          const fieldName = resolvedField?.name ?? meta.fieldName
+          break
+        }
 
-          const item: FieldLayoutItem = {
-            id: meta.id || generateId(),
-            type: 'field',
-            fieldId: meta.fieldId,
-            fieldName,
-            width: meta.width || 1,
-            labelWidth: meta.labelWidth,
+        // 检测字段（label列的文本）
+        if (col % 2 === 0 && value && !value.startsWith('\u{1F4C1}') && !value.startsWith('\u{1F4C2}')) {
+          const resolvedField = fields.find(f => f.name === value)
+          if (resolvedField) {
+            const item: FieldLayoutItem = {
+              id: generateId(),
+              type: 'field',
+              fieldId: resolvedField.id,
+              fieldName: resolvedField.name,
+              width: 1,
+            }
+            currentRowItems.push(item)
+            rowWidthUsed += 1
           }
-          currentRowItems.push(item)
-          rowWidthUsed += item.width
         }
       }
 
-      // After processing a row of fields, flush
       if (currentRowItems.length > 0) {
-        // Check if we need to wrap (if width exceeds columns)
         const containerCols = currentSubGroup?.columns ?? currentGroup?.columns ?? 2
         if (rowWidthUsed >= containerCols) {
           flushRowItems()
@@ -533,7 +414,6 @@ function univerDataToConfig(data: IWorkbookData, fields: TableField[]): FormLayo
     flushRowItems()
   }
 
-  // If no groups found, create a default one
   if (groups.length === 0) {
     groups.push({
       id: generateId(),
@@ -546,16 +426,17 @@ function univerDataToConfig(data: IWorkbookData, fields: TableField[]): FormLayo
   return { groups }
 }
 
-// ── Component ──
+// ── 组件 ──
 
-export default function UniverFormDesigner({
+export default function ZCellFormDesigner({
   tableId,
   fields,
   initialConfig,
   onSave,
-}: UniverFormDesignerProps) {
+}: ZCellFormDesignerProps) {
   const [saving, setSaving] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+
   const normalizeConfig = (raw: any): FormLayoutConfig => {
     if (!raw || !raw.groups || !Array.isArray(raw.groups)) {
       return { groups: [{ id: generateId(), title: '基本信息', columns: 2, items: [] }] }
@@ -580,9 +461,9 @@ export default function UniverFormDesigner({
 
   const [config, setConfig] = useState<FormLayoutConfig>(() => normalizeConfig(initialConfig))
 
-  const sheetRef = useRef<UniverSheetEditorHandle>(null)
+  const sheetRef = useRef<ZCellSheetEditorHandle>(null)
 
-  // Track which field IDs are already placed
+  // 追踪已使用的字段ID
   const usedFieldIds = new Set<number>()
   const collectUsedFieldIds = (items: LayoutItem[]) => {
     for (const item of items) {
@@ -601,10 +482,10 @@ export default function UniverFormDesigner({
       )
     : unassignedFields
 
-  // Build initial Univer data from config
-  const initialWorkbookData = configToUniverData(config)
+  // 构建初始 ZCell 数据
+  const initialWorkbookData = configToZCellData(config, fields)
 
-  // Handle adding a new group
+  // 添加分组
   const addGroup = useCallback(() => {
     setConfig(prev => ({
       ...prev,
@@ -620,13 +501,12 @@ export default function UniverFormDesigner({
     }))
   }, [])
 
-  // Handle inserting a field at the selected cell
+  // 字段点击插入
   const handleFieldClick = useCallback((field: TableField) => {
     const sheet = sheetRef.current
     if (!sheet) return
 
-    const selected = sheet.getSelectedCell()
-    if (!selected) return
+    sheet.insertField(field.name)
 
     const newFieldItem: FieldLayoutItem = {
       id: generateId(),
@@ -637,13 +517,7 @@ export default function UniverFormDesigner({
       labelWidth: 100,
     }
 
-    // Insert field label into the cell via Univer API
-    sheet.insertField(field.name)
-
-    // Update local config
     setConfig(prev => {
-      // Determine which group the row belongs to
-      // For simplicity, add to the first group if not determinable
       const targetGroup = prev.groups[0]
       if (!targetGroup) return prev
 
@@ -657,14 +531,13 @@ export default function UniverFormDesigner({
     })
   }, [])
 
-  // Handle save
+  // 保存
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      // Get current data from Univer and convert back
       const data = sheetRef.current?.getData()
       if (data) {
-        const reconstructed = univerDataToConfig(data, fields)
+        const reconstructed = zcellDataToConfig(data, fields)
         await onSave(reconstructed)
       } else {
         await onSave(config)
@@ -676,7 +549,7 @@ export default function UniverFormDesigner({
 
   return (
     <div className="space-y-4">
-      {/* Top bar */}
+      {/* 顶部操作栏 */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">表单布局设计</h2>
@@ -696,9 +569,9 @@ export default function UniverFormDesigner({
         </div>
       </div>
 
-      {/* Main layout: sidebar + Univer sheet */}
+      {/* 主布局: 侧边栏 + ZCell 表格 */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        {/* Left sidebar: Available fields */}
+        {/* 左侧边栏: 可用字段 */}
         <div className="lg:col-span-1">
           <Card>
             <CardHeader className="pb-3">
@@ -749,7 +622,7 @@ export default function UniverFormDesigner({
             </CardContent>
           </Card>
 
-          {/* Current config groups summary */}
+          {/* 分组概览 */}
           <Card className="mt-4">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">分组概览</CardTitle>
@@ -793,18 +666,16 @@ export default function UniverFormDesigner({
           </Card>
         </div>
 
-        {/* Right area: Univer Sheet */}
+        {/* 右侧: ZCell 表格编辑器 */}
         <div className="lg:col-span-3">
           <Card>
             <CardContent className="p-0">
-              <UniverSheetEditor
+              <ZCellSheetEditor
                 ref={sheetRef}
                 initialData={initialWorkbookData}
-                readonly={false}
                 height="calc(100vh - 240px)"
                 onDataChange={(data) => {
-                  // Sync config from Univer data changes
-                  const newConfig = univerDataToConfig(data, fields)
+                  const newConfig = zcellDataToConfig(data, fields)
                   if (newConfig?.groups) {
                     setConfig(normalizeConfig(newConfig))
                   }

@@ -121,7 +121,7 @@ export async function GET(
 
     const workbook = new ExcelJS.Workbook()
 
-    if (useTemplate && (templateConfig?.univerData || templateConfig?.grid)) {
+    if (useTemplate && (templateConfig?.univerData || templateConfig?.zcellData || templateConfig?.grid)) {
       await exportTemplateExcel(workbook, table, records, templateConfig, exportTemplate)
     } else {
       switch (type) {
@@ -509,6 +509,14 @@ async function exportFormExcel(
   })
 }
 
+function getFieldValue(record: any, data: Record<string, any>, fieldName: string): string {
+    if (fieldName === 'id') return record?.id?.toString() || ''
+    if (fieldName === 'status') return statusText[record?.status] || record?.status || ''
+    if (fieldName === 'createdAt' || fieldName === 'createTime') return record?.createdAt ? new Date(record.createdAt).toLocaleString('zh-CN') : ''
+    if (fieldName === 'updatedAt' || fieldName === 'updateTime') return record?.updatedAt ? new Date(record.updatedAt).toLocaleString('zh-CN') : ''
+    return data[fieldName]?.toString() || ''
+}
+
 async function exportTemplateExcel(
   workbook: ExcelJS.Workbook,
   table: any,
@@ -733,119 +741,133 @@ async function exportTemplateExcel(
     worksheet.getColumn(c + 1).width = (colWidths[c] || 100) / 7
   }
 
-  const firstRecord = records[0]
-  const firstData = firstRecord?.data as Record<string, any> || {}
+  // Find data rows (rows containing {{fieldName}} placeholders)
+  let dataStartRow = -1
+  let dataEndRow = -1
 
   for (let r = 0; r < maxRow; r++) {
     for (let c = 0; c < maxCol; c++) {
-      const cell = worksheet.getCell(r + 1, c + 1)
-      let value = cell.value?.toString() || ''
-
-      const placeholders = value.match(/\{\{[^}]+\}\}/g)
-      if (placeholders) {
-        placeholders.forEach(placeholder => {
-          const fieldName = placeholder.slice(2, -2)
-          let fieldValue = ''
-
-          if (fieldName === 'id') {
-            fieldValue = firstRecord?.id?.toString() || ''
-          } else if (fieldName === 'status') {
-            fieldValue = statusText[firstRecord?.status] || firstRecord?.status || ''
-          } else if (fieldName === 'createdAt' || fieldName === 'createTime') {
-            fieldValue = firstRecord?.createdAt ? new Date(firstRecord.createdAt).toLocaleString('zh-CN') : ''
-          } else if (fieldName === 'updatedAt' || fieldName === 'updateTime') {
-            fieldValue = firstRecord?.updatedAt ? new Date(firstRecord.updatedAt).toLocaleString('zh-CN') : ''
-          } else {
-            fieldValue = firstData[fieldName]?.toString() || ''
-          }
-
-          value = value.replace(placeholder, fieldValue)
-        })
-
-        cell.value = sanitizeCellValue(value)
+      const cellValue = grid[r]?.[c]?.value || ''
+      if (cellValue.match(/\{\{[^}]+\}\}/)) {
+        if (dataStartRow === -1) dataStartRow = r
+        dataEndRow = r
       }
     }
   }
 
-  if (records.length > 1) {
-    let dataStartRow = -1
-    let dataEndRow = -1
+  const dataRowCount = dataStartRow >= 0 ? (dataEndRow - dataStartRow + 1) : 0
 
-    for (let r = 0; r < maxRow; r++) {
+  // Helper to fill cells for a record at a given row offset
+  const fillRecordCells = (record: any, recordData: Record<string, any>, startRowIdx: number) => {
+    for (let r = dataStartRow; r <= dataEndRow; r++) {
+      const targetRowIdx = startRowIdx + (r - dataStartRow)
+      const targetRow = worksheet.getRow(targetRowIdx + 1) // 1-based
+      targetRow.height = rowHeights[r] || 20
+
       for (let c = 0; c < maxCol; c++) {
-        const cellValue = grid[r]?.[c]?.value || ''
-        if (cellValue.match(/\{\{[^}]+\}\}/)) {
-          if (dataStartRow === -1) dataStartRow = r
-          dataEndRow = r
+        const cellData = grid[r]?.[c]
+        if (!cellData || cellData.mergeHidden) continue
+
+        const targetCell = targetRow.getCell(c + 1)
+
+        // Apply styles from grid
+        if (cellData.bold || cellData.italic || cellData.underline || cellData.fontSize || cellData.textColor) {
+          targetCell.font = {
+            bold: cellData.bold,
+            italic: cellData.italic,
+            underline: cellData.underline ? 'single' : undefined,
+            size: cellData.fontSize,
+            color: cellData.textColor ? { argb: 'FF' + cellData.textColor.replace('#', '').toUpperCase() } : undefined,
+          }
+        }
+        if (cellData.bgColor) {
+          targetCell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF' + cellData.bgColor.replace('#', '').toUpperCase() },
+          }
+        }
+        if (cellData.align || cellData.verticalAlign || cellData.wrapText) {
+          targetCell.alignment = {
+            horizontal: cellData.align as any,
+            vertical: cellData.verticalAlign as any || 'middle',
+            wrapText: cellData.wrapText,
+          }
+        }
+        if (cellData.borderTop || cellData.borderBottom || cellData.borderLeft || cellData.borderRight) {
+          targetCell.border = {
+            top: cellData.borderTop ? { style: 'thin' } : undefined,
+            bottom: cellData.borderBottom ? { style: 'thin' } : undefined,
+            left: cellData.borderLeft ? { style: 'thin' } : undefined,
+            right: cellData.borderRight ? { style: 'thin' } : undefined,
+          }
+        } else {
+          targetCell.border = {
+            top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+            bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+            left: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+            right: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+          }
+        }
+
+        // Fill value from template, replacing placeholders with record data
+        let value = cellData.value || ''
+        const placeholders = value.match(/\{\{[^}]+\}\}/g)
+        if (placeholders) {
+          placeholders.forEach((placeholder: string) => {
+            const fieldName = placeholder.slice(2, -2)
+            value = value.replace(placeholder, getFieldValue(record, recordData, fieldName))
+          })
+        }
+
+        if (cellData.formula) {
+          const formula = cellData.formula.replace('=', '')
+          if (isSafeFormula(formula)) {
+            targetCell.value = { formula }
+          } else {
+            targetCell.value = "'=" + formula
+          }
+        } else {
+          targetCell.value = sanitizeCellValue(value)
+        }
+
+        // Handle merges for data rows
+        if (cellData && ((cellData.rowSpan && cellData.rowSpan > 1) || (cellData.colSpan && cellData.colSpan > 1))) {
+          mergeCells.push({
+            row: targetRowIdx,
+            col: c,
+            rowspan: cellData.rowSpan || 1,
+            colspan: cellData.colSpan || 1,
+          })
         }
       }
     }
+  }
 
-    if (dataStartRow >= 0 && dataEndRow >= 0) {
-      for (let i = 1; i < records.length; i++) {
-        const record = records[i]
-        const data = record.data as Record<string, any> || {}
-        const offset = i * (dataEndRow - dataStartRow + 1)
-
-        for (let r = dataStartRow; r <= dataEndRow; r++) {
-          const targetRowIdx = maxRow + offset + (r - dataStartRow) + 1
-          const sourceRowIdx = r + 1
-          const targetRow = worksheet.getRow(targetRowIdx)
-          targetRow.height = rowHeights[r] || 20
-
-          for (let c = 0; c < maxCol; c++) {
-            const sourceCell = worksheet.getCell(sourceRowIdx, c + 1)
-            const targetCell = targetRow.getCell(c + 1)
-            const sourceCellData = grid[r]?.[c]
-
-            if (sourceCell.font) {
-              targetCell.font = { ...sourceCell.font }
-            }
-            if (sourceCell.fill) {
-              targetCell.fill = { ...sourceCell.fill }
-            }
-            if (sourceCell.alignment) {
-              targetCell.alignment = { ...sourceCell.alignment }
-            }
-            if (sourceCell.border) {
-              targetCell.border = { ...sourceCell.border }
-            }
-
-            let value = sourceCell.value?.toString() || ''
-            const placeholders = value.match(/\{\{[^}]+\}\}/g)
-            if (placeholders) {
-              placeholders.forEach(placeholder => {
-                const fieldName = placeholder.slice(2, -2)
-                let fieldValue = ''
-
-                if (fieldName === 'id') {
-                  fieldValue = record.id?.toString() || ''
-                } else if (fieldName === 'status') {
-                  fieldValue = statusText[record.status] || record.status || ''
-                } else if (fieldName === 'createdAt' || fieldName === 'createTime') {
-                  fieldValue = record.createdAt ? new Date(record.createdAt).toLocaleString('zh-CN') : ''
-                } else if (fieldName === 'updatedAt' || fieldName === 'updateTime') {
-                  fieldValue = record.updatedAt ? new Date(record.updatedAt).toLocaleString('zh-CN') : ''
-                } else {
-                  fieldValue = data[fieldName]?.toString() || ''
-                }
-
-                value = value.replace(placeholder, fieldValue)
-              })
-            }
-
-            targetCell.value = sanitizeCellValue(value)
-
-            if (sourceCellData && ((sourceCellData.rowSpan && sourceCellData.rowSpan > 1) || (sourceCellData.colSpan && sourceCellData.colSpan > 1))) {
-              const mergeRow = targetRowIdx - 1
-              const mergeCol = c
-              mergeCells.push({
-                row: mergeRow,
-                col: mergeCol,
-                rowspan: sourceCellData.rowSpan || 1,
-                colspan: sourceCellData.colSpan || 1,
-              })
-            }
+  // Fill data for all records
+  if (dataStartRow >= 0 && dataRowCount > 0) {
+    records.forEach((record, recordIdx) => {
+      const recordData = (record.data as Record<string, any>) || {}
+      const startRowIdx = recordIdx * dataRowCount
+      fillRecordCells(record, recordData, startRowIdx)
+    })
+  } else {
+    // No data rows found, fill static content only for the first record
+    if (records.length > 0) {
+      const record = records[0]
+      const recordData = (record.data as Record<string, any>) || {}
+      // Fill all cells with placeholders in the first row range
+      for (let r = 0; r < maxRow; r++) {
+        for (let c = 0; c < maxCol; c++) {
+          const cell = worksheet.getCell(r + 1, c + 1)
+          let value = cell.value?.toString() || ''
+          const placeholders = value.match(/\{\{[^}]+\}\}/g)
+          if (placeholders) {
+            placeholders.forEach((placeholder: string) => {
+              const fieldName = placeholder.slice(2, -2)
+              value = value.replace(placeholder, getFieldValue(record, recordData, fieldName))
+            })
+            cell.value = sanitizeCellValue(value)
           }
         }
       }
