@@ -64,9 +64,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getCurrentUser()
+    if (!user) {
+      return NextResponse.json({ message: '未登录' }, { status: 401 })
+    }
+
     const body = await req.json()
     const {
-      userId,
       level = 'ERROR',
       module,
       action,
@@ -77,25 +81,25 @@ export async function POST(req: NextRequest) {
       requestParams,
       tableId,
       recordId,
-      ipAddress,
-      userAgent,
     } = body
+
+    const sanitizedParams = sanitizeSensitiveData(requestParams)
 
     const errorLog = await prisma.errorLog.create({
       data: {
-        userId: userId || null,
+        userId: user.id,
         level,
         module: module || 'UNKNOWN',
         action: action || 'UNKNOWN',
-        message,
-        stackTrace,
-        requestUrl,
-        requestMethod,
-        requestParams: requestParams || null,
+        message: message?.slice(0, 2000),
+        stackTrace: stackTrace?.slice(0, 5000),
+        requestUrl: requestUrl?.slice(0, 500),
+        requestMethod: requestMethod?.slice(0, 10),
+        requestParams: sanitizedParams || null,
         tableId: tableId || null,
         recordId: recordId || null,
-        ipAddress,
-        userAgent,
+        ipAddress: req.headers.get('x-forwarded-for') || req.headers.get('remote-address') || null,
+        userAgent: (req.headers.get('user-agent') || '').slice(0, 191) || null,
       },
     })
 
@@ -104,6 +108,35 @@ export async function POST(req: NextRequest) {
     console.error('Create error log error:', error)
     return NextResponse.json({ message: '创建错误日志失败' }, { status: 500 })
   }
+}
+
+const SENSITIVE_KEY_PATTERNS = [
+  /password/i,
+  /passwd/i,
+  /secret/i,
+  /token/i,
+  /authorization/i,
+  /credential/i,
+  /api[_-]?key/i,
+  /private[_-]?key/i,
+]
+
+function sanitizeSensitiveData(data: any): any {
+  if (!data) return data
+  if (typeof data !== 'object') return data
+  if (Array.isArray(data)) return data.map(sanitizeSensitiveData)
+
+  const sanitized: Record<string, any> = {}
+  for (const [key, value] of Object.entries(data)) {
+    if (SENSITIVE_KEY_PATTERNS.some(p => p.test(key))) {
+      sanitized[key] = '***REDACTED***'
+    } else if (typeof value === 'object' && value !== null) {
+      sanitized[key] = sanitizeSensitiveData(value)
+    } else {
+      sanitized[key] = value
+    }
+  }
+  return sanitized
 }
 
 export async function DELETE(req: NextRequest) {

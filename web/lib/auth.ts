@@ -4,11 +4,11 @@ import { cookies, headers } from 'next/headers'
 import { prisma } from './prisma'
 import { Role } from '@prisma/client'
 
-const DEFAULT_JWT_SECRET = 'zscx-default-jwt-secret-change-in-production-env-2024'
-const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET
+const JWT_SECRET = process.env.JWT_SECRET
 
-if (!process.env.JWT_SECRET) {
-  console.warn('[WARNING] JWT_SECRET environment variable not set. Using default secret. This is insecure for production!')
+if (!JWT_SECRET) {
+  console.error('[FATAL] JWT_SECRET environment variable is required. Set it before starting the application.')
+  throw new Error('JWT_SECRET environment variable is required. Please configure it in your .env file.')
 }
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 
@@ -39,12 +39,12 @@ export async function comparePassword(password: string, hash: string): Promise<b
 }
 
 export function generateToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN } as any)
+  return jwt.sign(payload, JWT_SECRET as string, { expiresIn: JWT_EXPIRES_IN } as any)
 }
 
 export function verifyToken(token: string): JwtPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as JwtPayload
+    return jwt.verify(token, JWT_SECRET as string) as JwtPayload
   } catch {
     return null
   }

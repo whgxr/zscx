@@ -178,7 +178,7 @@ export async function GET(
       FORM: '表单式',
     }
 
-    if (useTemplate && (templateConfig?.univerData || templateConfig?.grid)) {
+    if (useTemplate && (templateConfig?.univerData || templateConfig?.zcellData || templateConfig?.grid)) {
       await exportTemplatePdf(pdfDoc, fonts, table, records, templateConfig, exportTemplate)
     } else {
       const type = templateConfig?.type || ExportType.STANDARD
