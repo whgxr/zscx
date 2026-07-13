@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import FormLayoutDesigner, { FormLayoutConfig } from '@/components/form-layout-designer'
+import FormExcelDesigner from '@/components/form-excel-designer'
+import { FormExcelConfig } from '@/types/form-excel-config'
 import {
   Dialog,
   DialogContent,
@@ -131,6 +132,16 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFieldIds, setSelectedFieldIds] = useState<number[]>([])
+  const [batchDisplayDialogOpen, setBatchDisplayDialogOpen] = useState(false)
+  const [batchDisplayForm, setBatchDisplayForm] = useState({
+    showInList: true,
+    showInForm: true,
+    showInSearch: true,
+    updateList: false,
+    updateForm: false,
+    updateSearch: false,
+  })
+  const [batchDisplayLoading, setBatchDisplayLoading] = useState(false)
 
   const toggleSelectAllFields = () => {
     const filteredFields = searchQuery
@@ -171,7 +182,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const handleBatchDelete = async () => {
     if (selectedFieldIds.length === 0) return
     if (!confirm(`确定要删除选中的 ${selectedFieldIds.length} 个字段吗？`)) return
-    
+
     try {
       setLoading(true)
       const newFields = fields.filter(f => !selectedFieldIds.includes(f.id))
@@ -188,6 +199,72 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleBatchUpdateDisplay = async () => {
+    if (selectedFieldIds.length === 0) return
+
+    const updateData: any = { fieldIds: selectedFieldIds }
+    if (batchDisplayForm.updateList) updateData.showInList = batchDisplayForm.showInList
+    if (batchDisplayForm.updateForm) updateData.showInForm = batchDisplayForm.showInForm
+    if (batchDisplayForm.updateSearch) updateData.showInSearch = batchDisplayForm.showInSearch
+
+    if (!batchDisplayForm.updateList && !batchDisplayForm.updateForm && !batchDisplayForm.updateSearch) {
+      alert('请至少勾选一项要修改的显示设置')
+      return
+    }
+
+    setBatchDisplayLoading(true)
+    try {
+      const res = await fetch(`/api/tables/${table.id}/fields/batch-update`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        // 本地更新字段状态
+        setFields(prev => prev.map(f => {
+          if (!selectedFieldIds.includes(f.id)) return f
+          return {
+            ...f,
+            ...(batchDisplayForm.updateList && { showInList: batchDisplayForm.showInList }),
+            ...(batchDisplayForm.updateForm && { showInForm: batchDisplayForm.showInForm }),
+            ...(batchDisplayForm.updateSearch && { showInSearch: batchDisplayForm.showInSearch }),
+          }
+        }))
+        setBatchDisplayDialogOpen(false)
+        setBatchDisplayForm({
+          showInList: true,
+          showInForm: true,
+          showInSearch: true,
+          updateList: false,
+          updateForm: false,
+          updateSearch: false,
+        })
+        alert(`成功更新 ${data.count} 个字段的显示设置`)
+      } else {
+        const data = await res.json()
+        alert(data.message || '更新失败')
+      }
+    } catch (err) {
+      alert('更新失败')
+    } finally {
+      setBatchDisplayLoading(false)
+    }
+  }
+
+  const openBatchDisplayDialog = () => {
+    setBatchDisplayForm({
+      showInList: true,
+      showInForm: true,
+      showInSearch: true,
+      updateList: false,
+      updateForm: false,
+      updateSearch: false,
+    })
+    setBatchDisplayDialogOpen(true)
   }
   const [formData, setFormData] = useState({
     name: '',
@@ -739,7 +816,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const typeInfo = fieldTypeConfig[formData.type]
   const TypeIcon = typeInfo?.icon || Type
 
-  const handleSaveFormLayout = async (config: FormLayoutConfig) => {
+  const handleSaveFormLayout = async (config: FormExcelConfig) => {
     try {
       const res = await fetch(`/api/tables/${table.id}`, {
         method: 'PUT',
@@ -1348,6 +1425,10 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                   {selectedFieldIds.length > 0 && (
                     <div className="flex items-center gap-4 p-3 bg-primary/5 border border-primary/20 rounded-lg mb-4">
                       <span className="text-sm text-gray-600">已选择 {selectedFieldIds.length} 个字段</span>
+                      <Button variant="outline" size="sm" onClick={openBatchDisplayDialog}>
+                        <Settings className="w-4 h-4 mr-2" />
+                        批量修改显示设置
+                      </Button>
                       <Button variant="destructive" size="sm" onClick={handleBatchDelete}>
                         <Trash2 className="w-4 h-4 mr-2" />
                         批量删除
@@ -1537,14 +1618,98 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
 
       {activeTab === 'layout' && (
         <div className="mt-6">
-          <FormLayoutDesigner
+          <FormExcelDesigner
             tableId={table.id}
             fields={fields}
-            initialConfig={table.formLayoutConfig as FormLayoutConfig | null}
+            initialConfig={table.formLayoutConfig as FormExcelConfig | null}
             onSave={handleSaveFormLayout}
           />
         </div>
       )}
+
+      {/* 批量修改显示设置对话框 */}
+      <Dialog open={batchDisplayDialogOpen} onOpenChange={setBatchDisplayDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>批量修改显示设置</DialogTitle>
+            <DialogDescription>
+              对选中的 {selectedFieldIds.length} 个字段批量修改显示设置，勾选要修改的项并设置目标值。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={batchDisplayForm.updateList}
+                  onChange={(e) => setBatchDisplayForm({ ...batchDisplayForm, updateList: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div>
+                  <p className="font-medium text-sm">列表显示</p>
+                  <p className="text-xs text-gray-500">是否在数据列表中显示</p>
+                </div>
+              </div>
+              <Switch
+                checked={batchDisplayForm.showInList}
+                onCheckedChange={(v) => setBatchDisplayForm({ ...batchDisplayForm, showInList: v })}
+                disabled={!batchDisplayForm.updateList}
+              />
+            </div>
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={batchDisplayForm.updateForm}
+                  onChange={(e) => setBatchDisplayForm({ ...batchDisplayForm, updateForm: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div>
+                  <p className="font-medium text-sm">表单显示</p>
+                  <p className="text-xs text-gray-500">是否在录入表单中显示</p>
+                </div>
+              </div>
+              <Switch
+                checked={batchDisplayForm.showInForm}
+                onCheckedChange={(v) => setBatchDisplayForm({ ...batchDisplayForm, showInForm: v })}
+                disabled={!batchDisplayForm.updateForm}
+              />
+            </div>
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={batchDisplayForm.updateSearch}
+                  onChange={(e) => setBatchDisplayForm({ ...batchDisplayForm, updateSearch: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div>
+                  <p className="font-medium text-sm">可搜索</p>
+                  <p className="text-xs text-gray-500">是否可以作为搜索条件</p>
+                </div>
+              </div>
+              <Switch
+                checked={batchDisplayForm.showInSearch}
+                onCheckedChange={(v) => setBatchDisplayForm({ ...batchDisplayForm, showInSearch: v })}
+                disabled={!batchDisplayForm.updateSearch}
+              />
+            </div>
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-xs text-blue-700">
+                勾选左侧复选框表示要修改该项设置，右侧开关控制目标值。未勾选的项将保持原值不变。
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchDisplayDialogOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleBatchUpdateDisplay} disabled={batchDisplayLoading}>
+              {batchDisplayLoading ? '保存中...' : `应用到 ${selectedFieldIds.length} 个字段`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

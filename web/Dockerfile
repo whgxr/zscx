@@ -16,7 +16,7 @@ RUN npx prisma generate
 RUN npm run build
 
 FROM node:18-alpine AS runner
-RUN apk add --no-cache openssl libc6-compat
+RUN apk add --no-cache openssl libc6-compat mysql-client gzip
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -32,7 +32,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder --chown=nextjs:nodejs /app/next.config.js ./next.config.js
 
-RUN mkdir -p ./public/uploads
+RUN mkdir -p ./public/uploads ./backups
+
+RUN chown -R nextjs:nodejs ./public/uploads ./backups
 
 USER nextjs
 

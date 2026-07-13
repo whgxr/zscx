@@ -73,7 +73,7 @@ export async function POST(
     const record = await prisma.dataRecord.findUnique({
       where: { id: recordId },
     })
-    if (!record) {
+    if (!record || record.tableId !== dataTable.id) {
       return NextResponse.json({ message: '记录不存在' }, { status: 404 })
     }
 

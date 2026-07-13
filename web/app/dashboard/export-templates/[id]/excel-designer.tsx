@@ -55,6 +55,7 @@ import {
 } from 'lucide-react'
 import { ExportTemplate, DataTable, TableField } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
+import { CellData, PageSetup, RowConfig, ColConfig, DEFAULT_ROWS, DEFAULT_COLS, FIELD_PATTERN, getColLabel, emptyCell } from '@/types/cell-data'
 
 interface TemplateWithTable extends ExportTemplate {
   table: DataTable & {
@@ -62,64 +63,8 @@ interface TemplateWithTable extends ExportTemplate {
   }
 }
 
-interface CellData {
-  value: string
-  bold?: boolean
-  italic?: boolean
-  underline?: boolean
-  align?: 'left' | 'center' | 'right'
-  verticalAlign?: 'top' | 'middle' | 'bottom'
-  bgColor?: string
-  textColor?: string
-  fontSize?: number
-  borderTop?: string
-  borderBottom?: string
-  borderLeft?: string
-  borderRight?: string
-  wrapText?: boolean
-  rowSpan?: number
-  colSpan?: number
-  mergeHidden?: boolean
-  formula?: string
-}
-
-interface PageSetup {
-  paperSize: 'A4' | 'A3' | 'Letter'
-  orientation: 'portrait' | 'landscape'
-  marginTop: number
-  marginBottom: number
-  marginLeft: number
-  marginRight: number
-  headerMargin: number
-  footerMargin: number
-  printTitleRows?: string
-  printTitleCols?: string
-}
-
-interface RowConfig {
-  height: number
-}
-
-interface ColConfig {
-  width: number
-}
-
 interface ExcelTemplateDesignerProps {
   template: TemplateWithTable
-}
-
-const DEFAULT_ROWS = 30
-const DEFAULT_COLS = 15
-const FIELD_PATTERN = '\\{\\{[^}]+\\}\\}'
-
-function getColLabel(index: number) {
-  let label = ''
-  let n = index
-  while (n >= 0) {
-    label = String.fromCharCode(65 + (n % 26)) + label
-    n = Math.floor(n / 26) - 1
-  }
-  return label
 }
 
 function CellDisplay({ value, fields }: { value: string; fields: TableField[] }) {
@@ -179,8 +124,6 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
 
   const table = template.table
   const allFields = table.fields
-
-  const emptyCell = (): CellData => ({ value: '' })
 
   const initGrid = useCallback((): CellData[][] => {
     const cfg = template.config as any

@@ -1,11 +1,19 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Database,
   Users,
@@ -19,6 +27,12 @@ import {
   Clock,
   AlertCircle,
   LayoutDashboard,
+  Download,
+  Trash2,
+  RotateCcw,
+  HardDriveDownload,
+  HardDriveUpload,
+  Loader2,
 } from 'lucide-react'
 import { Role } from '@prisma/client'
 
@@ -37,9 +51,22 @@ interface SettingsClientProps {
 export function SettingsClient({ userRole, stats }: SettingsClientProps) {
   const [sessionTimeout, setSessionTimeout] = useState(30)
   const [loading, setLoading] = useState(false)
+  const isAdmin = userRole?.name === 'ADMIN'
+
+  // 数据库备份相关状态
+  const [backups, setBackups] = useState<Array<{ fileName: string; fileSize: number; createdAt: string }>>([])
+  const [backupLoading, setBackupLoading] = useState(false)
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
+  const [restoringFileName, setRestoringFileName] = useState<string | null>(null)
+  const [restoreLoading, setRestoreLoading] = useState(false)
+  const [uploadLoading, setUploadLoading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetchSettings()
+    if (isAdmin) {
+      fetchBackups()
+    }
   }, [])
 
   const fetchSettings = async () => {
@@ -73,6 +100,149 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
       alert('保存失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+  }
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr)
+    return d.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  const fetchBackups = async () => {
+    try {
+      const res = await fetch('/api/database/backup')
+      if (res.ok) {
+        const data = await res.json()
+        setBackups(data.backups || [])
+      }
+    } catch (err) {
+      console.error('Fetch backups error:', err)
+    }
+  }
+
+  const handleCreateBackup = async () => {
+    setBackupLoading(true)
+    try {
+      const res = await fetch('/api/database/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        alert('数据库备份成功：' + data.backup.fileName)
+        await fetchBackups()
+      } else {
+        const data = await res.json()
+        alert(data.message || '备份失败')
+      }
+    } catch (err) {
+      alert('备份失败')
+    } finally {
+      setBackupLoading(false)
+    }
+  }
+
+  const handleDownloadBackup = (fileName: string) => {
+    const url = `/api/database/backup/${encodeURIComponent(fileName)}`
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
+  const handleDeleteBackup = async (fileName: string) => {
+    if (!confirm(`确定要删除备份文件 ${fileName} 吗？`)) return
+    try {
+      const res = await fetch(`/api/database/backup/${encodeURIComponent(fileName)}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        await fetchBackups()
+      } else {
+        const data = await res.json()
+        alert(data.message || '删除失败')
+      }
+    } catch (err) {
+      alert('删除失败')
+    }
+  }
+
+  const openRestoreDialog = (fileName: string) => {
+    setRestoringFileName(fileName)
+    setRestoreDialogOpen(true)
+  }
+
+  const handleRestoreBackup = async () => {
+    if (!restoringFileName) return
+    setRestoreLoading(true)
+    try {
+      const res = await fetch('/api/database/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: restoringFileName }),
+      })
+      if (res.ok) {
+        alert('数据库恢复成功')
+        setRestoreDialogOpen(false)
+        setRestoringFileName(null)
+      } else {
+        const data = await res.json()
+        alert(data.message || '恢复失败')
+      }
+    } catch (err) {
+      alert('恢复失败')
+    } finally {
+      setRestoreLoading(false)
+    }
+  }
+
+  const handleUploadBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // 校验文件类型
+    if (!file.name.endsWith('.sql') && !file.name.endsWith('.sql.gz')) {
+      alert('请选择 .sql 或 .sql.gz 格式的备份文件')
+      e.target.value = ''
+      return
+    }
+
+    setUploadLoading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/database/backup/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      if (res.ok) {
+        const data = await res.json()
+        alert('备份文件上传成功：' + data.backup.fileName)
+        await fetchBackups()
+      } else {
+        const data = await res.json()
+        alert(data.message || '上传失败')
+      }
+    } catch (err) {
+      alert('上传失败')
+    } finally {
+      setUploadLoading(false)
+      e.target.value = ''
     }
   }
 
@@ -185,7 +355,7 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
             </div>
             <div>
               <span className="text-gray-500">版本</span>
-              <p className="font-medium mt-1">v1.1.0</p>
+              <p className="font-medium mt-1">v1.2.1</p>
             </div>
             <div>
               <span className="text-gray-500">数据库</span>
@@ -239,6 +409,145 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
         </CardContent>
       </Card>
 
+      {/* 数据库备份与恢复 - 仅超级系统管理员可见 */}
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <HardDriveDownload className="w-5 h-5" />
+              数据库备份与恢复
+            </CardTitle>
+            <CardDescription>
+              备份和恢复系统数据库，仅超级系统管理员可操作
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div>
+                  <p className="font-medium text-sm">立即备份数据库</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    创建当前数据库的完整备份（含表结构和数据）
+                  </p>
+                </div>
+                <Button onClick={handleCreateBackup} disabled={backupLoading}>
+                  {backupLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      备份中...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="w-4 h-4 mr-2" />
+                      创建备份
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div>
+                  <p className="font-medium text-sm">上传备份文件恢复</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    上传 .sql 或 .sql.gz 备份文件到服务器，用于恢复数据库
+                  </p>
+                </div>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept=".sql,.gz"
+                  onChange={handleUploadBackup}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadLoading}
+                >
+                  {uploadLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      上传中...
+                    </>
+                  ) : (
+                    <>
+                      <HardDriveUpload className="w-4 h-4 mr-2" />
+                      上传备份
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="font-medium">备份记录</Label>
+                  <Button variant="outline" size="sm" onClick={fetchBackups}>
+                    刷新
+                  </Button>
+                </div>
+                {backups.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400 border border-dashed rounded-lg">
+                    <HardDriveDownload className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">暂无备份记录</p>
+                  </div>
+                ) : (
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="max-h-80 overflow-y-auto">
+                      {backups.map((backup) => (
+                        <div
+                          key={backup.fileName}
+                          className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 border-b last:border-b-0"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{backup.fileName}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {formatDate(backup.createdAt)} · {formatFileSize(backup.fileSize)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 ml-4">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="下载备份"
+                              onClick={() => handleDownloadBackup(backup.fileName)}
+                            >
+                              <Download className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="恢复此备份"
+                              onClick={() => openRestoreDialog(backup.fileName)}
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600"
+                              title="删除备份"
+                              onClick={() => handleDeleteBackup(backup.fileName)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-xs text-yellow-700">
+                  注意：恢复操作将覆盖当前数据库的所有数据，请谨慎操作。建议在恢复前先创建一份新的备份。
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* 管理功能入口 */}
       <Card>
         <CardHeader>
@@ -249,7 +558,7 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {modules.map(module => {
               const Icon = module.icon
-              const isDisabled = module.adminOnly && userRole?.name !== 'ADMIN'
+              const isDisabled = module.adminOnly && !isAdmin
               return (
                 <a
                   key={module.href}
@@ -278,6 +587,49 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* 恢复确认对话框 */}
+      <Dialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认恢复数据库</DialogTitle>
+            <DialogDescription>
+              此操作将用备份文件覆盖当前数据库的所有数据，且不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-700 font-medium">警告</p>
+              <p className="text-sm text-red-600 mt-1">
+                恢复后当前数据库的所有数据将被替换为备份时的数据。建议在恢复前先创建一份新的备份。
+              </p>
+            </div>
+            {restoringFileName && (
+              <p className="text-sm text-gray-500 mt-3">
+                将恢复的备份文件：<span className="font-mono text-gray-700">{restoringFileName}</span>
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestoreDialogOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={handleRestoreBackup} disabled={restoreLoading}>
+              {restoreLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  恢复中...
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  确认恢复
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

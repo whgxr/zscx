@@ -30,7 +30,7 @@ export default async function H5RecordDetailPage({ params }: { params: { tableNa
     },
   })
 
-  if (!record) {
+  if (!record || record.tableId !== table.id) {
     return <div className="p-8 text-center text-gray-500">记录不存在</div>
   }
 
