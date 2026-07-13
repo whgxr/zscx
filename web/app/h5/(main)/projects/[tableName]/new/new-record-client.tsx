@@ -134,16 +134,27 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
 
       // 2. 上传附件
       if (attachments.length > 0 && recordId) {
+        const failedAttachments: string[] = []
         for (const attachment of attachments) {
           const fd = new FormData()
           fd.append('file', attachment.file)
           fd.append('displayName', attachment.displayName)
           fd.append('type', attachment.type)
 
-          await fetch(`/api/attachments/${table.name}/${recordId}`, {
-            method: 'POST',
-            body: fd,
-          })
+          try {
+            const uploadRes = await fetch(`/api/attachments/${table.name}/${recordId}`, {
+              method: 'POST',
+              body: fd,
+            })
+            if (!uploadRes.ok) {
+              failedAttachments.push(attachment.displayName)
+            }
+          } catch {
+            failedAttachments.push(attachment.displayName)
+          }
+        }
+        if (failedAttachments.length > 0) {
+          alert(`记录已创建，但以下附件上传失败：\n${failedAttachments.join('、')}\n请进入记录详情重新上传。`)
         }
       }
 

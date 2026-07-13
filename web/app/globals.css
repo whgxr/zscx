@@ -57,3 +57,181 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ========== Excel Grid Form Styles ========== */
+@layer components {
+  /* 外层包裹 */
+  .excel-form-wrapper {
+    @apply space-y-0;
+  }
+
+  /* 分组容器 */
+  .excel-form-group {
+    @apply border border-[#BFBFBF] overflow-hidden;
+    @apply mb-4;
+  }
+  .excel-form-group:last-child {
+    @apply mb-0;
+  }
+
+  /* 分组标题行 */
+  .excel-group-header {
+    @apply bg-[#F0F0F0] border-b border-[#BFBFBF] px-4 py-2;
+    @apply text-sm font-semibold text-gray-700;
+    @apply flex items-center gap-2;
+  }
+
+  /* 网格布局 */
+  .excel-grid {
+    display: grid;
+    width: 100%;
+  }
+
+  /* 单元格 */
+  .excel-cell {
+    @apply border-r border-b border-[#D9D9D9];
+    @apply flex items-stretch min-h-[38px];
+    @apply overflow-hidden;
+  }
+
+  /* ========== 水平单元格：标签左 + 输入右 ========== */
+  .excel-cell-horizontal {
+    @apply flex items-stretch w-full min-w-0;
+  }
+
+  .excel-cell-label {
+    @apply bg-[#FAFAFA] px-3 flex items-center relative;
+    @apply text-[13px] text-gray-700 font-medium whitespace-nowrap;
+    @apply border-r border-[#E8E8E8] flex-shrink-0;
+    min-width: 80px;
+  }
+
+  .excel-cell-value {
+    @apply flex-1 px-1.5 flex items-center min-w-0;
+  }
+
+  /* ========== 垂直单元格：标签上 + 输入下 ========== */
+  .excel-cell-vertical {
+    @apply flex flex-col w-full min-w-0 p-2;
+  }
+
+  .excel-cell-vertical .excel-cell-label {
+    @apply border-r-0 border-b border-[#E8E8E8] py-1.5;
+    min-width: unset;
+  }
+
+  .excel-cell-value-vertical {
+    @apply pt-1.5 min-w-0;
+  }
+
+  /* ========== 表格单元格（新版网格） ========== */
+  .excel-form-group table td {
+    @apply p-0 align-top overflow-hidden;
+    min-height: 36px;
+    min-width: 60px;
+  }
+
+  .excel-form-group table td.excel-cell {
+    @apply p-0;
+  }
+
+  /* ========== 单元格内输入框：无边框，融入单元格 ========== */
+  .excel-cell input[type="text"],
+  .excel-cell input[type="email"],
+  .excel-cell input[type="tel"],
+  .excel-cell input[type="number"],
+  .excel-cell input[type="date"],
+  .excel-cell input[type="datetime-local"],
+  .excel-cell textarea,
+  .excel-cell-vertical input[type="text"],
+  .excel-cell-vertical input[type="email"],
+  .excel-cell-vertical input[type="tel"],
+  .excel-cell-vertical input[type="number"],
+  .excel-cell-vertical input[type="date"],
+  .excel-cell-vertical input[type="datetime-local"],
+  .excel-cell-vertical textarea {
+    @apply w-full h-7 border-0 outline-none bg-transparent;
+    @apply text-[13px] text-gray-800 px-1;
+    @apply shadow-none rounded-none;
+  }
+
+  .excel-cell input[type="text"]:focus,
+  .excel-cell input[type="email"]:focus,
+  .excel-cell input[type="tel"]:focus,
+  .excel-cell input[type="number"]:focus,
+  .excel-cell input[type="date"]:focus,
+  .excel-cell input[type="datetime-local"]:focus,
+  .excel-cell textarea:focus,
+  .excel-cell-vertical input[type="text"]:focus,
+  .excel-cell-vertical input[type="email"]:focus,
+  .excel-cell-vertical input[type="tel"]:focus,
+  .excel-cell-vertical input[type="number"]:focus,
+  .excel-cell-vertical input[type="date"]:focus,
+  .excel-cell-vertical input[type="datetime-local"]:focus,
+  .excel-cell-vertical textarea:focus {
+    @apply bg-[#FFF9E6];
+    box-shadow: inset 0 0 0 1.5px #4B3FE3;
+  }
+
+  /* Select 在单元格内 */
+  .excel-cell [data-radix-select-trigger],
+  .excel-cell-vertical [data-radix-select-trigger] {
+    @apply h-7 border-0 shadow-none rounded-none bg-transparent;
+    @apply text-[13px] px-1;
+  }
+  .excel-cell [data-radix-select-trigger]:focus,
+  .excel-cell-vertical [data-radix-select-trigger]:focus {
+    @apply ring-0 outline-none bg-[#FFF9E6];
+    box-shadow: inset 0 0 0 1.5px #4B3FE3;
+  }
+
+  /* ========== 子分组 ========== */
+  .excel-subgroup {
+    @apply flex flex-col overflow-hidden;
+  }
+
+  .excel-subgroup-header {
+    @apply bg-[#F5F5F0] border-b border-[#D9D9D9] px-3 py-1.5;
+    @apply text-[12px] font-semibold text-gray-500;
+    @apply flex items-center gap-1.5;
+  }
+
+  .excel-subgroup-cell {
+    @apply border-r border-b border-[#D9D9D9] overflow-hidden;
+  }
+
+  .excel-grid-inner {
+    display: grid;
+    width: 100%;
+  }
+
+  .excel-row-inner {
+    display: contents;
+  }
+
+  .excel-cell-inner {
+    @apply border-r border-b border-[#E0E0E0] flex items-stretch min-h-[34px] overflow-hidden;
+  }
+
+  .excel-cell-inner .excel-cell-label {
+    @apply bg-[#F5F5F5] px-2.5 text-[12px] min-w-[70px];
+  }
+
+  .excel-cell-inner .excel-cell-value {
+    @apply px-1;
+  }
+
+  .excel-cell-inner input[type="text"],
+  .excel-cell-inner input[type="email"],
+  .excel-cell-inner input[type="tel"],
+  .excel-cell-inner input[type="number"],
+  .excel-cell-inner input[type="date"],
+  .excel-cell-inner input[type="datetime-local"] {
+    @apply w-full h-6 border-0 outline-none bg-transparent text-[12px] px-1 shadow-none rounded-none;
+  }
+
+  .excel-cell-inner input:focus {
+    @apply bg-[#FFF9E6];
+    box-shadow: inset 0 0 0 1.5px #4B3FE3;
+  }
+}

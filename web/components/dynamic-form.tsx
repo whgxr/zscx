@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+
 import {
   Select,
   SelectContent,
@@ -18,7 +18,9 @@ import { Badge } from '@/components/ui/badge'
 import { Upload, X, Image as ImageIcon, File, Loader2, Plus, Trash2, Layers } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
-import { FormLayoutConfig, SubGroupLayoutItem, FieldLayoutItem } from './form-layout-designer'
+import { FormLayoutConfig, SubGroupLayoutItem, FieldLayoutItem, FormCellData, FormLayoutGroup } from './form-layout-designer'
+import { FormExcelConfig, SubTableConfig } from '@/types/form-excel-config'
+import { CellData, FIELD_PATTERN } from '@/types/cell-data'
 import { FolderOpen } from 'lucide-react'
 
 interface ImageInfo {
@@ -191,6 +193,111 @@ function ImageUploadField({ urls, onChange, disabled, fieldName }: ImageUploadFi
   )
 }
 
+/** 子表渲染组件 */
+function FormExcelSubTable({
+  config, values, onChange, disabled
+}: {
+  config: SubTableConfig
+  values: Record<string, any>
+  onChange: (name: string, value: any) => void
+  disabled?: boolean
+}) {
+  const [detailFields, setDetailFields] = useState<TableField[]>([])
+  const [loadingFields, setLoadingFields] = useState(false)
+
+  useEffect(() => {
+    if (config.detailTableId) {
+      setLoadingFields(true)
+      fetch(`/api/tables/${config.detailTableId}/fields`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.fields) {
+            setDetailFields(data.fields.filter((f: TableField) => f.showInForm))
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingFields(false))
+    }
+  }, [config.detailTableId])
+
+  const value = values[config.detailTableName] || []
+  const detailRows: Array<Record<string, any>> = Array.isArray(value) ? value : []
+  const minRows = config.minRows ?? 0
+  const maxRows = config.maxRows ?? 100
+
+  const addRow = () => {
+    if (detailRows.length >= maxRows) return
+    onChange(config.detailTableName, [...detailRows, {}])
+  }
+
+  const removeRow = (idx: number) => {
+    if (detailRows.length <= minRows) return
+    onChange(config.detailTableName, detailRows.filter((_, i) => i !== idx))
+  }
+
+  const updateRow = (idx: number, fieldName: string, val: any) => {
+    const newRows = [...detailRows]
+    newRows[idx] = { ...newRows[idx], [fieldName]: val }
+    onChange(config.detailTableName, newRows)
+  }
+
+  return (
+    <div className="border rounded-md p-3 bg-gray-50/50">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <span className="font-medium">{config.label}</span>
+          <span className="text-xs text-gray-400">（{detailRows.length} 条）</span>
+        </div>
+        {!disabled && (
+          <Button type="button" variant="outline" size="sm" onClick={addRow}
+            disabled={detailRows.length >= maxRows}>
+            <Plus className="w-3 h-3 mr-1" />添加
+          </Button>
+        )}
+      </div>
+      {loadingFields ? (
+        <div className="text-center py-4 text-sm text-gray-500">加载中...</div>
+      ) : detailFields.length === 0 ? (
+        <div className="text-center py-4 text-sm text-gray-400 border border-dashed rounded">
+          子表没有可录入的字段
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {detailRows.map((row, idx) => (
+            <div key={idx} className="border rounded p-2 bg-white">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-500">第 {idx + 1} 条</span>
+                {!disabled && (
+                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-500"
+                    onClick={() => removeRow(idx)}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {detailFields.filter(f => config.fields.includes(f.name)).map(df => (
+                  <div key={df.id} className="space-y-0.5">
+                    <Label className="text-xs text-gray-600">{df.label}</Label>
+                    <Input className="h-7 text-xs" type="text" placeholder={`请输入${df.label}`}
+                      value={row[df.name] || ''}
+                      onChange={e => updateRow(idx, df.name, e.target.value)}
+                      disabled={disabled} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {detailRows.length === 0 && (
+            <div className="text-center py-3 text-sm text-gray-400 border border-dashed rounded">
+              {minRows > 0 ? `至少需要添加 ${minRows} 条` : '点击"添加"按钮'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface DynamicFormProps {
   fields: TableField[]
   values: Record<string, any>
@@ -207,6 +314,10 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
   }
 
   const hasValidLayout = layoutConfig && layoutConfig.groups && layoutConfig.groups.length > 0
+
+  const isFormExcelConfig = (config: any): config is FormExcelConfig => {
+    return config && 'grid' in config && Array.isArray(config.grid)
+  }
 
   const getFieldById = (fieldId: number) => fields.find(f => f.id === fieldId)
   const getFieldByName = (fieldName: string) => fields.find(f => f.name === fieldName)
@@ -231,6 +342,98 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
       console.error('Upload error:', err)
       alert('上传失败')
     }
+  }
+
+  /** 解析单元格 value 中的 {{fieldName}} 占位符，返回文本+字段片段 */
+  const parseCellValue = (value: string): Array<{ text: string; field?: string }> => {
+    const regex = new RegExp(FIELD_PATTERN, 'g')
+    const parts: Array<{ text: string; field?: string }> = []
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+
+    while ((match = regex.exec(value)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({ text: value.slice(lastIndex, match.index) })
+      }
+      parts.push({ text: '', field: match[0].slice(2, -2) })
+      lastIndex = regex.lastIndex
+    }
+    if (lastIndex < value.length) {
+      parts.push({ text: value.slice(lastIndex) })
+    }
+    return parts
+  }
+
+  /** 渲染新版 FormExcelConfig 格式的表格 */
+  const renderFormExcelGrid = (config: FormExcelConfig) => {
+    const { grid, colWidths, rowHeights, subTables } = config
+
+    return (
+      <div className="space-y-4">
+        <div className="overflow-auto border rounded-lg">
+          <table className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
+            <colgroup>
+              {colWidths.map((w, i) => (
+                <col key={i} style={{ width: `${w}px`, minWidth: `${w}px` }} />
+              ))}
+            </colgroup>
+            <tbody>
+              {grid.map((row, ri) => {
+                // 跳过 mergeHidden 的行（但保留 rowSpan 起始行）
+                const allHidden = row.every(c => c.mergeHidden)
+                if (allHidden) return null
+
+                return (
+                  <tr key={ri} style={{ height: `${rowHeights[ri] || 24}px` }}>
+                    {row.map((cell, ci) => {
+                      if (cell.mergeHidden) return null
+                      const parts = parseCellValue(cell.value)
+                      const style: React.CSSProperties = {
+                        fontSize: cell.fontSize || 11,
+                        fontWeight: cell.bold ? 'bold' : undefined,
+                        fontStyle: cell.italic ? 'italic' : undefined,
+                        textDecoration: cell.underline ? 'underline' : undefined,
+                        textAlign: cell.align || 'left',
+                        verticalAlign: cell.verticalAlign || 'middle',
+                        backgroundColor: cell.bgColor || undefined,
+                        color: cell.textColor || undefined,
+                        whiteSpace: cell.wrapText ? 'normal' : 'nowrap',
+                      }
+
+                      return (
+                        <td key={ci}
+                          rowSpan={cell.rowSpan || undefined}
+                          colSpan={cell.colSpan || undefined}
+                          className="border border-gray-300 p-1.5"
+                          style={style}>
+                          {parts.map((part, i) => {
+                            if (part.field) {
+                              const field = formFields.find(f => f.name === part.field)
+                              if (!field) return <span key={i} className="text-red-400">[{part.field} 未找到]</span>
+                              return <span key={i}>{renderField(field)}</span>
+                            }
+                            return <span key={i}>{part.text}</span>
+                          })}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 子表模块 */}
+        {subTables && subTables.length > 0 && (
+          <div className="space-y-3">
+            {subTables.map((st, idx) => (
+              <FormExcelSubTable key={idx} config={st} values={values} onChange={handleChange} disabled={disabled} />
+            ))}
+          </div>
+        )}
+      </div>
+    )
   }
 
   // 明细表单字段渲染
@@ -564,226 +767,264 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
     }
   }
 
-  const renderFieldWithLabel = (field: TableField, width?: number, labelWidth?: number) => {
-    const fieldWidth = width || 1
-    const useHorizontalLayout = fieldWidth >= 2 &&
-      field.type !== 'TEXTAREA' && 
-      field.type !== 'UPLOAD_IMAGE' && 
-      field.type !== 'UPLOAD_FILE' && 
-      field.type !== 'DETAIL_TABLE' &&
-      field.type !== 'MULTISELECT' &&
-      field.type !== 'CHECKBOX'
-    
-    if (useHorizontalLayout) {
-      const labelW = labelWidth || 100
+  /** 判断字段是否使用垂直布局 */
+  const isVerticalField = (type: FieldType) =>
+    type === 'TEXTAREA' || type === 'UPLOAD_IMAGE' || type === 'UPLOAD_FILE' ||
+    type === 'DETAIL_TABLE' || type === 'MULTISELECT' || type === 'CHECKBOX'
+
+  /** 计算某个位置是否被同行 colSpan 覆盖 */
+  const isColCovered = (row: FormCellData[], colIdx: number): boolean => {
+    let col = 0
+    for (let i = 0; i < row.length; i++) {
+      if (col > colIdx) return true
+      if (col === colIdx) return false
+      col += row[i]?.colSpan || 1
+    }
+    return col > colIdx
+  }
+
+  /** 计算某个位置是否被上方某行的 rowSpan 覆盖 */
+  const isRowSpanCovered = (rows: FormCellData[][], rowIdx: number, colIdx: number): boolean => {
+    for (let r = 0; r < rowIdx; r++) {
+      const row = rows[r]
+      let col = 0
+      for (let c = 0; c < row.length; c++) {
+        const cell = row[c]
+        const span = cell?.colSpan || 1
+        const rSpan = cell?.rowSpan || 1
+        if (colIdx >= col && colIdx < col + span && r + rSpan > rowIdx) return true
+        col += span
+      }
+    }
+    return false
+  }
+
+  /** ========== Excel 多列网格渲染（新版 rows 格式） ========== */
+  const renderExcelGridGroup = (group: FormLayoutGroup) => {
+    const colWidths = group.colWidths || []
+    const rows = group.rows || []
+
+    return (
+      <div key={group.id} className="excel-form-group">
+        {group.title && (
+          <div className="excel-group-header">{group.title}</div>
+        )}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" style={{ tableLayout: 'fixed' }}>
+            {colWidths.length > 0 && (
+              <colgroup>
+                {colWidths.map((w, i) => <col key={i} style={{ width: `${w}px` }} />)}
+              </colgroup>
+            )}
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => {
+                    // 被合并覆盖的单元格跳过
+                    if (isColCovered(row, ci) || isRowSpanCovered(rows, ri, ci)) return null
+
+                    const field = cell.fieldId != null
+                      ? getFieldById(cell.fieldId) || getFieldByName(cell.fieldName)
+                      : null
+                    if (!field || !field.showInForm) {
+                      // 空单元格或无效字段
+                      return (
+                        <td key={ci} colSpan={cell.colSpan || 1}
+                            rowSpan={(cell.rowSpan && cell.rowSpan > 1) ? cell.rowSpan : undefined}
+                            className="border border-[#D9D9D9] min-h-[36px]" />
+                      )
+                    }
+
+                    const vertical = isVerticalField(field.type)
+                    const fontSize = cell.fontSize || group.defaultFontSize || 13
+                    const labelW = cell.labelWidth || group.defaultLabelWidth || 90
+
+                    return (
+                      <td key={ci} colSpan={cell.colSpan || 1}
+                          rowSpan={(cell.rowSpan && cell.rowSpan > 1) ? cell.rowSpan : undefined}
+                          className="border border-[#D9D9D9] min-h-[36px] excel-cell">
+                        {vertical ? (
+                          <div className="excel-cell-vertical" style={{ fontSize: `${fontSize}px` }}>
+                            <div className="excel-cell-label">
+                              {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
+                            </div>
+                            <div className="excel-cell-value-vertical">
+                              {renderField(field)}
+                              {field.description && (
+                                <p className="text-xs text-gray-400 mt-1">{field.description}</p>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="excel-cell-horizontal">
+                            <div className="excel-cell-label"
+                                 style={{ width: `${labelW}px`, minWidth: `${labelW}px`, fontSize: `${fontSize}px` }}>
+                              {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
+                            </div>
+                            <div className="excel-cell-value" style={{ fontSize: `${fontSize}px` }}>
+                              {renderField(field)}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  /** ========== 旧版 items 格式渲染（兼容） ========== */
+  const renderFieldCell = (field: TableField, width?: number, labelWidth?: number) => {
+    const isVertical = isVerticalField(field.type)
+    const labelW = labelWidth || 90
+
+    if (isVertical) {
       return (
-        <div key={field.id} className="w-full min-w-0 flex gap-2 items-start">
-          <Label
-            className="text-xs text-gray-600 font-medium flex-shrink-0"
-            style={{ 
-              width: `${labelW}px`, 
-              minWidth: `${labelW}px`,
-              textAlign: 'right',
-              paddingRight: '4px',
-              lineHeight: '32px',
-            }}
-          >
-            {field.label}
-            {field.required && <span className="text-red-500 ml-0.5">*</span>}
-          </Label>
-          <div className="flex-1 min-w-0">
+        <div key={field.id} className="excel-cell-vertical">
+          <div className="excel-cell-label">{field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}</div>
+          <div className="excel-cell-value-vertical">
             {renderField(field)}
             {field.description && (
-              <p className="text-xs text-gray-500 mt-1">{field.description}</p>
+              <p className="text-xs text-gray-400 mt-1">{field.description}</p>
             )}
           </div>
         </div>
       )
     }
-    
+
     return (
-      <div key={field.id} className="w-full min-w-0 space-y-1.5">
-        <Label
-          className="block text-xs text-gray-600 font-medium"
-          style={{ textAlign: 'left' }}
-        >
-          {field.label}
-          {field.required && <span className="text-red-500 ml-0.5">*</span>}
-        </Label>
-        <div className="w-full">
+      <div key={field.id} className="excel-cell-horizontal">
+        <div className="excel-cell-label" style={{ width: `${labelW}px`, minWidth: `${labelW}px` }}>
+          {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
+        </div>
+        <div className="excel-cell-value">
           {renderField(field)}
-          {field.description && (
-            <p className="text-xs text-gray-500 mt-1">{field.description}</p>
-          )}
         </div>
       </div>
     )
   }
 
-  /** 渲染子分组 */
-  const renderSubGroup = (subGroup: SubGroupLayoutItem, parentColumns: number = 2) => {
-    const columns = subGroup.columns || 2
-
+  const renderSubGroup = (subGroup: SubGroupLayoutItem, _parentColumns: number = 1) => {
+    const items = subGroup.items || []
     return (
-      <div
-        key={subGroup.id}
-        className="border rounded-lg bg-gray-50/50"
-        style={{
-          flex: subGroup.width || 1,
-          minWidth: 0,
-          alignSelf: 'flex-start',
-          height: 'fit-content',
-        }}
-      >
+      <div key={subGroup.id} className="excel-subgroup">
         {subGroup.title && (
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b bg-gray-100/40 rounded-t-lg">
-            <FolderOpen className="w-4 h-4 text-amber-600" />
-            <span className="text-sm font-medium">{subGroup.title}</span>
+          <div className="excel-subgroup-header">
+            <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+            <span>{subGroup.title}</span>
           </div>
         )}
-        <div className="p-4 space-y-3">
-          {groupItemsIntoRows(subGroup.items || [], columns).map((row, rowIndex) => (
-            <div key={rowIndex} className="flex gap-3 items-start">
-              {row.map(item => {
-                const itemWidth = item.width || 1
-                return (
-                  <div
-                  key={item.id}
-                  style={{
-                    flex: itemWidth,
-                    minWidth: 0,
-                  }}
-                >
-                    {item.type === 'field'
-                      ? (() => {
-                          const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
-                          if (!field || !field.showInForm) return null
-                          return renderFieldWithLabel(field, item.width, (item as FieldLayoutItem).labelWidth)
-                        })()
-                      : renderSubGroup(item as SubGroupLayoutItem, columns)
-                    }
-                  </div>
-                )
-              })}
-            </div>
-          ))}
+        <div className="excel-grid-inner" style={{ gridTemplateColumns: '1fr' }}>
+          {items.map((item: any, idx: number) => {
+            const isLast = idx === items.length - 1
+            if (item.type === 'field') {
+              const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
+              if (!field || !field.showInForm) return null
+              return (
+                <div key={item.id} className={cn("excel-cell-inner", isLast && "border-b-0")}>
+                  {renderFieldCell(field, 1, item.labelWidth || subGroup.defaultLabelWidth)}
+                </div>
+              )
+            }
+            return renderSubGroup(item as SubGroupLayoutItem, 1)
+          })}
         </div>
       </div>
     )
   }
 
-  /** 检测是否是新版配置 */
-  const isNewFormat = (config: any): boolean => {
-    if (!config || !config.groups) return false
-    return config.groups.some((g: any) => Array.isArray(g.items))
-  }
-
-  /** 旧版兼容渲染 */
   const renderLegacyGroup = (group: any) => {
-    const columns = group.columns || 2
+    const fieldConfigs = (group.fields || []).map((f: any) => ({ ...f, type: 'field', width: 1, id: f.fieldId || f.fieldName }))
     return (
-      <Card key={group.id}>
-        {group.title && (
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{group.title}</CardTitle>
-          </CardHeader>
-        )}
-        <CardContent className="space-y-3">
-          {groupItemsIntoRows((group.fields || []).map((f: any) => ({ ...f, type: 'field', width: f.span === 2 ? 2 : 1, id: f.fieldId || f.fieldName })), columns).map((row, rowIndex) => (
-            <div key={rowIndex} className="flex gap-6 items-start">
-              {row.map(fieldConfig => {
-                const fieldWidth = fieldConfig.width || 1
-                const field = getFieldById(fieldConfig.fieldId) || getFieldByName(fieldConfig.fieldName)
-                if (!field || !field.showInForm) return null
-                return (
-                  <div
-                    key={fieldConfig.id}
-                    style={{
-                      flex: fieldWidth,
-                      minWidth: 0,
-                    }}
-                  >
-                    {renderFieldWithLabel(field, fieldConfig.width, fieldConfig.labelWidth)}
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      <div key={group.id} className="excel-form-group">
+        {group.title && <div className="excel-group-header">{group.title}</div>}
+        <div className="excel-grid" style={{ gridTemplateColumns: '1fr' }}>
+          {fieldConfigs.map((fieldConfig: any, idx: number) => {
+            const isLast = idx === fieldConfigs.length - 1
+            const field = getFieldById(fieldConfig.fieldId) || getFieldByName(fieldConfig.fieldName)
+            if (!field || !field.showInForm) return null
+            return (
+              <div key={fieldConfig.id} className={cn("excel-cell", isLast && "!border-b-0")}>
+                {renderFieldCell(field, 1, fieldConfig.labelWidth)}
+              </div>
+            )
+          })}
+        </div>
+      </div>
     )
   }
 
-  /** 新版渲染 */
-  const renderNewGroup = (group: any) => {
-    const columns = group.columns || 2
+  const renderItemsGroup = (group: any) => {
+    const items = group.items || []
     return (
-      <Card key={group.id}>
-        {group.title && (
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{group.title}</CardTitle>
-          </CardHeader>
-        )}
-        <CardContent className="space-y-3">
-          {groupItemsIntoRows(group.items || [], columns).map((row, rowIndex) => (
-            <div key={rowIndex} className="flex gap-3 items-start">
-              {row.map(item => {
-                const itemWidth = item.width || 1
-                return (
-                  <div
-                    key={item.id}
-                    style={{
-                      flex: itemWidth,
-                      minWidth: 0,
-                    }}
-                  >
-                    {item.type === 'field'
-                      ? (() => {
-                          const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
-                          if (!field || !field.showInForm) return null
-                          return renderFieldWithLabel(field, item.width, (item as FieldLayoutItem).labelWidth)
-                        })()
-                      : renderSubGroup(item as SubGroupLayoutItem, columns)
-                    }
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      <div key={group.id} className="excel-form-group">
+        {group.title && <div className="excel-group-header">{group.title}</div>}
+        <div className="excel-grid" style={{ gridTemplateColumns: '1fr' }}>
+          {items.map((item: any, idx: number) => {
+            const isLast = idx === items.length - 1
+            if (item.type === 'field') {
+              const field = getFieldById(item.fieldId) || getFieldByName(item.fieldName)
+              if (!field || !field.showInForm) return null
+              return (
+                <div key={item.id} className={cn("excel-cell", isLast && "!border-b-0")}>
+                  {renderFieldCell(field, 1, item.labelWidth || group.defaultLabelWidth)}
+                </div>
+              )
+            }
+            return (
+              <div key={item.id} className={cn("excel-subgroup-cell", isLast && "!border-b-0")}>
+                {renderSubGroup(item as SubGroupLayoutItem, 1)}
+              </div>
+            )
+          })}
+        </div>
+      </div>
     )
   }
 
+  /** ========== 主渲染入口 ========== */
+  if (isFormExcelConfig(layoutConfig)) {
+    return renderFormExcelGrid(layoutConfig as FormExcelConfig)
+  }
   if (hasValidLayout) {
     return (
-      <div className="space-y-6">
-        {layoutConfig!.groups.map((group: any) =>
-          isNewFormat(layoutConfig)
-            ? renderNewGroup(group)
-            : renderLegacyGroup(group)
-        )}
+      <div className="excel-form-wrapper">
+        {layoutConfig!.groups.map((group: any) => {
+          // 新版网格格式（有 rows 数组）
+          if (Array.isArray(group.rows) && group.rows.length > 0) {
+            return renderExcelGridGroup(group as FormLayoutGroup)
+          }
+          // 旧版 items 格式
+          if (Array.isArray(group.items)) {
+            return renderItemsGroup(group)
+          }
+          // 最旧版 fields 格式
+          return renderLegacyGroup(group)
+        })}
       </div>
     )
   }
 
+  // 无布局 fallback：单列行列表
   return (
-    <div className="space-y-6">
-      {formFields.map((field) => (
-        <div key={field.id} className={cn(
-          "space-y-2",
-          field.type === FieldType.UPLOAD_IMAGE || field.type === FieldType.UPLOAD_FILE ? "col-span-full" : ""
-        )}>
-          <Label className="flex items-center gap-1">
-            {field.label}
-            {field.required && <span className="text-red-500">*</span>}
-          </Label>
-          {renderField(field)}
-          {field.description && (
-            <p className="text-xs text-gray-500">{field.description}</p>
-          )}
+    <div className="excel-form-wrapper">
+      <div className="excel-form-group">
+        <div className="excel-grid" style={{ gridTemplateColumns: '1fr' }}>
+          {formFields.map((field, idx) => {
+            const isLast = idx === formFields.length - 1
+            return (
+              <div key={field.id} className={cn("excel-cell", isLast && "!border-b-0")}>
+                {renderFieldCell(field)}
+              </div>
+            )
+          })}
         </div>
-      ))}
+      </div>
     </div>
   )
 }

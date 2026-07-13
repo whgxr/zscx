@@ -758,9 +758,9 @@ async function exportTemplateExcel(
   const dataRowCount = dataStartRow >= 0 ? (dataEndRow - dataStartRow + 1) : 0
 
   // Helper to fill cells for a record at a given row offset
-  const fillRecordCells = (record: any, recordData: Record<string, any>, startRowIdx: number) => {
+  const fillRecordCells = (record: any, recordData: Record<string, any>, targetStartRow: number) => {
     for (let r = dataStartRow; r <= dataEndRow; r++) {
-      const targetRowIdx = startRowIdx + (r - dataStartRow)
+      const targetRowIdx = targetStartRow + (r - dataStartRow)
       const targetRow = worksheet.getRow(targetRowIdx + 1) // 1-based
       targetRow.height = rowHeights[r] || 20
 
@@ -845,12 +845,28 @@ async function exportTemplateExcel(
   }
 
   // Fill data for all records
-  if (dataStartRow >= 0 && dataRowCount > 0) {
+  if (dataStartRow >= 0 && dataRowCount > 0 && records.length > 1) {
+    // Insert new rows for records 2+ BEFORE filling data
+    // Each subsequent record needs dataRowCount rows inserted after the template data rows
+    const insertCount = (records.length - 1) * dataRowCount
+    if (insertCount > 0) {
+      // Insert blank rows after dataEndRow (1-based ExcelJS indexing)
+      worksheet.spliceRows(dataEndRow + 2, 0, ...Array(insertCount).fill({}))
+    }
+
+    // Now fill all records
     records.forEach((record, recordIdx) => {
       const recordData = (record.data as Record<string, any>) || {}
-      const startRowIdx = recordIdx * dataRowCount
-      fillRecordCells(record, recordData, startRowIdx)
+      // First record uses original dataStartRow position
+      // Subsequent records are placed after inserted rows
+      const targetStartRow = dataStartRow + recordIdx * dataRowCount
+      fillRecordCells(record, recordData, targetStartRow)
     })
+  } else if (dataStartRow >= 0 && dataRowCount > 0 && records.length === 1) {
+    // Single record - just fill the template data rows
+    const record = records[0]
+    const recordData = (record.data as Record<string, any>) || {}
+    fillRecordCells(record, recordData, dataStartRow)
   } else {
     // No data rows found, fill static content only for the first record
     if (records.length > 0) {

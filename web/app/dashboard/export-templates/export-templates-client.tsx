@@ -49,6 +49,7 @@ import {
   Printer,
   Download,
   Settings2,
+  Loader2,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { ExportType, DataTable, TableField, ExportTemplate } from '@prisma/client'
@@ -117,6 +118,9 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [sharingTemplate, setSharingTemplate] = useState<any>(null)
   const [sharedTableIds, setSharedTableIds] = useState<number[]>([])
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<number[]>([])
+  const [batchShareDialogOpen, setBatchShareDialogOpen] = useState(false)
+  const [batchLoading, setBatchLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     tableId: '',
@@ -299,6 +303,147 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
     setter({ ...target, categories: updated } as any)
   }
 
+  // 单个模板导出
+  const handleExportSingle = (template: TemplateWithTable) => {
+    const exportData = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      templates: [{
+        name: template.name,
+        type: template.type,
+        category: template.category,
+        description: template.description,
+        config: template.config,
+        isDefault: template.isDefault,
+        tableName: template.table?.name,
+        tableLabel: template.table?.label,
+      }],
+    }
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `模板_${template.name}_${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // 批量选择相关
+  const toggleSelectTemplate = (id: number) => {
+    setSelectedTemplateIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    )
+  }
+
+  const toggleSelectAllTemplates = () => {
+    const selectable = filteredTemplates.filter(t => !t.isSystem || isAdmin)
+    if (selectedTemplateIds.length === selectable.length) {
+      setSelectedTemplateIds([])
+    } else {
+      setSelectedTemplateIds(selectable.map(t => t.id))
+    }
+  }
+
+  // 批量导出
+  const handleBatchExport = () => {
+    if (selectedTemplateIds.length === 0) return
+    const selectedTemplates = templates.filter(t => selectedTemplateIds.includes(t.id))
+    const exportData = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      templates: selectedTemplates.map(t => ({
+        name: t.name,
+        type: t.type,
+        category: t.category,
+        description: t.description,
+        config: t.config,
+        isDefault: t.isDefault,
+        tableName: t.table?.name,
+        tableLabel: t.table?.label,
+      })),
+    }
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `模板批量导出_${selectedTemplateIds.length}个_${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // 批量删除
+  const handleBatchDelete = async () => {
+    if (selectedTemplateIds.length === 0) return
+    if (!confirm(`确定要删除选中的 ${selectedTemplateIds.length} 个模板吗？此操作不可撤销。`)) return
+
+    setBatchLoading(true)
+    try {
+      const results = await Promise.all(
+        selectedTemplateIds.map(id =>
+          fetch(`/api/export-templates/${id}`, { method: 'DELETE' })
+            .then(res => ({ id, ok: res.ok }))
+            .catch(() => ({ id, ok: false }))
+        )
+      )
+      const failed = results.filter(r => !r.ok)
+      if (failed.length > 0) {
+        alert(`${selectedTemplateIds.length - failed.length} 个模板删除成功，${failed.length} 个删除失败`)
+      } else {
+        alert(`成功删除 ${selectedTemplateIds.length} 个模板`)
+      }
+      setSelectedTemplateIds([])
+      router.refresh()
+    } catch (err) {
+      alert('批量删除失败')
+    } finally {
+      setBatchLoading(false)
+    }
+  }
+
+  // 批量分享
+  const handleBatchShareSave = async () => {
+    if (selectedTemplateIds.length === 0) return
+    setBatchLoading(true)
+    try {
+      const results = await Promise.all(
+        selectedTemplateIds.map(id =>
+          fetch(`/api/export-templates/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              isShared: sharedTableIds.length > 0,
+              sharedTableIds,
+            }),
+          }).then(res => ({ id, ok: res.ok }))
+            .catch(() => ({ id, ok: false }))
+        )
+      )
+      const failed = results.filter(r => !r.ok)
+      if (failed.length > 0) {
+        alert(`${selectedTemplateIds.length - failed.length} 个模板分享设置成功，${failed.length} 个失败`)
+      } else {
+        alert(`成功设置 ${selectedTemplateIds.length} 个模板的分享`)
+      }
+      setBatchShareDialogOpen(false)
+      setSelectedTemplateIds([])
+      setSharedTableIds([])
+      router.refresh()
+    } catch (err) {
+      alert('批量分享设置失败')
+    } finally {
+      setBatchLoading(false)
+    }
+  }
+
+  const openBatchShareDialog = () => {
+    setSharedTableIds([])
+    setBatchShareDialogOpen(true)
+  }
+
   const isAdmin = userRole === 'ADMIN'
 
   const filteredTemplates = templates.filter(t => hasCategory(t, activeCategory))
@@ -439,9 +584,37 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
           </div>
         </CardHeader>
         <CardContent className="pt-4">
+          {selectedTemplateIds.length > 0 && (
+            <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg mb-4">
+              <span className="text-sm text-gray-600">已选择 {selectedTemplateIds.length} 个模板</span>
+              <Button variant="outline" size="sm" onClick={handleBatchExport}>
+                <Download className="w-4 h-4 mr-1" />
+                批量导出
+              </Button>
+              <Button variant="outline" size="sm" onClick={openBatchShareDialog}>
+                <Share2 className="w-4 h-4 mr-1" />
+                批量分享
+              </Button>
+              <Button variant="destructive" size="sm" onClick={handleBatchDelete} disabled={batchLoading}>
+                {batchLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
+                批量删除
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedTemplateIds([])}>
+                取消选择
+              </Button>
+            </div>
+          )}
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    checked={filteredTemplates.length > 0 && filteredTemplates.filter(t => !t.isSystem || isAdmin).length === selectedTemplateIds.length}
+                    onChange={toggleSelectAllTemplates}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                </TableHead>
                 <TableHead>模板名称</TableHead>
                 <TableHead>所属表</TableHead>
                 <TableHead>类型</TableHead>
@@ -456,8 +629,19 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
                 filteredTemplates.map((template) => {
                   const TypeIcon = typeIcons[template.type] || TableIcon
                   const cats = parseCategories(template.category)
+                  const canModify = !template.isSystem || isAdmin
                   return (
                     <TableRow key={template.id}>
+                      <TableCell>
+                        {canModify && (
+                          <input
+                            type="checkbox"
+                            checked={selectedTemplateIds.includes(template.id)}
+                            onChange={() => toggleSelectTemplate(template.id)}
+                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                          />
+                        )}
+                      </TableCell>
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           <Palette className="w-4 h-4 text-primary" />
@@ -517,7 +701,15 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
-                          {(!template.isSystem || isAdmin) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="导出模板"
+                            onClick={() => handleExportSingle(template)}
+                          >
+                            <Download className="w-4 h-4" />
+                          </Button>
+                          {canModify && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -527,7 +719,7 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
                               <Settings2 className="w-4 h-4" />
                             </Button>
                           )}
-                          {(!template.isSystem || isAdmin) && (
+                          {canModify && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -537,7 +729,7 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
                               <Share2 className="w-4 h-4" />
                             </Button>
                           )}
-                          {(!template.isSystem || isAdmin) && (
+                          {canModify && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -555,7 +747,7 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12 text-gray-500">
+                  <TableCell colSpan={8} className="text-center py-12 text-gray-500">
                     <Palette className="w-12 h-12 mx-auto mb-2 opacity-50" />
                     <p>暂无{categoryLabels[activeCategory]}，点击右上角创建</p>
                   </TableCell>
@@ -681,6 +873,59 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
             </Button>
             <Button onClick={handleSaveShare}>
               保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 批量分享对话框 */}
+      <Dialog open={batchShareDialogOpen} onOpenChange={setBatchShareDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>批量共享模板</DialogTitle>
+            <DialogDescription>
+              将选中的 {selectedTemplateIds.length} 个模板共享给以下项目表，共享后其他表也可以使用这些模板导出
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="space-y-2">
+              <Label>共享给以下项目表</Label>
+              <div className="border rounded-lg max-h-80 overflow-y-auto">
+                {tables.map(table => (
+                  <div
+                    key={table.id}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b last:border-b-0"
+                    onClick={() => toggleSharedTable(table.id)}
+                  >
+                    <div className={
+                      'w-5 h-5 border rounded border-gray-300 flex items-center justify-center ' +
+                      (sharedTableIds.includes(table.id)
+                        ? 'bg-primary border-primary'
+                        : 'bg-white')
+                    }>
+                      {sharedTableIds.includes(table.id) && (
+                        <Check className="w-3.5 h-3.5 text-white" />
+                      )}
+                    </div>
+                    <span className="text-sm">{table.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchShareDialogOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleBatchShareSave} disabled={batchLoading}>
+              {batchLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  保存中...
+                </>
+              ) : (
+                `保存（${selectedTemplateIds.length} 个模板）`
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

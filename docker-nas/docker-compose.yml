@@ -41,8 +41,10 @@ services:
         condition: service_healthy
     volumes:
       - uploads:/app/public/uploads
+      - backups:/app/backups
     command: sh -c "node prisma/docker-migrate.js && npm start"
 
 volumes:
   mysql_data:
   uploads:
+  backups:
