@@ -52,6 +52,9 @@ import {
   Calculator,
   FileSpreadsheet,
   Settings,
+  Undo,
+  Copy,
+  ClipboardPaste,
 } from 'lucide-react'
 import { ExportTemplate, DataTable, TableField } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
@@ -67,22 +70,23 @@ interface ExcelTemplateDesignerProps {
   template: TemplateWithTable
 }
 
-function CellDisplay({ value, fields }: { value: string; fields: TableField[] }) {
+function CellDisplay({ value, fields }: { value: any; fields: TableField[] }) {
+  const safeValue = typeof value === 'string' ? value : value == null ? '' : String(value)
   const regex = new RegExp(FIELD_PATTERN, 'g')
   const parts: { text: string; isField: boolean }[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
 
-  while ((match = regex.exec(value)) !== null) {
+  while ((match = regex.exec(safeValue)) !== null) {
     if (match.index > lastIndex) {
-      parts.push({ text: value.slice(lastIndex, match.index), isField: false })
+      parts.push({ text: safeValue.slice(lastIndex, match.index), isField: false })
     }
     parts.push({ text: match[0], isField: true })
     lastIndex = regex.lastIndex
   }
 
-  if (lastIndex < value.length) {
-    parts.push({ text: value.slice(lastIndex), isField: false })
+  if (lastIndex < safeValue.length) {
+    parts.push({ text: safeValue.slice(lastIndex), isField: false })
   }
 
   return (
@@ -121,6 +125,15 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
   const resizingRow = useRef<number | null>(null)
   const resizeStartPos = useRef<number>(0)
   const resizeStartSize = useRef<number>(0)
+
+  // 剪贴板与撤销
+  const [clipboard, setClipboard] = useState<CellData[][] | null>(null)
+  const undoStack = useRef<CellData[][][]>([])
+  const undoRowHeights = useRef<number[][]>([])
+  const undoColWidths = useRef<number[][]>([])
+  const canUndo = undoStack.current.length > 0
+  const pushUndoRef = useRef<() => void>(() => {})
+  const undoRef = useRef<() => void>(() => {})
 
   const table = template.table
   const allFields = table.fields
@@ -162,6 +175,27 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
   const [rowHeights, setRowHeights] = useState<number[]>(initRowHeights)
   const [colWidths, setColWidths] = useState<number[]>(initColWidths)
 
+  // 更新撤销/重做函数引用（必须在所有相关 state 定义之后）
+  pushUndoRef.current = () => {
+    undoStack.current = undoStack.current.slice(-49)
+    undoRowHeights.current = undoRowHeights.current.slice(-49)
+    undoColWidths.current = undoColWidths.current.slice(-49)
+    undoStack.current.push(grid.map(r => r.map(c => ({ ...c }))))
+    undoRowHeights.current.push([...rowHeights])
+    undoColWidths.current.push([...colWidths])
+  }
+  undoRef.current = () => {
+    if (undoStack.current.length === 0) return
+    const prevGrid = undoStack.current.pop()!
+    const prevRH = undoRowHeights.current.pop()!
+    const prevCW = undoColWidths.current.pop()!
+    setGrid(prevGrid)
+    setRowHeights(prevRH)
+    setColWidths(prevCW)
+    setActiveCell(null)
+    setSelection(null)
+  }
+
   const initPageSetup = useCallback((): PageSetup => {
     const cfg = template.config as any
     if (cfg && cfg.pageSetup) {
@@ -188,7 +222,8 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
     return grid[row]?.[col] || emptyCell()
   }
 
-  const setCell = (row: number, col: number, data: Partial<CellData>) => {
+  const setCell = (row: number, col: number, data: Partial<CellData>, skipUndo?: boolean) => {
+    if (!skipUndo) pushUndoRef.current()
     setGrid(prev => {
       const newGrid = prev.map(r => r.map(c => ({ ...c })))
       newGrid[row] = newGrid[row] || []
@@ -197,11 +232,12 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
     })
   }
 
-  const setRangeStyle = (style: Partial<CellData>) => {
+  const setRangeStyle = (style: Partial<CellData>, skipUndo?: boolean) => {
     if (!selection) return
+    if (!skipUndo) pushUndoRef.current()
     if (style.fontSize !== undefined) {
       setRowHeights(prev => {
-        const newHeights = { ...prev }
+        const newHeights = [...prev]
         const neededHeight = Math.max(24, (style.fontSize ?? 11) * 1.6)
         for (let r = selection.start.row; r <= selection.end.row; r++) {
           if (!newHeights[r] || newHeights[r] < neededHeight) {
@@ -228,21 +264,64 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
     if (!selection) return
     const { start, end } = selection
     if (start.row === end.row && start.col === end.col) return
+    pushUndoRef.current()
 
-    const rowSpan = end.row - start.row + 1
-    const colSpan = end.col - start.col + 1
+    const minRow = Math.min(start.row, end.row)
+    const maxRow = Math.max(start.row, end.row)
+    const minCol = Math.min(start.col, end.col)
+    const maxCol = Math.max(start.col, end.col)
+    const rowSpan = maxRow - minRow + 1
+    const colSpan = maxCol - minCol + 1
 
     setGrid(prev => {
       const newGrid = prev.map(r => r.map(c => ({ ...c })))
-      const topLeftCell = { ...newGrid[start.row][start.col] }
-      topLeftCell.rowSpan = rowSpan
-      topLeftCell.colSpan = colSpan
-      newGrid[start.row][start.col] = topLeftCell
 
-      for (let r = start.row; r <= end.row; r++) {
-        for (let c = start.col; c <= end.col; c++) {
-          if (r === start.row && c === start.col) continue
-          newGrid[r][c] = { ...newGrid[r][c], mergeHidden: true }
+      // 第一步：扫描整个 grid，清除所有 owner cell 在选区内的合并区域
+      // 只清除 owner cell 落在选区中的合并，避免下方操作时误伤上方大合并
+      for (let r = 0; r < newGrid.length; r++) {
+        for (let c = 0; c < (newGrid[r]?.length || 0); c++) {
+          const cell = newGrid[r][c]
+          if (!cell?.rowSpan && !cell?.colSpan) continue
+
+          const endR = r + (cell.rowSpan || 1) - 1
+          const endC = c + (cell.colSpan || 1) - 1
+
+          // 只有合并区域的 owner cell 位于选区内时才清除
+          const ownerInSelection = r >= minRow && r <= maxRow && c >= minCol && c <= maxCol
+          // 额外安全：如果选区与合并区域有重叠且 owner cell 在选区内，才清除
+          const overlaps = r <= maxRow && endR >= minRow && c <= maxCol && endC >= minCol
+          if (ownerInSelection && overlaps) {
+            delete newGrid[r][c].rowSpan
+            delete newGrid[r][c].colSpan
+            for (let sr = r; sr <= endR; sr++) {
+              for (let sc = c; sc <= endC; sc++) {
+                if (sr === r && sc === c) continue
+                if (newGrid[sr]?.[sc]) delete newGrid[sr][sc].mergeHidden
+              }
+            }
+          }
+        }
+      }
+
+      // 第二步：清除选区内所有单元格的旧状态
+      for (let r = minRow; r <= maxRow; r++) {
+        for (let c = minCol; c <= maxCol; c++) {
+          if (newGrid[r]?.[c]) {
+            delete newGrid[r][c].rowSpan
+            delete newGrid[r][c].colSpan
+            delete newGrid[r][c].mergeHidden
+          }
+        }
+      }
+
+      // 第三步：设置新的合并
+      newGrid[minRow][minCol].rowSpan = rowSpan
+      newGrid[minRow][minCol].colSpan = colSpan
+      for (let r = minRow; r <= maxRow; r++) {
+        for (let c = minCol; c <= maxCol; c++) {
+          if (r === minRow && c === minCol) continue
+          if (!newGrid[r][c]) newGrid[r][c] = { value: '' }
+          newGrid[r][c].mergeHidden = true
         }
       }
       return newGrid
@@ -251,16 +330,58 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
 
   const unmergeCells = () => {
     if (!selection) return
-    const { start, end } = selection
+    pushUndoRef.current()
+    const selMinRow = Math.min(selection.start.row, selection.end.row)
+    const selMaxRow = Math.max(selection.start.row, selection.end.row)
+    const selMinCol = Math.min(selection.start.col, selection.end.col)
+    const selMaxCol = Math.max(selection.start.col, selection.end.col)
+    const isSingleCell = selMinRow === selMaxRow && selMinCol === selMaxCol
 
     setGrid(prev => {
       const newGrid = prev.map(r => r.map(c => ({ ...c })))
-      for (let r = start.row; r <= end.row; r++) {
-        for (let c = start.col; c <= end.col; c++) {
-          if (newGrid[r]?.[c]) {
-            delete newGrid[r][c].rowSpan
-            delete newGrid[r][c].colSpan
-            delete newGrid[r][c].mergeHidden
+
+      // 收集需要拆分的合并区域
+      const toSplit: Array<{ r: number; c: number; endR: number; endC: number }> = []
+      for (let r = selMinRow; r <= selMaxRow; r++) {
+        for (let c = selMinCol; c <= selMaxCol; c++) {
+          const cell = newGrid[r][c]
+          if (!cell?.rowSpan && !cell?.colSpan) continue
+          if (cell.mergeHidden) continue
+          const endR = r + (cell.rowSpan || 1) - 1
+          const endC = c + (cell.colSpan || 1) - 1
+
+          if (isSingleCell) {
+            // 单单元格选区：允许拆分该单元格的合并（用户明确点击了 owner cell）
+            toSplit.push({ r, c, endR, endC })
+          } else {
+            // 多单元格选区：只允许拆分左上角与选区左上角重合的合并区域
+            // 这样用户必须从合并区域的左上角开始拖拽选区，才能拆分它
+            // 防止从下方拖拽时意外包含上方大合并导致误拆分
+            if (r === selMinRow && c === selMinCol && endR <= selMaxRow && endC <= selMaxCol) {
+              toSplit.push({ r, c, endR, endC })
+            }
+          }
+        }
+      }
+
+      for (const { r, c, endR, endC } of toSplit) {
+        const cell = newGrid[r][c]
+        const ownerStyle: Record<string, any> = {}
+        for (const key of Object.keys(cell)) {
+          if (!['rowSpan', 'colSpan', 'value', 'mergeHidden'].includes(key)) {
+            ownerStyle[key] = (cell as any)[key]
+          }
+        }
+        delete cell.rowSpan
+        delete cell.colSpan
+        delete (cell as any).mergeHidden
+        // 子单元格：清空内容，保留样式
+        for (let sr = r; sr <= endR; sr++) {
+          for (let sc = c; sc <= endC; sc++) {
+            if (sr === r && sc === c) continue
+            if (newGrid[sr]?.[sc]) {
+              newGrid[sr][sc] = { value: '', ...ownerStyle }
+            }
           }
         }
       }
@@ -270,6 +391,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
 
   const setAllBorders = (borderStyle: string) => {
     if (!selection) return
+    pushUndoRef.current()
     setGrid(prev => {
       const newGrid = prev.map(r => r.map(c => ({ ...c })))
       for (let r = selection.start.row; r <= selection.end.row; r++) {
@@ -291,6 +413,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
 
   const clearAllBorders = () => {
     if (!selection) return
+    pushUndoRef.current()
     setGrid(prev => {
       const newGrid = prev.map(r => r.map(c => ({ ...c })))
       for (let r = selection.start.row; r <= selection.end.row; r++) {
@@ -413,6 +536,109 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Ctrl+S 保存
+    if (e.ctrlKey && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault()
+      handleSave()
+      return
+    }
+    // Ctrl+Z 撤销
+    if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault()
+      undoRef.current()
+      return
+    }
+    // Ctrl+A 全选
+    if (e.ctrlKey && (e.key === 'a' || e.key === 'A')) {
+      e.preventDefault()
+      if (grid.length > 0 && grid[0].length > 0) {
+        setSelection({
+          start: { row: 0, col: 0 },
+          end: { row: grid.length - 1, col: grid[0].length - 1 },
+        })
+        setActiveCell({ row: 0, col: 0 })
+      }
+      return
+    }
+    // Ctrl+C 复制
+    if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault()
+      if (!selection) return
+      const minRow = Math.min(selection.start.row, selection.end.row)
+      const maxRow = Math.max(selection.start.row, selection.end.row)
+      const minCol = Math.min(selection.start.col, selection.end.col)
+      const maxCol = Math.max(selection.start.col, selection.end.col)
+      const copied: CellData[][] = []
+      for (let r = minRow; r <= maxRow; r++) {
+        const row: CellData[] = []
+        for (let c = minCol; c <= maxCol; c++) {
+          row.push({ ...getCell(r, c) })
+        }
+        copied.push(row)
+      }
+      setClipboard(copied)
+      return
+    }
+    // Ctrl+V 粘贴
+    if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
+      e.preventDefault()
+      if (!clipboard || !activeCell) return
+      pushUndoRef.current()
+      const clipRows = clipboard.length
+      const clipCols = clipboard[0]?.length || 0
+      setGrid(prev => {
+        const newGrid = prev.map(r => r.map(c => ({ ...c })))
+        for (let r = 0; r < clipRows; r++) {
+          const targetRow = activeCell.row + r
+          if (targetRow >= newGrid.length) continue
+          for (let c = 0; c < clipCols; c++) {
+            const targetCol = activeCell.col + c
+            if (targetCol >= newGrid[targetRow].length) continue
+            const src = clipboard[r][c]
+            newGrid[targetRow][targetCol] = {
+              ...newGrid[targetRow][targetCol],
+              value: src.value,
+              bold: src.bold,
+              italic: src.italic,
+              underline: src.underline,
+              align: src.align,
+              verticalAlign: src.verticalAlign,
+              bgColor: src.bgColor,
+              textColor: src.textColor,
+              fontSize: src.fontSize,
+              wrapText: src.wrapText,
+              textOrientation: src.textOrientation,
+              borderTop: src.borderTop,
+              borderBottom: src.borderBottom,
+              borderLeft: src.borderLeft,
+              borderRight: src.borderRight,
+            }
+          }
+        }
+        return newGrid
+      })
+      return
+    }
+    // Delete 清除内容
+    if (e.key === 'Delete') {
+      e.preventDefault()
+      if (!selection) return
+      pushUndoRef.current()
+      setGrid(prev => {
+        const newGrid = prev.map(r => r.map(c => ({ ...c })))
+        for (let r = selection.start.row; r <= selection.end.row; r++) {
+          for (let c = selection.start.col; c <= selection.end.col; c++) {
+            if (newGrid[r]?.[c]) {
+              newGrid[r][c].value = ''
+              delete newGrid[r][c].formula
+            }
+          }
+        }
+        return newGrid
+      })
+      return
+    }
+
     if (!activeCell) return
     if (e.key === 'ArrowUp' && activeCell.row > 0) {
       const newRow = activeCell.row - 1
@@ -529,6 +755,23 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
         }
       })
 
+      // 归一化：确保所有合并区域的 mergeHidden 一致性
+      for (let r = 0; r < newGrid.length; r++) {
+        for (let c = 0; c < newGrid[r].length; c++) {
+          const cell = newGrid[r][c]
+          if (cell.mergeHidden) continue
+          const rs = cell.rowSpan || 1
+          const cs = cell.colSpan || 1
+          if (rs <= 1 && cs <= 1) continue
+          for (let sr = r; sr < r + rs; sr++) {
+            for (let sc = c; sc < c + cs; sc++) {
+              if (sr === r && sc === c) continue
+              if (newGrid[sr]?.[sc]) newGrid[sr][sc].mergeHidden = true
+            }
+          }
+        }
+      }
+
       setGrid(newGrid)
       setRowHeights(newRowHeights)
       setColWidths(newColWidths)
@@ -595,6 +838,20 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
       })
     })
     return count
+  }
+
+  const getSelectionLabel = (): string => {
+    if (!selection) return ''
+    const minRow = Math.min(selection.start.row, selection.end.row)
+    const maxRow = Math.max(selection.start.row, selection.end.row)
+    const minCol = Math.min(selection.start.col, selection.end.col)
+    const maxCol = Math.max(selection.start.col, selection.end.col)
+    const startColLabel = getColLabel(minCol)
+    const endColLabel = getColLabel(maxCol)
+    if (minRow === maxRow && minCol === maxCol) {
+      return `选中: ${startColLabel}${minRow + 1}`
+    }
+    return `选中: ${startColLabel}${minRow + 1}:${endColLabel}${maxRow + 1} (${maxRow - minRow + 1}×${maxCol - minCol + 1})`
   }
 
   const fieldCount = countFields()
@@ -687,10 +944,11 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                                 backgroundColor: cell.bgColor,
                                 color: cell.textColor,
                                 fontSize: cell.fontSize ? cell.fontSize + 'px' : undefined,
+                                writingMode: cell.textOrientation === 'vertical' ? 'vertical-rl' : 'horizontal-tb',
                                 width: colWidths[cIdx] || 100,
                               }}
                             >
-                              {cell.value || '\u00A0'}
+                              {typeof cell.value === 'string' ? (cell.value || '\u00A0') : String(cell.value ?? '')}
                             </td>
                           )
                         })}
@@ -714,6 +972,19 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
       <Card>
         <CardContent className="p-3">
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="撤销 (Ctrl+Z)"
+                onClick={undo}
+                disabled={!canUndo}
+              >
+                <Undo className="w-4 h-4" />
+              </Button>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-1">
               <Button
                 variant="ghost"
@@ -836,6 +1107,12 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
               >
                 <Unlink className="w-4 h-4" />
               </Button>
+              {/* 选区范围显示 */}
+              {selection && (
+                <span className="text-[11px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded ml-1">
+                  {getSelectionLabel()}
+                </span>
+              )}
             </div>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-1">
@@ -897,6 +1174,27 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                 onClick={() => setRangeStyle({ verticalAlign: 'bottom' })}
               >
                 <ChevronDown className="w-4 h-4" />
+              </Button>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="横排文字"
+                onClick={() => setRangeStyle({ textOrientation: 'horizontal' })}
+              >
+                <span className="text-xs font-bold">T</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="竖排文字"
+                onClick={() => setRangeStyle({ textOrientation: 'vertical' })}
+              >
+                <span className="text-xs font-bold" style={{ writingMode: 'vertical-rl' }}>T</span>
               </Button>
             </div>
             <Separator orientation="vertical" className="h-6" />
@@ -1284,6 +1582,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                               color: cell.textColor,
                               fontSize: cell.fontSize ? cell.fontSize + 'px' : '11px',
                               whiteSpace: cell.wrapText ? 'pre-wrap' : 'nowrap',
+                              writingMode: cell.textOrientation === 'vertical' ? 'vertical-rl' : 'horizontal-tb',
                               borderTop: cell.borderTop,
                               borderBottom: cell.borderBottom,
                               borderLeft: cell.borderLeft,
@@ -1295,7 +1594,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                             {active ? (
                               <input
                                 autoFocus
-                                value={cell.value}
+                                value={typeof cell.value === 'string' ? cell.value : String(cell.value ?? '')}
                                 onChange={(e) => handleCellEdit(rIdx, cIdx, e.target.value)}
                                 onBlur={() => {}}
                                 className="w-full h-full bg-transparent outline-none"
