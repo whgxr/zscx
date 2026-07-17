@@ -216,7 +216,228 @@ async function main() {
     `)
   }
 
-  // ==================== 5. 创建默认管理员（如果没有用户） ====================
+  // ==================== 6. Role 表扩展 - 添加新权限字段 (迭代 1.2.2) ====================
+  console.log('6. 扩展 Role 表权限字段...')
+  if (tableNames.includes('role')) {
+    const roleCols = await prisma.$queryRaw`DESCRIBE \`Role\``
+    const roleColNames = roleCols.map(c => c.Field)
+    if (!roleColNames.includes('canManageApproval')) {
+      console.log('   给 Role 添加 canManageApproval 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `Role` ADD COLUMN `canManageApproval` TINYINT(1) NOT NULL DEFAULT 0')
+      await prisma.$executeRawUnsafe('UPDATE `Role` SET `canManageApproval` = 1 WHERE `name` IN ("ADMIN", "MANAGER")')
+    }
+    if (!roleColNames.includes('canPublishNotification')) {
+      console.log('   给 Role 添加 canPublishNotification 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `Role` ADD COLUMN `canPublishNotification` TINYINT(1) NOT NULL DEFAULT 0')
+      await prisma.$executeRawUnsafe('UPDATE `Role` SET `canPublishNotification` = 1 WHERE `name` IN ("ADMIN", "MANAGER")')
+    }
+  }
+
+  // ==================== 7. 创建审批流程相关表 (迭代 1.2.2) ====================
+  console.log('7. 创建审批流程相关表...')
+  if (!tableNames.includes('approvalworkflow')) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`ApprovalWorkflow\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`name\` VARCHAR(191) NOT NULL,
+        \`tableId\` INT NOT NULL,
+        \`description\` TEXT NULL,
+        \`status\` ENUM('ACTIVE','INACTIVE','DRAFT') NOT NULL DEFAULT 'ACTIVE',
+        \`version\` INT NOT NULL DEFAULT 1,
+        \`canvasData\` LONGTEXT NULL,
+        \`createdBy\` INT NULL,
+        \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        INDEX \`ApprovalWorkflow_tableId_idx\` (\`tableId\`),
+        INDEX \`ApprovalWorkflow_status_idx\` (\`status\`),
+        INDEX \`ApprovalWorkflow_version_idx\` (\`version\`),
+        CONSTRAINT \`ApprovalWorkflow_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ ApprovalWorkflow 表创建完成')
+  }
+
+  if (!tableNames.includes('approvalnode')) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`ApprovalNode\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`workflowId\` INT NOT NULL,
+        \`nodeType\` ENUM('ROLE','USER','FIELD','CONDITION') NOT NULL,
+        \`nodeOrder\` INT NOT NULL,
+        \`nodeName\` VARCHAR(191) NOT NULL,
+        \`roleId\` INT NULL,
+        \`userId\` INT NULL,
+        \`fieldName\` VARCHAR(191) NULL,
+        \`canView\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`canEdit\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`canApprove\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`canTransfer\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`timeout\` INT NULL,
+        \`timeoutAction\` ENUM('AUTO_PASS','AUTO_REJECT','NONE') NULL,
+        \`conditionField\` VARCHAR(191) NULL,
+        \`conditionOp\` VARCHAR(191) NULL,
+        \`conditionValue\` VARCHAR(191) NULL,
+        \`nextNodeTrue\` INT NULL,
+        \`nextNodeFalse\` INT NULL,
+        \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        INDEX \`ApprovalNode_workflowId_idx\` (\`workflowId\`),
+        INDEX \`ApprovalNode_nodeOrder_idx\` (\`nodeOrder\`),
+        CONSTRAINT \`ApprovalNode_workflowId_fkey\` FOREIGN KEY (\`workflowId\`) REFERENCES \`ApprovalWorkflow\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalNode_roleId_fkey\` FOREIGN KEY (\`roleId\`) REFERENCES \`Role\`(\`id\`) ON DELETE SET NULL,
+        CONSTRAINT \`ApprovalNode_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ ApprovalNode 表创建完成')
+  }
+
+  if (!tableNames.includes('approvalinstance')) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`ApprovalInstance\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`workflowId\` INT NOT NULL,
+        \`tableId\` INT NOT NULL,
+        \`recordId\` INT NOT NULL,
+        \`currentNodeId\` INT NULL,
+        \`status\` ENUM('PENDING','APPROVED','REJECTED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+        \`initiatorId\` INT NULL,
+        \`startedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        \`completedAt\` DATETIME(3) NULL,
+        \`cancelledAt\` DATETIME(3) NULL,
+        \`cancelReason\` TEXT NULL,
+        INDEX \`ApprovalInstance_workflowId_idx\` (\`workflowId\`),
+        INDEX \`ApprovalInstance_tableId_idx\` (\`tableId\`),
+        INDEX \`ApprovalInstance_recordId_idx\` (\`recordId\`),
+        INDEX \`ApprovalInstance_status_idx\` (\`status\`),
+        INDEX \`ApprovalInstance_initiatorId_idx\` (\`initiatorId\`),
+        CONSTRAINT \`ApprovalInstance_workflowId_fkey\` FOREIGN KEY (\`workflowId\`) REFERENCES \`ApprovalWorkflow\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalInstance_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalInstance_recordId_fkey\` FOREIGN KEY (\`recordId\`) REFERENCES \`DataRecord\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalInstance_initiatorId_fkey\` FOREIGN KEY (\`initiatorId\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ ApprovalInstance 表创建完成')
+  }
+
+  if (!tableNames.includes('approvalnodeinstance')) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`ApprovalNodeInstance\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`instanceId\` INT NOT NULL,
+        \`nodeId\` INT NOT NULL,
+        \`assigneeId\` INT NULL,
+        \`status\` ENUM('PENDING','APPROVED','REJECTED','TRANSFERRED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+        \`action\` ENUM('APPROVE','REJECT','TRANSFER','CANCEL') NULL,
+        \`comment\` TEXT NULL,
+        \`transferredTo\` INT NULL,
+        \`processedAt\` DATETIME(3) NULL,
+        \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        UNIQUE INDEX \`ApprovalNodeInstance_instanceId_nodeId_assigneeId_key\` (\`instanceId\`, \`nodeId\`, \`assigneeId\`),
+        INDEX \`ApprovalNodeInstance_instanceId_idx\` (\`instanceId\`),
+        INDEX \`ApprovalNodeInstance_assigneeId_idx\` (\`assigneeId\`),
+        INDEX \`ApprovalNodeInstance_status_idx\` (\`status\`),
+        CONSTRAINT \`ApprovalNodeInstance_instanceId_fkey\` FOREIGN KEY (\`instanceId\`) REFERENCES \`ApprovalInstance\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalNodeInstance_nodeId_fkey\` FOREIGN KEY (\`nodeId\`) REFERENCES \`ApprovalNode\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalNodeInstance_assigneeId_fkey\` FOREIGN KEY (\`assigneeId\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL,
+        CONSTRAINT \`ApprovalNodeInstance_transferredTo_fkey\` FOREIGN KEY (\`transferredTo\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ ApprovalNodeInstance 表创建完成')
+  }
+
+  // ==================== 8. 创建第三方绑定表 (迭代 1.2.2) ====================
+  console.log('8. 创建第三方绑定表...')
+  if (!tableNames.includes('userthirdpartybinding')) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`UserThirdPartyBinding\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`userId\` INT NOT NULL,
+        \`platform\` ENUM('FEISHU','WEWORK') NOT NULL,
+        \`platformUserId\` VARCHAR(191) NOT NULL,
+        \`platformUserName\` VARCHAR(191) NOT NULL,
+        \`accessToken\` TEXT NULL,
+        \`refreshToken\` TEXT NULL,
+        \`expiresAt\` DATETIME(3) NULL,
+        \`status\` ENUM('ACTIVE','EXPIRED','UNBOUND') NOT NULL DEFAULT 'ACTIVE',
+        \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        UNIQUE INDEX \`UserThirdPartyBinding_userId_platform_key\` (\`userId\`, \`platform\`),
+        INDEX \`UserThirdPartyBinding_userId_idx\` (\`userId\`),
+        INDEX \`UserThirdPartyBinding_platform_idx\` (\`platform\`),
+        INDEX \`UserThirdPartyBinding_platformUserId_idx\` (\`platformUserId\`),
+        CONSTRAINT \`UserThirdPartyBinding_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ UserThirdPartyBinding 表创建完成')
+  }
+
+  // ==================== 9. 创建通知相关表 (迭代 1.2.2) ====================
+  console.log('9. 创建通知相关表...')
+  if (!tableNames.includes('notification')) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`Notification\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`type\` ENUM('SYSTEM','BUSINESS','APPROVAL','ALERT') NOT NULL,
+        \`title\` VARCHAR(191) NOT NULL,
+        \`content\` TEXT NOT NULL,
+        \`targetType\` ENUM('ALL','ROLE','USER') NOT NULL,
+        \`targetRoleId\` INT NULL,
+        \`targetUserIds\` LONGTEXT NULL,
+        \`priority\` ENUM('LOW','NORMAL','HIGH','URGENT') NOT NULL DEFAULT 'NORMAL',
+        \`linkUrl\` VARCHAR(191) NULL,
+        \`linkParams\` LONGTEXT NULL,
+        \`createdBy\` INT NULL,
+        \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        \`expiredAt\` DATETIME(3) NULL,
+        INDEX \`Notification_type_idx\` (\`type\`),
+        INDEX \`Notification_targetType_idx\` (\`targetType\`),
+        INDEX \`Notification_createdAt_idx\` (\`createdAt\`),
+        INDEX \`Notification_expiredAt_idx\` (\`expiredAt\`),
+        CONSTRAINT \`Notification_createdBy_fkey\` FOREIGN KEY (\`createdBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ Notification 表创建完成')
+  }
+
+  if (!tableNames.includes('notificationread')) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`NotificationRead\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`notificationId\` INT NOT NULL,
+        \`userId\` INT NOT NULL,
+        \`readAt\` DATETIME(3) NULL,
+        \`isDeleted\` TINYINT(1) NOT NULL DEFAULT 0,
+        UNIQUE INDEX \`NotificationRead_notificationId_userId_key\` (\`notificationId\`, \`userId\`),
+        INDEX \`NotificationRead_userId_idx\` (\`userId\`),
+        INDEX \`NotificationRead_readAt_idx\` (\`readAt\`),
+        CONSTRAINT \`NotificationRead_notificationId_fkey\` FOREIGN KEY (\`notificationId\`) REFERENCES \`Notification\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`NotificationRead_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ NotificationRead 表创建完成')
+  }
+
+  if (!tableNames.includes('notificationsendlog')) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`NotificationSendLog\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`notificationId\` INT NOT NULL,
+        \`userId\` INT NOT NULL,
+        \`channel\` ENUM('INTERNAL','FEISHU','WEWORK') NOT NULL,
+        \`status\` ENUM('PENDING','SUCCESS','FAILED') NOT NULL DEFAULT 'PENDING',
+        \`sentAt\` DATETIME(3) NULL,
+        \`errorMessage\` TEXT NULL,
+        INDEX \`NotificationSendLog_notificationId_idx\` (\`notificationId\`),
+        INDEX \`NotificationSendLog_userId_idx\` (\`userId\`),
+        INDEX \`NotificationSendLog_status_idx\` (\`status\`),
+        CONSTRAINT \`NotificationSendLog_notificationId_fkey\` FOREIGN KEY (\`notificationId\`) REFERENCES \`Notification\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`NotificationSendLog_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ NotificationSendLog 表创建完成')
+  }
+
+  // ==================== 10. 创建默认管理员（如果没有用户） ====================
   if (hasUserTable || tableNames.includes('user')) {
     const userCount = await prisma.$queryRaw`SELECT COUNT(*) as c FROM \`User\``
     if (userCount[0].c === 0) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, LogOut, User } from 'lucide-react'
+import { LogOut, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { NotificationCenter } from '@/components/notification-center'
 import { Role } from '@prisma/client'
 
 interface HeaderProps {
@@ -74,9 +75,7 @@ export function Header({ user }: HeaderProps) {
         </h2>
       </div>
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon">
-          <Bell className="w-5 h-5 text-gray-500" />
-        </Button>
+        <NotificationCenter onNavigate={(url) => router.push(url)} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="gap-2">

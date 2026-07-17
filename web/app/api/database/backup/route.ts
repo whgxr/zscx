@@ -2,24 +2,56 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { exec } from 'child_process'
-import { promisify } from 'util'
 import fs from 'fs/promises'
 import path from 'path'
-
-const execAsync = promisify(exec)
+import { createReadStream, createWriteStream } from 'fs'
+import { createGzip } from 'zlib'
+import { pipeline } from 'stream/promises'
 
 const BACKUP_DIR = path.join(process.cwd(), 'backups')
 
 // 解析 DATABASE_URL 获取连接信息
 function parseDbUrl() {
   const url = new URL(process.env.DATABASE_URL || '')
+  const protocol = url.protocol.replace(':', '')
+  const isPostgres = protocol === 'postgres' || protocol === 'postgresql'
   return {
     host: url.hostname,
-    port: url.port || '3306',
+    port: url.port || (isPostgres ? '5432' : '3306'),
     user: url.username,
     password: url.password,
     database: url.pathname.slice(1),
+    type: isPostgres ? 'postgres' : 'mysql' as const,
   }
+}
+
+// 使用 exec 执行命令并返回 stdout（不使用 shell 重定向，避免 Windows 环境问题）
+function execWithOutput(cmd: string, timeout: number = 300000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = exec(cmd, { timeout, maxBuffer: 1024 * 1024 * 100 })
+    let stdout = ''
+    let stderr = ''
+    
+    child.stdout?.on('data', (data) => {
+      stdout += data
+    })
+    
+    child.stderr?.on('data', (data) => {
+      stderr += data
+    })
+    
+    child.on('error', (err) => {
+      reject(new Error(`Command error: ${err.message}`))
+    })
+    
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Command exited with code ${code}: ${stderr}`))
+      } else {
+        resolve(stdout)
+      }
+    })
+  })
 }
 
 // 创建备份
@@ -45,19 +77,56 @@ export async function POST(req: NextRequest) {
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const fileName = `db_backup_${dateStr}.sql.gz`
     const filePath = path.join(BACKUP_DIR, fileName)
+    const sqlFilePath = filePath.replace(/\.gz$/, '')
 
-    // 使用 mysqldump 备份数据库，通过管道压缩
-    const dumpCmd = `mysqldump -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' --single-transaction --routines --triggers --quick ${dbInfo.database} | gzip > "${filePath}"`
+    // 根据数据库类型选择备份命令
+    let dumpCmd: string
+    if (dbInfo.type === 'postgres') {
+      dumpCmd = `PGPASSWORD=${dbInfo.password} pg_dump -h ${dbInfo.host} -p ${dbInfo.port} -U ${dbInfo.user} -d ${dbInfo.database} -F p`
+    } else {
+      dumpCmd = `mysqldump -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' --single-transaction --routines --triggers --quick --skip-ssl ${dbInfo.database}`
+    }
 
+    let dumpOutput: string
     try {
-      await execAsync(dumpCmd, { timeout: 300000, maxBuffer: 1024 * 1024 * 100 })
+      dumpOutput = await execWithOutput(dumpCmd)
     } catch (dumpError: any) {
-      console.error('mysqldump error:', dumpError)
+      console.error('dump error:', dumpError)
       return NextResponse.json(
-        { message: '数据库备份失败：' + (dumpError.message || '执行mysqldump命令失败') },
+        { message: '数据库备份失败：' + (dumpError.message || '执行备份命令失败') },
         { status: 500 }
       )
     }
+
+    // 将备份内容写入临时 .sql 文件
+    try {
+      await fs.writeFile(sqlFilePath, dumpOutput, 'utf8')
+    } catch (writeError: any) {
+      console.error('Write sql file error:', writeError)
+      return NextResponse.json(
+        { message: '写入备份文件失败：' + (writeError.message || '未知错误') },
+        { status: 500 }
+      )
+    }
+
+    // 使用 Node.js zlib 压缩为 .sql.gz（跨平台，不依赖 gzip 命令）
+    try {
+      await pipeline(
+        createReadStream(sqlFilePath),
+        createGzip(),
+        createWriteStream(filePath)
+      )
+    } catch (gzipError: any) {
+      console.error('gzip error:', gzipError)
+      try { await fs.unlink(sqlFilePath) } catch {}
+      return NextResponse.json(
+        { message: '压缩备份文件失败：' + (gzipError.message || '未知错误') },
+        { status: 500 }
+      )
+    }
+
+    // 清理临时 .sql 文件
+    try { await fs.unlink(sqlFilePath) } catch {}
 
     // 获取文件大小
     const stats = await fs.stat(filePath)

@@ -466,6 +466,11 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
   const handleCellClick = (row: number, col: number) => {
     setActiveCell({ row, col })
     setSelection({ start: { row, col }, end: { row, col } })
+  }
+
+  const handleCellMouseDown = (row: number, col: number) => {
+    setActiveCell({ row, col })
+    setSelection({ start: { row, col }, end: { row, col } })
     isSelecting.current = true
   }
 
@@ -978,7 +983,7 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                 size="icon"
                 className="h-8 w-8"
                 title="撤销 (Ctrl+Z)"
-                onClick={undo}
+                onClick={undoRef.current}
                 disabled={!canUndo}
               >
                 <Undo className="w-4 h-4" />
@@ -1588,7 +1593,8 @@ export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) 
                               borderLeft: cell.borderLeft,
                               borderRight: cell.borderRight,
                             }}
-                            onMouseDown={() => handleCellClick(rIdx, cIdx)}
+                            onMouseDown={() => handleCellMouseDown(rIdx, cIdx)}
+                            onClick={() => handleCellClick(rIdx, cIdx)}
                             onMouseEnter={() => handleCellMouseEnter(rIdx, cIdx)}
                           >
                             {active ? (

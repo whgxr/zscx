@@ -504,6 +504,252 @@ async function main() {
 
   await conn.execute(`INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`, \`updatedAt\`) VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）', NOW()) ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`), \`updatedAt\`=NOW()`)
   
+  // ==================== 16. Role 表扩展 - 添加新权限字段 ====================
+  console.log('\n16. 扩展 Role 表权限字段...')
+  const [roleCols] = await conn.execute('DESCRIBE `Role`')
+  const roleColNames = roleCols.map(c => c.Field)
+  if (!roleColNames.includes('canManageApproval')) {
+    await conn.execute('ALTER TABLE `Role` ADD COLUMN `canManageApproval` TINYINT(1) NOT NULL DEFAULT 0')
+    await conn.execute('UPDATE `Role` SET `canManageApproval` = 1 WHERE `name` IN ("ADMIN", "MANAGER")')
+  }
+  if (!roleColNames.includes('canPublishNotification')) {
+    await conn.execute('ALTER TABLE `Role` ADD COLUMN `canPublishNotification` TINYINT(1) NOT NULL DEFAULT 0')
+    await conn.execute('UPDATE `Role` SET `canPublishNotification` = 1 WHERE `name` IN ("ADMIN", "MANAGER")')
+  }
+  
+  // ==================== 17. ApprovalWorkflow 审批流程表 ====================
+  console.log('\n17. 创建 ApprovalWorkflow 表...')
+  if (!tableNames.includes('approvalworkflow')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`ApprovalWorkflow\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`name\` VARCHAR(191) NOT NULL,
+        \`tableId\` INT NOT NULL,
+        \`description\` TEXT NULL,
+        \`status\` ENUM('ACTIVE','INACTIVE','DRAFT') NOT NULL DEFAULT 'ACTIVE',
+        \`version\` INT NOT NULL DEFAULT 1,
+        \`canvasData\` LONGTEXT NULL,
+        \`createdBy\` INT NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updatedAt\` DATETIME NULL,
+        INDEX \`ApprovalWorkflow_tableId_idx\` (\`tableId\`),
+        INDEX \`ApprovalWorkflow_status_idx\` (\`status\`),
+        INDEX \`ApprovalWorkflow_version_idx\` (\`version\`),
+        CONSTRAINT \`ApprovalWorkflow_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    await createUpdateTrigger('ApprovalWorkflow')
+    console.log('   ✅ ApprovalWorkflow 表创建完成')
+  } else {
+    console.log('   ApprovalWorkflow 表已存在')
+  }
+  
+  // ==================== 18. ApprovalNode 审批节点表 ====================
+  console.log('\n18. 创建 ApprovalNode 表...')
+  if (!tableNames.includes('approvalnode')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`ApprovalNode\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`workflowId\` INT NOT NULL,
+        \`nodeType\` ENUM('ROLE','USER','FIELD','CONDITION') NOT NULL,
+        \`nodeOrder\` INT NOT NULL,
+        \`nodeName\` VARCHAR(191) NOT NULL,
+        \`roleId\` INT NULL,
+        \`userId\` INT NULL,
+        \`fieldName\` VARCHAR(191) NULL,
+        \`canView\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`canEdit\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`canApprove\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`canTransfer\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`timeout\` INT NULL,
+        \`timeoutAction\` ENUM('AUTO_PASS','AUTO_REJECT','NONE') NULL,
+        \`conditionField\` VARCHAR(191) NULL,
+        \`conditionOp\` VARCHAR(191) NULL,
+        \`conditionValue\` VARCHAR(191) NULL,
+        \`nextNodeTrue\` INT NULL,
+        \`nextNodeFalse\` INT NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updatedAt\` DATETIME NULL,
+        INDEX \`ApprovalNode_workflowId_idx\` (\`workflowId\`),
+        INDEX \`ApprovalNode_nodeOrder_idx\` (\`nodeOrder\`),
+        CONSTRAINT \`ApprovalNode_workflowId_fkey\` FOREIGN KEY (\`workflowId\`) REFERENCES \`ApprovalWorkflow\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalNode_roleId_fkey\` FOREIGN KEY (\`roleId\`) REFERENCES \`Role\`(\`id\`) ON DELETE SET NULL,
+        CONSTRAINT \`ApprovalNode_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    await createUpdateTrigger('ApprovalNode')
+    console.log('   ✅ ApprovalNode 表创建完成')
+  } else {
+    console.log('   ApprovalNode 表已存在')
+  }
+  
+  // ==================== 19. ApprovalInstance 审批实例表 ====================
+  console.log('\n19. 创建 ApprovalInstance 表...')
+  if (!tableNames.includes('approvalinstance')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`ApprovalInstance\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`workflowId\` INT NOT NULL,
+        \`tableId\` INT NOT NULL,
+        \`recordId\` INT NOT NULL,
+        \`currentNodeId\` INT NULL,
+        \`status\` ENUM('PENDING','APPROVED','REJECTED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+        \`initiatorId\` INT NULL,
+        \`startedAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`completedAt\` DATETIME NULL,
+        \`cancelledAt\` DATETIME NULL,
+        \`cancelReason\` TEXT NULL,
+        INDEX \`ApprovalInstance_workflowId_idx\` (\`workflowId\`),
+        INDEX \`ApprovalInstance_tableId_idx\` (\`tableId\`),
+        INDEX \`ApprovalInstance_recordId_idx\` (\`recordId\`),
+        INDEX \`ApprovalInstance_status_idx\` (\`status\`),
+        INDEX \`ApprovalInstance_initiatorId_idx\` (\`initiatorId\`),
+        CONSTRAINT \`ApprovalInstance_workflowId_fkey\` FOREIGN KEY (\`workflowId\`) REFERENCES \`ApprovalWorkflow\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalInstance_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalInstance_recordId_fkey\` FOREIGN KEY (\`recordId\`) REFERENCES \`DataRecord\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalInstance_initiatorId_fkey\` FOREIGN KEY (\`initiatorId\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ ApprovalInstance 表创建完成')
+  } else {
+    console.log('   ApprovalInstance 表已存在')
+  }
+  
+  // ==================== 20. ApprovalNodeInstance 节点审批实例表 ====================
+  console.log('\n20. 创建 ApprovalNodeInstance 表...')
+  if (!tableNames.includes('approvalnodeinstance')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`ApprovalNodeInstance\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`instanceId\` INT NOT NULL,
+        \`nodeId\` INT NOT NULL,
+        \`assigneeId\` INT NULL,
+        \`status\` ENUM('PENDING','APPROVED','REJECTED','TRANSFERRED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+        \`action\` ENUM('APPROVE','REJECT','TRANSFER','CANCEL') NULL,
+        \`comment\` TEXT NULL,
+        \`transferredTo\` INT NULL,
+        \`processedAt\` DATETIME NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE INDEX \`ApprovalNodeInstance_instanceId_nodeId_assigneeId_key\` (\`instanceId\`, \`nodeId\`, \`assigneeId\`),
+        INDEX \`ApprovalNodeInstance_instanceId_idx\` (\`instanceId\`),
+        INDEX \`ApprovalNodeInstance_assigneeId_idx\` (\`assigneeId\`),
+        INDEX \`ApprovalNodeInstance_status_idx\` (\`status\`),
+        CONSTRAINT \`ApprovalNodeInstance_instanceId_fkey\` FOREIGN KEY (\`instanceId\`) REFERENCES \`ApprovalInstance\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalNodeInstance_nodeId_fkey\` FOREIGN KEY (\`nodeId\`) REFERENCES \`ApprovalNode\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`ApprovalNodeInstance_assigneeId_fkey\` FOREIGN KEY (\`assigneeId\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL,
+        CONSTRAINT \`ApprovalNodeInstance_transferredTo_fkey\` FOREIGN KEY (\`transferredTo\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ ApprovalNodeInstance 表创建完成')
+  } else {
+    console.log('   ApprovalNodeInstance 表已存在')
+  }
+  
+  // ==================== 21. UserThirdPartyBinding 第三方绑定表 ====================
+  console.log('\n21. 创建 UserThirdPartyBinding 表...')
+  if (!tableNames.includes('userthirdpartybinding')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`UserThirdPartyBinding\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`userId\` INT NOT NULL,
+        \`platform\` ENUM('FEISHU','WEWORK') NOT NULL,
+        \`platformUserId\` VARCHAR(191) NOT NULL,
+        \`platformUserName\` VARCHAR(191) NOT NULL,
+        \`accessToken\` TEXT NULL,
+        \`refreshToken\` TEXT NULL,
+        \`expiresAt\` DATETIME NULL,
+        \`status\` ENUM('ACTIVE','EXPIRED','UNBOUND') NOT NULL DEFAULT 'ACTIVE',
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updatedAt\` DATETIME NULL,
+        UNIQUE INDEX \`UserThirdPartyBinding_userId_platform_key\` (\`userId\`, \`platform\`),
+        INDEX \`UserThirdPartyBinding_userId_idx\` (\`userId\`),
+        INDEX \`UserThirdPartyBinding_platform_idx\` (\`platform\`),
+        INDEX \`UserThirdPartyBinding_platformUserId_idx\` (\`platformUserId\`),
+        CONSTRAINT \`UserThirdPartyBinding_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    await createUpdateTrigger('UserThirdPartyBinding')
+    console.log('   ✅ UserThirdPartyBinding 表创建完成')
+  } else {
+    console.log('   UserThirdPartyBinding 表已存在')
+  }
+  
+  // ==================== 22. Notification 通知表 ====================
+  console.log('\n22. 创建 Notification 表...')
+  if (!tableNames.includes('notification')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`Notification\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`type\` ENUM('SYSTEM','BUSINESS','APPROVAL','ALERT') NOT NULL,
+        \`title\` VARCHAR(191) NOT NULL,
+        \`content\` TEXT NOT NULL,
+        \`targetType\` ENUM('ALL','ROLE','USER') NOT NULL,
+        \`targetRoleId\` INT NULL,
+        \`targetUserIds\` LONGTEXT NULL,
+        \`priority\` ENUM('LOW','NORMAL','HIGH','URGENT') NOT NULL DEFAULT 'NORMAL',
+        \`linkUrl\` VARCHAR(191) NULL,
+        \`linkParams\` LONGTEXT NULL,
+        \`createdBy\` INT NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`expiredAt\` DATETIME NULL,
+        INDEX \`Notification_type_idx\` (\`type\`),
+        INDEX \`Notification_targetType_idx\` (\`targetType\`),
+        INDEX \`Notification_createdAt_idx\` (\`createdAt\`),
+        INDEX \`Notification_expiredAt_idx\` (\`expiredAt\`),
+        CONSTRAINT \`Notification_createdBy_fkey\` FOREIGN KEY (\`createdBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ Notification 表创建完成')
+  } else {
+    console.log('   Notification 表已存在')
+  }
+  
+  // ==================== 23. NotificationRead 通知阅读状态表 ====================
+  console.log('\n23. 创建 NotificationRead 表...')
+  if (!tableNames.includes('notificationread')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`NotificationRead\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`notificationId\` INT NOT NULL,
+        \`userId\` INT NOT NULL,
+        \`readAt\` DATETIME NULL,
+        \`isDeleted\` TINYINT(1) NOT NULL DEFAULT 0,
+        UNIQUE INDEX \`NotificationRead_notificationId_userId_key\` (\`notificationId\`, \`userId\`),
+        INDEX \`NotificationRead_userId_idx\` (\`userId\`),
+        INDEX \`NotificationRead_readAt_idx\` (\`readAt\`),
+        CONSTRAINT \`NotificationRead_notificationId_fkey\` FOREIGN KEY (\`notificationId\`) REFERENCES \`Notification\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`NotificationRead_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ NotificationRead 表创建完成')
+  } else {
+    console.log('   NotificationRead 表已存在')
+  }
+  
+  // ==================== 24. NotificationSendLog 通知发送日志表 ====================
+  console.log('\n24. 创建 NotificationSendLog 表...')
+  if (!tableNames.includes('notificationsendlog')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`NotificationSendLog\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`notificationId\` INT NOT NULL,
+        \`userId\` INT NOT NULL,
+        \`channel\` ENUM('INTERNAL','FEISHU','WEWORK') NOT NULL,
+        \`status\` ENUM('PENDING','SUCCESS','FAILED') NOT NULL DEFAULT 'PENDING',
+        \`sentAt\` DATETIME NULL,
+        \`errorMessage\` TEXT NULL,
+        INDEX \`NotificationSendLog_notificationId_idx\` (\`notificationId\`),
+        INDEX \`NotificationSendLog_userId_idx\` (\`userId\`),
+        INDEX \`NotificationSendLog_status_idx\` (\`status\`),
+        CONSTRAINT \`NotificationSendLog_notificationId_fkey\` FOREIGN KEY (\`notificationId\`) REFERENCES \`Notification\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`NotificationSendLog_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ NotificationSendLog 表创建完成')
+  } else {
+    console.log('   NotificationSendLog 表已存在')
+  }
+  
   // ==================== 验证 ====================
   console.log('\n✅ 迁移完成！')
   const [finalTables] = await conn.execute('SHOW TABLES')

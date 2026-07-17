@@ -15,6 +15,7 @@ export interface CellData {
   borderRight?: string
   wrapText?: boolean
   textOrientation?: 'horizontal' | 'vertical'
+  layoutDirection?: 'vertical' | 'horizontal'
   rowSpan?: number
   colSpan?: number
   mergeHidden?: boolean

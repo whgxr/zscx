@@ -13,6 +13,8 @@ import {
   Palette,
   Activity,
   FolderTree,
+  GitBranch,
+  Bell,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Role } from '@prisma/client'
@@ -100,6 +102,44 @@ export function Sidebar({ user, tables }: SidebarProps) {
               {table.label}
             </Link>
           ))}
+        </div>
+
+        {isAdmin && (
+          <div className="mb-2">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 mb-2">
+              审批管理
+            </p>
+            <Link
+              href="/dashboard/approval"
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+                pathname.startsWith('/dashboard/approval')
+                  ? "bg-primary/10 text-primary font-medium"
+                  : "text-gray-600 hover:bg-gray-100"
+              )}
+            >
+              <GitBranch className="w-5 h-5" />
+              审批流程
+            </Link>
+          </div>
+        )}
+
+        <div className="mb-2">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 mb-2">
+            通知中心
+          </p>
+          <Link
+            href="/dashboard/notifications"
+            className={cn(
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+              pathname.startsWith('/dashboard/notifications')
+                ? "bg-primary/10 text-primary font-medium"
+                : "text-gray-600 hover:bg-gray-100"
+            )}
+          >
+            <Bell className="w-5 h-5" />
+            通知管理
+          </Link>
         </div>
 
         {isAdmin && (
