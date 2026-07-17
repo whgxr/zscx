@@ -837,7 +837,12 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" tabIndex={0} onKeyDown={(e) => {
+      if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
+        e.preventDefault()
+        openCreateDialog()
+      }
+    }}>
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => router.back()}>
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -1059,7 +1064,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
 
                     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                       <DialogTrigger asChild>
-                        <Button onClick={openCreateDialog}>
+                        <Button onClick={openCreateDialog} title="快捷键: Ctrl+N">
                           <Plus className="w-4 h-4 mr-2" />
                           添加字段
                         </Button>

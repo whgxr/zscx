@@ -19,6 +19,7 @@ import {
   Save, Upload, Eye, Bold, Italic, Underline,
   AlignLeft, AlignCenter, AlignRight, Palette, Type, Plus, Trash2,
   Database, Merge, Unlink, Grid3x3, Minus, Calculator, Settings, X, Search,
+  Loader2, Undo,
 } from 'lucide-react'
 import * as ExcelJS from 'exceljs'
 import { CellData, PageSetup, FIELD_PATTERN, getColLabel, emptyCell } from '@/types/cell-data'
@@ -29,21 +30,22 @@ import {
 
 /* ===================== 单元格显示组件 ===================== */
 
-function CellDisplay({ value, fields }: { value: string; fields: TableField[] }) {
+function CellDisplay({ value, fields }: { value: any; fields: TableField[] }) {
+  const safeValue = typeof value === 'string' ? value : value == null ? '' : String(value)
   const regex = new RegExp(FIELD_PATTERN, 'g')
   const parts: { text: string; isField: boolean }[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
 
-  while ((match = regex.exec(value)) !== null) {
+  while ((match = regex.exec(safeValue)) !== null) {
     if (match.index > lastIndex) {
-      parts.push({ text: value.slice(lastIndex, match.index), isField: false })
+      parts.push({ text: safeValue.slice(lastIndex, match.index), isField: false })
     }
     parts.push({ text: match[0], isField: true })
     lastIndex = regex.lastIndex
   }
-  if (lastIndex < value.length) {
-    parts.push({ text: value.slice(lastIndex), isField: false })
+  if (lastIndex < safeValue.length) {
+    parts.push({ text: safeValue.slice(lastIndex), isField: false })
   }
 
   return (
@@ -179,6 +181,7 @@ export default function FormExcelDesigner({
   } | null>(null)
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [formulaDialogOpen, setFormulaDialogOpen] = useState(false)
   const [pageSetupDialogOpen, setPageSetupDialogOpen] = useState(false)
@@ -193,7 +196,31 @@ export default function FormExcelDesigner({
     ? migrateFormLayoutToExcel(initialConfig)
     : defaultFormExcelConfig()
 
-  const [grid, setGrid] = useState<CellData[][]>(initConfig.grid)
+  // 归一化 grid：确保合并区域的 mergeHidden 一致性
+  const normalizedGrid = useCallback((g: CellData[][]): CellData[][] => {
+    const ng = g.map(r => r.map(c => ({ ...c })))
+    for (let r = 0; r < ng.length; r++) {
+      for (let c = 0; c < (ng[r]?.length || 0); c++) {
+        const cell = ng[r][c]
+        if (cell.mergeHidden) continue
+        const rs = cell.rowSpan || 1
+        const cs = cell.colSpan || 1
+        if (rs <= 1 && cs <= 1) continue
+        // 标记所有被覆盖的子单元格
+        for (let sr = r; sr < r + rs; sr++) {
+          for (let sc = c; sc < c + cs; sc++) {
+            if (sr === r && sc === c) continue
+            if (ng[sr]?.[sc]) {
+              ng[sr][sc].mergeHidden = true
+            }
+          }
+        }
+      }
+    }
+    return ng
+  }, [])
+
+  const [grid, setGrid] = useState<CellData[][]>(normalizedGrid(initConfig.grid))
   const [rowHeights, setRowHeights] = useState<number[]>(initConfig.rowHeights)
   const [colWidths, setColWidths] = useState<number[]>(initConfig.colWidths)
   const [pageSetup, setPageSetup] = useState<PageSetup>(initConfig.pageSetup)
@@ -205,6 +232,34 @@ export default function FormExcelDesigner({
   const resizingCol = useRef<number | null>(null)
   const resizeStartPos = useRef<number>(0)
   const resizeStartSize = useRef<number>(0)
+
+  // 剪贴板与撤销
+  const [clipboard, setClipboard] = useState<CellData[][] | null>(null)
+  const undoStack = useRef<CellData[][][]>([])
+  const undoRowHeights = useRef<number[][]>([])
+  const undoColWidths = useRef<number[][]>([])
+  const canUndo = undoStack.current.length > 0
+
+  const pushUndo = useCallback(() => {
+    undoStack.current = undoStack.current.slice(-49)
+    undoRowHeights.current = undoRowHeights.current.slice(-49)
+    undoColWidths.current = undoColWidths.current.slice(-49)
+    undoStack.current.push(grid.map(r => r.map(c => ({ ...c }))))
+    undoRowHeights.current.push([...rowHeights])
+    undoColWidths.current.push([...colWidths])
+  }, [grid, rowHeights, colWidths])
+
+  const undo = useCallback(() => {
+    if (undoStack.current.length === 0) return
+    const prevGrid = undoStack.current.pop()!
+    const prevRH = undoRowHeights.current.pop()!
+    const prevCW = undoColWidths.current.pop()!
+    setGrid(prevGrid)
+    setRowHeights(prevRH)
+    setColWidths(prevCW)
+    setActiveCell(null)
+    setSelection(null)
+  }, [])
 
   // 加载可选子表
   useEffect(() => {
@@ -225,14 +280,16 @@ export default function FormExcelDesigner({
     return emptyCell()
   }
 
-  const setCell = useCallback((row: number, col: number, data: Partial<CellData>) => {
+  const setCell = useCallback((row: number, col: number, data: Partial<CellData>, skipUndo?: boolean) => {
+    if (!skipUndo) pushUndo()
     setGrid(prev => prev.map((r, ri) =>
       ri !== row ? r : r.map((c, ci) => ci !== col ? c : { ...c, ...data })
     ))
-  }, [])
+  }, [pushUndo])
 
-  const setRangeStyle = useCallback((style: Partial<CellData>) => {
+  const setRangeStyle = useCallback((style: Partial<CellData>, skipUndo?: boolean) => {
     if (!selection) return
+    if (!skipUndo) pushUndo()
     const minRow = Math.min(selection.start.row, selection.end.row)
     const maxRow = Math.max(selection.start.row, selection.end.row)
     const minCol = Math.min(selection.start.col, selection.end.col)
@@ -263,42 +320,137 @@ export default function FormExcelDesigner({
     const minCol = Math.min(selection.start.col, selection.end.col)
     const maxCol = Math.max(selection.start.col, selection.end.col)
     if (minRow === maxRow && minCol === maxCol) return
+    pushUndo()
 
-    setGrid(prev => prev.map((row, ri) =>
-      row.map((cell, ci) => {
-        if (ri === minRow && ci === minCol) {
-          return { ...cell, rowSpan: maxRow - minRow + 1, colSpan: maxCol - minCol + 1 }
+    setGrid(prev => {
+      // 深拷贝整个 grid
+      const newGrid = prev.map(r => r.map(c => ({ ...c })))
+
+      // 第一步：扫描整个 grid，清除所有 owner cell 在选区内的合并区域
+      // 只清除 owner cell 落在选区中的合并，避免下方操作时误伤上方大合并
+      for (let r = 0; r < newGrid.length; r++) {
+        for (let c = 0; c < (newGrid[r]?.length || 0); c++) {
+          const cell = newGrid[r][c]
+          if (!cell?.rowSpan && !cell?.colSpan) continue
+
+          const endR = r + (cell.rowSpan || 1) - 1
+          const endC = c + (cell.colSpan || 1) - 1
+
+          // 只有合并区域的 owner cell 位于选区内时才清除
+          const ownerInSelection = r >= minRow && r <= maxRow && c >= minCol && c <= maxCol
+          // 额外安全：如果选区与合并区域有重叠且 owner cell 在选区内，才清除
+          const overlaps = r <= maxRow && endR >= minRow && c <= maxCol && endC >= minCol
+          if (ownerInSelection && overlaps) {
+            // 完整拆分此合并区域
+            delete newGrid[r][c].rowSpan
+            delete newGrid[r][c].colSpan
+            for (let sr = r; sr <= endR; sr++) {
+              for (let sc = c; sc <= endC; sc++) {
+                if (sr === r && sc === c) continue
+                if (newGrid[sr]?.[sc]) delete newGrid[sr][sc].mergeHidden
+              }
+            }
+          }
         }
-        if (ri >= minRow && ri <= maxRow && ci >= minCol && ci <= maxCol) {
-          return { ...cell, mergeHidden: true }
+      }
+
+      // 第二步：清除选区内所有单元格的旧状态（保险）
+      for (let r = minRow; r <= maxRow; r++) {
+        for (let c = minCol; c <= maxCol; c++) {
+          if (newGrid[r]?.[c]) {
+            delete newGrid[r][c].rowSpan
+            delete newGrid[r][c].colSpan
+            delete newGrid[r][c].mergeHidden
+          }
         }
-        return cell
-      })
-    ))
+      }
+
+      // 第三步：设置新的合并
+      newGrid[minRow][minCol].rowSpan = maxRow - minRow + 1
+      newGrid[minRow][minCol].colSpan = maxCol - minCol + 1
+      for (let r = minRow; r <= maxRow; r++) {
+        for (let c = minCol; c <= maxCol; c++) {
+          if (r === minRow && c === minCol) continue
+          if (!newGrid[r][c]) newGrid[r][c] = { value: '' }
+          newGrid[r][c].mergeHidden = true
+        }
+      }
+
+      return newGrid
+    })
   }, [selection])
 
   const unmergeCells = useCallback(() => {
     if (!selection) return
-    const minRow = Math.min(selection.start.row, selection.end.row)
-    const maxRow = Math.max(selection.start.row, selection.end.row)
-    const minCol = Math.min(selection.start.col, selection.end.col)
-    const maxCol = Math.max(selection.start.col, selection.end.col)
+    pushUndo()
+    const selMinRow = Math.min(selection.start.row, selection.end.row)
+    const selMaxRow = Math.max(selection.start.row, selection.end.row)
+    const selMinCol = Math.min(selection.start.col, selection.end.col)
+    const selMaxCol = Math.max(selection.start.col, selection.end.col)
+    const isSingleCell = selMinRow === selMaxRow && selMinCol === selMaxCol
 
-    setGrid(prev => prev.map((row, ri) =>
-      row.map((cell, ci) => {
-        if (ri >= minRow && ri <= maxRow && ci >= minCol && ci <= maxCol) {
-          const { rowSpan, colSpan, mergeHidden, ...rest } = cell
-          return rest
+    setGrid(prev => {
+      const newGrid = prev.map(r => r.map(c => ({ ...c })))
+
+      // 收集需要拆分的合并区域
+      const toSplit: Array<{ r: number; c: number; endR: number; endC: number }> = []
+      for (let r = selMinRow; r <= selMaxRow; r++) {
+        for (let c = selMinCol; c <= selMaxCol; c++) {
+          const cell = newGrid[r][c]
+          if (!cell?.rowSpan && !cell?.colSpan) continue
+          // 只处理合并区域的左上角（非 mergeHidden 的 owner）
+          if (cell.mergeHidden) continue
+          const endR = r + (cell.rowSpan || 1) - 1
+          const endC = c + (cell.colSpan || 1) - 1
+
+          if (isSingleCell) {
+            // 单单元格选区：允许拆分该单元格的合并（用户明确点击了 owner cell）
+            toSplit.push({ r, c, endR, endC })
+          } else {
+            // 多单元格选区：只允许拆分左上角与选区左上角重合的合并区域
+            // 这样用户必须从合并区域的左上角开始拖拽选区，才能拆分它
+            // 防止从下方拖拽时意外包含上方大合并导致误拆分
+            if (r === selMinRow && c === selMinCol && endR <= selMaxRow && endC <= selMaxCol) {
+              toSplit.push({ r, c, endR, endC })
+            }
+          }
         }
-        return cell
-      })
-    ))
+      }
+
+      for (const { r, c, endR, endC } of toSplit) {
+        const cell = newGrid[r][c]
+        // 保留 owner 样式
+        const ownerStyle: Record<string, any> = {}
+        for (const key of Object.keys(cell)) {
+          if (!['rowSpan', 'colSpan', 'value', 'mergeHidden'].includes(key)) {
+            ownerStyle[key] = (cell as any)[key]
+          }
+        }
+
+        // 清除合并状态
+        delete cell.rowSpan
+        delete cell.colSpan
+        delete (cell as any).mergeHidden
+        // 子单元格：清空内容，保留样式
+        for (let sr = r; sr <= endR; sr++) {
+          for (let sc = c; sc <= endC; sc++) {
+            if (sr === r && sc === c) continue
+            if (newGrid[sr]?.[sc]) {
+              newGrid[sr][sc] = { value: '', ...ownerStyle }
+            }
+          }
+        }
+      }
+
+      return newGrid
+    })
   }, [selection])
 
   /* ---- 边框 ---- */
 
   const setAllBorders = useCallback((borderStyle: string) => {
     if (!selection) return
+    pushUndo()
     const minRow = Math.min(selection.start.row, selection.end.row)
     const maxRow = Math.max(selection.start.row, selection.end.row)
     const minCol = Math.min(selection.start.col, selection.end.col)
@@ -314,10 +466,11 @@ export default function FormExcelDesigner({
         }
       })
     ))
-  }, [selection])
+  }, [selection, pushUndo])
 
   const clearAllBorders = useCallback(() => {
     if (!selection) return
+    pushUndo()
     const minRow = Math.min(selection.start.row, selection.end.row)
     const maxRow = Math.max(selection.start.row, selection.end.row)
     const minCol = Math.min(selection.start.col, selection.end.col)
@@ -401,6 +554,109 @@ export default function FormExcelDesigner({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Ctrl+S 保存
+    if (e.ctrlKey && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault()
+      handleSave()
+      return
+    }
+    // Ctrl+Z 撤销
+    if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault()
+      undo()
+      return
+    }
+    // Ctrl+A 全选
+    if (e.ctrlKey && (e.key === 'a' || e.key === 'A')) {
+      e.preventDefault()
+      if (grid.length > 0 && grid[0].length > 0) {
+        setSelection({
+          start: { row: 0, col: 0 },
+          end: { row: grid.length - 1, col: grid[0].length - 1 },
+        })
+        setActiveCell({ row: 0, col: 0 })
+      }
+      return
+    }
+    // Ctrl+C 复制
+    if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault()
+      if (!selection) return
+      const minRow = Math.min(selection.start.row, selection.end.row)
+      const maxRow = Math.max(selection.start.row, selection.end.row)
+      const minCol = Math.min(selection.start.col, selection.end.col)
+      const maxCol = Math.max(selection.start.col, selection.end.col)
+      const copied: CellData[][] = []
+      for (let r = minRow; r <= maxRow; r++) {
+        const row: CellData[] = []
+        for (let c = minCol; c <= maxCol; c++) {
+          row.push({ ...getCell(r, c) })
+        }
+        copied.push(row)
+      }
+      setClipboard(copied)
+      return
+    }
+    // Ctrl+V 粘贴
+    if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
+      e.preventDefault()
+      if (!clipboard || !activeCell) return
+      pushUndo()
+      const clipRows = clipboard.length
+      const clipCols = clipboard[0]?.length || 0
+      setGrid(prev => {
+        const newGrid = prev.map(r => r.map(c => ({ ...c })))
+        for (let r = 0; r < clipRows; r++) {
+          const targetRow = activeCell.row + r
+          if (targetRow >= newGrid.length) continue
+          for (let c = 0; c < clipCols; c++) {
+            const targetCol = activeCell.col + c
+            if (targetCol >= newGrid[targetRow].length) continue
+            const src = clipboard[r][c]
+            newGrid[targetRow][targetCol] = {
+              ...newGrid[targetRow][targetCol],
+              value: src.value,
+              bold: src.bold,
+              italic: src.italic,
+              underline: src.underline,
+              align: src.align,
+              verticalAlign: src.verticalAlign,
+              bgColor: src.bgColor,
+              textColor: src.textColor,
+              fontSize: src.fontSize,
+              wrapText: src.wrapText,
+              textOrientation: src.textOrientation,
+              borderTop: src.borderTop,
+              borderBottom: src.borderBottom,
+              borderLeft: src.borderLeft,
+              borderRight: src.borderRight,
+            }
+          }
+        }
+        return newGrid
+      })
+      return
+    }
+    // Delete 清除内容
+    if (e.key === 'Delete') {
+      e.preventDefault()
+      if (!selection) return
+      pushUndo()
+      setGrid(prev => {
+        const newGrid = prev.map(r => r.map(c => ({ ...c })))
+        for (let r = selection.start.row; r <= selection.end.row; r++) {
+          for (let c = selection.start.col; c <= selection.end.col; c++) {
+            if (newGrid[r]?.[c]) {
+              newGrid[r][c].value = ''
+              delete newGrid[r][c].formula
+            }
+          }
+        }
+        return newGrid
+      })
+      return
+    }
+
     if (!activeCell) return
     const { row, col } = activeCell
     let newRow = row, newCol = col
@@ -440,62 +696,99 @@ export default function FormExcelDesigner({
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    setImporting(true)
     try {
       const buffer = await file.arrayBuffer()
       const workbook = new ExcelJS.Workbook()
       await workbook.xlsx.load(buffer)
       const ws = workbook.worksheets[0]
-      if (!ws) return
+      if (!ws) { setImporting(false); return }
+
+      const MAX_IMPORT_ROWS = 50
+      const MAX_IMPORT_COLS = 15
 
       const newGrid: CellData[][] = []
       const newRowHeights: number[] = []
       const newColWidths: number[] = []
 
+      // 列宽（限制列数）
       if (ws.columns) {
-        ws.columns.forEach(col => {
+        ws.columns.slice(0, MAX_IMPORT_COLS).forEach(col => {
           newColWidths.push(col.width ? col.width * 7 : 100)
         })
       }
+      if (newColWidths.length === 0) {
+        for (let i = 0; i < MAX_IMPORT_COLS; i++) newColWidths.push(100)
+      }
 
+      // 行数据（限制行数，跳过全空行）
       ws.eachRow((row, _rowNum) => {
+        if (newGrid.length >= MAX_IMPORT_ROWS) return
         const cells: CellData[] = []
-        let maxCol = row.cellCount
-        if (ws.columns && ws.columns.length > maxCol) maxCol = ws.columns.length
+        const maxCol = Math.min(
+          Math.max(row.cellCount, ws.columns?.length || 0),
+          MAX_IMPORT_COLS
+        )
+        let hasContent = false
 
         for (let i = 1; i <= maxCol; i++) {
           const cell = row.getCell(i)
-          const cellData: CellData = { value: cell.text || '' }
-          if (cell.font) {
-            if (cell.font.bold) cellData.bold = true
-            if (cell.font.italic) cellData.italic = true
-            if (cell.font.underline) cellData.underline = true
-            if (cell.font.size) cellData.fontSize = cell.font.size
-            if (cell.font.color?.argb) cellData.textColor = cell.font.color.argb
+          let cellValue = ''
+          if (cell.value !== null && cell.value !== undefined) {
+            if (typeof cell.value === 'object') {
+              cellValue = String((cell.value as any).text ?? (cell.value as any).richText ?? '')
+            } else {
+              cellValue = String(cell.value)
+            }
           }
-          if (cell.fill && 'fgColor' in cell.fill && (cell.fill as any).fgColor?.argb) cellData.bgColor = (cell.fill as any).fgColor.argb
-          if (cell.alignment) {
-            if (cell.alignment.horizontal) cellData.align = cell.alignment.horizontal as any
-            if (cell.alignment.vertical) cellData.verticalAlign = cell.alignment.vertical as any
-            if (cell.alignment.wrapText) cellData.wrapText = true
-          }
+          if (cellValue.trim()) hasContent = true
+          const cellData: CellData = { value: cellValue }
+          try {
+            if (cell.font) {
+              if (cell.font.bold) cellData.bold = true
+              if (cell.font.italic) cellData.italic = true
+              if (cell.font.underline) cellData.underline = true
+              if (cell.font.size) cellData.fontSize = cell.font.size
+              if (cell.font.color?.argb) cellData.textColor = cell.font.color.argb
+            }
+            if (cell.fill && 'fgColor' in cell.fill && (cell.fill as any).fgColor?.argb) cellData.bgColor = (cell.fill as any).fgColor.argb
+            if (cell.alignment) {
+              if (cell.alignment.horizontal) cellData.align = cell.alignment.horizontal as any
+              if (cell.alignment.vertical) cellData.verticalAlign = cell.alignment.vertical as any
+              if (cell.alignment.wrapText) cellData.wrapText = true
+            }
+          } catch {}
           cells.push(cellData)
         }
+        // 补齐到 maxCol
+        while (cells.length < maxCol) cells.push({ value: '' })
         newGrid.push(cells)
         newRowHeights.push(24)
       })
 
+      // 如果一行数据都没有，至少保留一行
+      if (newGrid.length === 0) {
+        const emptyRow: CellData[] = Array.from({ length: newColWidths.length }, () => ({ value: '' }))
+        newGrid.push(emptyRow)
+        newRowHeights.push(24)
+      }
+
       // 合并单元格
       if (ws.model?.merges) {
-        for (const merge of ws.model.merges as any[]) {
-          const { tl, br } = merge
-          const minRow = tl.r - 1, maxRow = br.r - 1
-          const minCol = tl.c - 1, maxCol = br.c - 1
+        for (const merge of ws.model.merges as string[]) {
+          const [startRef, endRef] = merge.split(':')
+          if (!startRef || !endRef) continue
+          const startCell = ws.getCell(startRef) as any
+          const endCell = ws.getCell(endRef) as any
+          const minRow = (startCell.row as number) - 1, maxRow = (endCell.row as number) - 1
+          const minCol = (startCell.col as number) - 1, maxCol = (endCell.col as number) - 1
+          if (minRow >= newGrid.length || minCol >= newColWidths.length) continue
           if (newGrid[minRow]?.[minCol]) {
-            newGrid[minRow][minCol].rowSpan = maxRow - minRow + 1
-            newGrid[minRow][minCol].colSpan = maxCol - minCol + 1
+            newGrid[minRow][minCol].rowSpan = Math.min(maxRow - minRow + 1, newGrid.length - minRow)
+            newGrid[minRow][minCol].colSpan = Math.min(maxCol - minCol + 1, newColWidths.length - minCol)
           }
-          for (let r = minRow; r <= maxRow; r++) {
-            for (let c = minCol; c <= maxCol; c++) {
+          for (let r = minRow; r <= Math.min(maxRow, newGrid.length - 1); r++) {
+            for (let c = minCol; c <= Math.min(maxCol, newColWidths.length - 1); c++) {
               if (r === minRow && c === minCol) continue
               if (newGrid[r]?.[c]) newGrid[r][c].mergeHidden = true
             }
@@ -503,13 +796,29 @@ export default function FormExcelDesigner({
         }
       }
 
-      setGrid(newGrid)
-      if (newColWidths.length > 0) setColWidths(newColWidths)
-      if (newRowHeights.length > 0) setRowHeights(newRowHeights)
+      // 确保所有行长度与列宽一致
+      const targetCols = newColWidths.length
+      for (const row of newGrid) {
+        while (row.length < targetCols) row.push({ value: '' })
+      }
+
+      // 先关闭对话框，再更新状态（解耦渲染）
       setImportDialogOpen(false)
+      // 用 setTimeout 把状态更新放到下一个事件循环，让 UI 先响应
+      setTimeout(() => {
+        // 归一化 mergeHidden 标记，确保合并区域一致性
+        setGrid(normalizedGrid(newGrid))
+        setColWidths(newColWidths)
+        setRowHeights(newRowHeights)
+        setImporting(false)
+        // 重置 file input
+        if (fileInputRef.current) fileInputRef.current.value = ''
+      }, 50)
     } catch (err) {
       console.error('Import error:', err)
-      alert('导入 Excel 失败')
+      alert('导入 Excel 失败: ' + (err instanceof Error ? err.message : String(err)))
+      setImporting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -590,6 +899,20 @@ export default function FormExcelDesigner({
     return grid[activeCell.row]?.[activeCell.col]?.[key]
   }
 
+  const getSelectionLabel = (): string => {
+    if (!selection) return ''
+    const minRow = Math.min(selection.start.row, selection.end.row)
+    const maxRow = Math.max(selection.start.row, selection.end.row)
+    const minCol = Math.min(selection.start.col, selection.end.col)
+    const maxCol = Math.max(selection.start.col, selection.end.col)
+    const startColLabel = getColLabel(minCol)
+    const endColLabel = getColLabel(maxCol)
+    if (minRow === maxRow && minCol === maxCol) {
+      return `选中: ${startColLabel}${minRow + 1}`
+    }
+    return `选中: ${startColLabel}${minRow + 1}:${endColLabel}${maxRow + 1} (${maxRow - minRow + 1}×${maxCol - minCol + 1})`
+  }
+
   /* ===================== 渲染 ===================== */
 
   return (
@@ -604,6 +927,11 @@ export default function FormExcelDesigner({
           <Badge variant="outline" className="text-xs">
             {countFields()}个字段绑定
           </Badge>
+          {selection && (
+            <Badge variant="default" className="text-xs bg-blue-100 text-blue-700 hover:bg-blue-100">
+              {getSelectionLabel()}
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
@@ -625,6 +953,13 @@ export default function FormExcelDesigner({
       <Card>
         <CardContent className="p-2">
           <div className="flex flex-wrap items-center gap-1">
+            <Button variant="ghost" size="sm" className="w-8 h-8"
+              title="撤销 (Ctrl+Z)"
+              onClick={undo}
+              disabled={!canUndo}>
+              <Undo className="w-4 h-4" />
+            </Button>
+            <Separator orientation="vertical" className="h-6 mx-1" />
             <Button variant="ghost" size="sm" className="w-8 h-8"
               onClick={() => setRangeStyle({ bold: !getActiveCellStyle('bold') })}>
               <Bold className="w-4 h-4" />
@@ -685,6 +1020,12 @@ export default function FormExcelDesigner({
               title="取消合并">
               <Unlink className="w-4 h-4" />
             </Button>
+            {/* 选区范围显示 */}
+            {selection && (
+              <span className="text-[11px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded ml-1">
+                {getSelectionLabel()}
+              </span>
+            )}
             <Separator orientation="vertical" className="h-6 mx-1" />
 
             <Button variant="ghost" size="sm" className="w-8 h-8"
@@ -694,6 +1035,18 @@ export default function FormExcelDesigner({
             <Button variant="ghost" size="sm" className="w-8 h-8" onClick={clearAllBorders}
               title="清除边框">
               <X className="w-4 h-4" />
+            </Button>
+            <Separator orientation="vertical" className="h-6 mx-1" />
+
+            <Button variant="ghost" size="sm" className="w-8 h-8"
+              title="横排文字"
+              onClick={() => setRangeStyle({ textOrientation: 'horizontal' })}>
+              <span className="text-xs font-bold">T</span>
+            </Button>
+            <Button variant="ghost" size="sm" className="w-8 h-8"
+              title="竖排文字"
+              onClick={() => setRangeStyle({ textOrientation: 'vertical' })}>
+              <span className="text-xs font-bold" style={{ writingMode: 'vertical-rl' }}>T</span>
             </Button>
             <Separator orientation="vertical" className="h-6 mx-1" />
 
@@ -758,86 +1111,85 @@ export default function FormExcelDesigner({
           </div>
         </div>
 
-        {/* 右侧表格编辑区 */}
+        {/* 右侧表格编辑区 - 单层 CSS Grid，彻底避免 table rowSpan/colSpan 列错位 */}
         <div className="col-span-10 overflow-auto border rounded-lg bg-white"
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-          <table className="border-collapse" style={{ tableLayout: 'fixed' }}>
-            <colgroup>
-              <col style={{ width: '36px', minWidth: '36px' }} />
-              {colWidths.map((w, i) => (
-                <col key={i} style={{ width: `${w}px`, minWidth: `${w}px` }} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                <th className="sticky top-0 z-10 w-9 h-6 bg-gray-100 border border-gray-300 text-[10px] text-gray-500 font-normal text-center">
-                  #
-                </th>
-                {colWidths.map((w, i) => (
-                  <th key={i}
-                    className="sticky top-0 z-10 h-6 bg-gray-100 border border-gray-300 text-[10px] text-gray-500 font-normal text-center relative"
-                    style={{ minWidth: `${w}px` }}>
-                    {getColLabel(i)}
-                    <div className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-400 z-20"
-                      onMouseDown={e => handleColResizeStart(e, i)} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {grid.map((row, ri) => {
-                // 整行都是 mergeHidden 则跳过
-                if (row.every(c => c.mergeHidden)) return null
-                return (
-                  <tr key={ri} style={{ height: `${rowHeights[ri] || 24}px` }}>
-                    <td className="bg-gray-50 border border-gray-300 text-[10px] text-gray-500 text-center select-none">
-                      {ri + 1}
-                    </td>
-                    {row.map((cell, ci) => {
-                      if (cell.mergeHidden) return null
-                      const isSelected = isCellSelected(ri, ci)
-                      const isActive = isCellActive(ri, ci)
-                      const style: React.CSSProperties = {
-                        fontSize: cell.fontSize || 11,
-                        fontWeight: cell.bold ? 'bold' : undefined,
-                        fontStyle: cell.italic ? 'italic' : undefined,
-                        textDecoration: cell.underline ? 'underline' : undefined,
-                        textAlign: cell.align || 'left',
-                        verticalAlign: cell.verticalAlign || 'middle',
-                        backgroundColor: cell.bgColor || undefined,
-                        color: cell.textColor || undefined,
-                        whiteSpace: cell.wrapText ? 'normal' : 'nowrap',
-                      }
+          <div className="grid" style={{ gridTemplateColumns: `36px ${colWidths.map(w => `${w}px`).join(' ')}` }}>
+            {/* 列头 */}
+            <div className="sticky top-0 z-10 h-6 bg-gray-100 border border-gray-300 text-[10px] text-gray-500 font-normal text-center flex items-center justify-center"
+              style={{ gridColumn: 1, gridRow: 1 }}>#</div>
+            {colWidths.map((w, i) => (
+              <div key={`ch-${i}`}
+                className="sticky top-0 z-10 h-6 bg-gray-100 border border-gray-300 text-[10px] text-gray-500 font-normal text-center relative flex items-center justify-center"
+                style={{ gridColumn: i + 2, gridRow: 1 }}>
+                {getColLabel(i)}
+                <div className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-400 z-20"
+                  onMouseDown={e => handleColResizeStart(e, i)} />
+              </div>
+            ))}
 
-                      return (
-                        <td key={ci}
-                          rowSpan={cell.rowSpan || undefined}
-                          colSpan={cell.colSpan || undefined}
-                          className={`border border-gray-300 p-1 relative cursor-pointer select-none
-                            ${isActive ? 'ring-2 ring-blue-500 ring-inset' : ''}
-                            ${isSelected ? 'bg-blue-50' : ''}`}
-                          style={style}
-                          onClick={() => handleCellClick(ri, ci)}
-                          onMouseEnter={() => handleCellMouseEnter(ri, ci)}>
-                          {isActive ? (
-                            <input
-                              className="w-full h-full bg-transparent border-none outline-none text-[inherit] font-[inherit] p-0 m-0"
-                              value={cell.value}
-                              onChange={e => setCell(ri, ci, { value: e.target.value })}
-                              onKeyDown={handleKeyDown}
-                              autoFocus
-                            />
-                          ) : (
-                            <CellDisplay value={cell.value} fields={fields} />
-                          )}
-                        </td>
-                      )
-                    })}
-                  </tr>
+            {/* 数据单元格：所有单元格平铺在同一 grid 中，通过 grid-column/grid-row 精确定位 */}
+            {grid.flatMap((row, ri) => {
+              const items: React.ReactNode[] = []
+              // 行号
+              items.push(
+                <div key={`rh-${ri}`}
+                  className="bg-gray-50 border border-gray-300 text-[10px] text-gray-500 text-center select-none flex items-center justify-center"
+                  style={{ gridColumn: 1, gridRow: ri + 2, minHeight: `${rowHeights[ri] || 24}px` }}>
+                  {ri + 1}
+                </div>
+              )
+              // 数据
+              row.forEach((cell, ci) => {
+                const cellData = cell || { value: '' }
+                if (cellData.mergeHidden) return
+                const isSelected = isCellSelected(ri, ci)
+                const isActive = isCellActive(ri, ci)
+
+                const gridColumn = cellData.colSpan ? `${ci + 2} / span ${cellData.colSpan}` : ci + 2
+                const gridRow = cellData.rowSpan ? `${ri + 2} / span ${cellData.rowSpan}` : ri + 2
+
+                const style: React.CSSProperties = {
+                  gridColumn,
+                  gridRow,
+                  minHeight: `${rowHeights[ri] || 24}px`,
+                  fontSize: cellData.fontSize || 11,
+                  fontWeight: cellData.bold ? 'bold' : undefined,
+                  fontStyle: cellData.italic ? 'italic' : undefined,
+                  textDecoration: cellData.underline ? 'underline' : undefined,
+                  textAlign: cellData.align || 'left',
+                  verticalAlign: cellData.verticalAlign || 'middle',
+                  backgroundColor: cellData.bgColor || undefined,
+                  color: cellData.textColor || undefined,
+                  whiteSpace: cellData.wrapText ? 'normal' : 'nowrap',
+                  writingMode: cellData.textOrientation === 'vertical' ? 'vertical-rl' : 'horizontal-tb',
+                }
+
+                items.push(
+                  <div key={`${ri}-${ci}`}
+                    className={`border border-gray-300 p-1 relative cursor-pointer select-none flex items-center
+                      ${isActive ? 'ring-2 ring-blue-500 ring-inset' : ''}
+                      ${isSelected ? 'bg-blue-50' : ''}`}
+                    style={style}
+                    onClick={() => handleCellClick(ri, ci)}
+                    onMouseEnter={() => handleCellMouseEnter(ri, ci)}>
+                    {isActive ? (
+                      <input
+                        className="w-full h-full bg-transparent border-none outline-none text-[inherit] font-[inherit] p-0 m-0"
+                        value={typeof cellData.value === 'string' ? cellData.value : String(cellData.value ?? '')}
+                        onChange={e => setCell(ri, ci, { value: e.target.value })}
+                        onKeyDown={handleKeyDown}
+                        autoFocus
+                      />
+                    ) : (
+                      <CellDisplay value={typeof cellData.value === 'string' ? cellData.value : String(cellData.value ?? '')} fields={fields} />
+                    )}
+                  </div>
                 )
-              })}
-            </tbody>
-          </table>
+              })
+              return items
+            })}
+          </div>
         </div>
       </div>
 
@@ -927,10 +1279,15 @@ export default function FormExcelDesigner({
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls"
               className="hidden" onChange={handleImportExcel} />
             <Button variant="outline" className="w-full h-24 border-dashed"
-              onClick={() => fileInputRef.current?.click()}>
-              <Upload className="w-6 h-6 mr-2 text-gray-400" />
-              <span className="text-gray-500">点击选择 Excel 文件</span>
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}>
+              {importing ? (
+                <><Loader2 className="w-6 h-6 mr-2 animate-spin text-gray-400" /><span className="text-gray-500">正在导入...</span></>
+              ) : (
+                <><Upload className="w-6 h-6 mr-2 text-gray-400" /><span className="text-gray-500">点击选择 Excel 文件</span></>
+              )}
             </Button>
+            <p className="text-xs text-gray-400 mt-2 text-center">最多导入前 50 行 × 15 列</p>
           </div>
         </DialogContent>
       </Dialog>
@@ -965,8 +1322,9 @@ export default function FormExcelDesigner({
                             textAlign: cell.align || 'left',
                             backgroundColor: cell.bgColor || undefined,
                             color: cell.textColor || undefined,
+                            writingMode: cell.textOrientation === 'vertical' ? 'vertical-rl' : 'horizontal-tb',
                           }}>
-                          <CellDisplay value={cell.value} fields={fields} />
+                          <CellDisplay value={typeof cell.value === 'string' ? cell.value : String(cell.value ?? '')} fields={fields} />
                         </td>
                       )
                     })}
