@@ -1,13 +1,13 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { User, Key, Phone, Mail, Shield, Clock } from 'lucide-react'
+import { User, Key, Phone, Mail, Shield, Clock, MessageCircle, Globe2, Link2, X } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 
 interface RoleInfo {
@@ -36,12 +36,93 @@ const roleLabels: Record<string, string> = {
   VIEWER: '查看员',
 }
 
+interface ThirdPartyBinding {
+  id: number
+  platform: string
+  openId: string
+  unionId: string | null
+  extraData: string | null
+  createdAt: string
+}
+
 export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState<'info' | 'password'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'password' | 'thirdparty'>('info')
   const [user, setUser] = useState<UserProfile>(initialUser)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [feishuBinding, setFeishuBinding] = useState<ThirdPartyBinding | null>(null)
+  const [weworkBinding, setWeworkBinding] = useState<ThirdPartyBinding | null>(null)
+  const [bindingLoading, setBindingLoading] = useState(false)
+
+  useEffect(() => {
+    loadThirdPartyBindings()
+  }, [])
+
+  const loadThirdPartyBindings = async () => {
+    try {
+      const [feishuRes, weworkRes] = await Promise.all([
+        fetch('/api/third-party/feishu'),
+        fetch('/api/third-party/wework'),
+      ])
+      if (feishuRes.ok) {
+        const data = await feishuRes.json()
+        setFeishuBinding(data.binding || null)
+      }
+      if (weworkRes.ok) {
+        const data = await weworkRes.json()
+        setWeworkBinding(data.binding || null)
+      }
+    } catch (error) {
+      console.error('Failed to load third-party bindings:', error)
+    }
+  }
+
+  const handleBindFeishu = () => {
+    const redirectUri = `${window.location.origin}/dashboard/profile`
+    window.location.href = `/api/third-party/feishu/auth?redirectUri=${encodeURIComponent(redirectUri)}`
+  }
+
+  const handleBindWework = () => {
+    const redirectUri = `${window.location.origin}/dashboard/profile`
+    window.location.href = `/api/third-party/wework/auth?redirectUri=${encodeURIComponent(redirectUri)}`
+  }
+
+  const handleUnbindFeishu = async () => {
+    if (!confirm('确定要解绑飞书账号吗？')) return
+    setBindingLoading(true)
+    try {
+      const res = await fetch('/api/third-party/feishu', { method: 'DELETE' })
+      if (res.ok) {
+        setFeishuBinding(null)
+        setMessage({ type: 'success', text: '飞书账号解绑成功' })
+      } else {
+        setMessage({ type: 'error', text: '解绑失败' })
+      }
+    } catch {
+      setMessage({ type: 'error', text: '解绑失败' })
+    } finally {
+      setBindingLoading(false)
+    }
+  }
+
+  const handleUnbindWework = async () => {
+    if (!confirm('确定要解绑企业微信账号吗？')) return
+    setBindingLoading(true)
+    try {
+      const res = await fetch('/api/third-party/wework', { method: 'DELETE' })
+      if (res.ok) {
+        setWeworkBinding(null)
+        setMessage({ type: 'success', text: '企业微信账号解绑成功' })
+      } else {
+        setMessage({ type: 'error', text: '解绑失败' })
+      }
+    } catch {
+      setMessage({ type: 'error', text: '解绑失败' })
+    } finally {
+      setBindingLoading(false)
+    }
+  }
 
   const [formData, setFormData] = useState({
     realName: user.realName,
@@ -175,6 +256,13 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
                 <Key className="w-4 h-4 mr-2" />
                 修改密码
               </Button>
+              <Button
+                variant={activeTab === 'thirdparty' ? 'default' : 'ghost'}
+                onClick={() => setActiveTab('thirdparty')}
+              >
+                <Globe2 className="w-4 h-4 mr-2" />
+                第三方绑定
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -220,7 +308,7 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : activeTab === 'password' ? (
               <div className="space-y-4 max-w-md">
                 <div className="space-y-2">
                   <Label htmlFor="oldPassword">旧密码 *</Label>
@@ -253,15 +341,117 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
                   />
                 </div>
               </div>
+            ) : (
+              <div className="space-y-6">
+                <Card className="border border-gray-200">
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                          <MessageCircle className="w-6 h-6 text-green-600" />
+                        </div>
+                        <div>
+                          <h4 className="font-medium text-gray-900">飞书</h4>
+                          <p className="text-sm text-gray-500">绑定后可接收审批通知和消息推送</p>
+                        </div>
+                      </div>
+                      {feishuBinding ? (
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-green-100 text-green-600">已绑定</Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleUnbindFeishu}
+                            disabled={bindingLoading}
+                          >
+                            <X className="w-4 h-4 mr-1" />
+                            解绑
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          onClick={handleBindFeishu}
+                          disabled={bindingLoading}
+                        >
+                          <Link2 className="w-4 h-4 mr-2" />
+                          绑定飞书
+                        </Button>
+                      )}
+                    </div>
+                    {feishuBinding && (
+                      <div className="mt-4 pt-4 border-t">
+                        <p className="text-sm text-gray-500">
+                          绑定时间: {formatDateTime(feishuBinding.createdAt)}
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border border-gray-200">
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                          <Globe2 className="w-6 h-6 text-blue-600" />
+                        </div>
+                        <div>
+                          <h4 className="font-medium text-gray-900">企业微信</h4>
+                          <p className="text-sm text-gray-500">绑定后可接收审批通知和消息推送</p>
+                        </div>
+                      </div>
+                      {weworkBinding ? (
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-green-100 text-green-600">已绑定</Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleUnbindWework}
+                            disabled={bindingLoading}
+                          >
+                            <X className="w-4 h-4 mr-1" />
+                            解绑
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          onClick={handleBindWework}
+                          disabled={bindingLoading}
+                        >
+                          <Link2 className="w-4 h-4 mr-2" />
+                          绑定企业微信
+                        </Button>
+                      )}
+                    </div>
+                    {weworkBinding && (
+                      <div className="mt-4 pt-4 border-t">
+                        <p className="text-sm text-gray-500">
+                          绑定时间: {formatDateTime(weworkBinding.createdAt)}
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="text-sm text-yellow-800">
+                    <strong>提示：</strong>绑定第三方账号后，您将在对应平台上收到审批通知和系统消息。您可以同时绑定飞书和企业微信。
+                  </p>
+                </div>
+              </div>
             )}
           </CardContent>
           <CardFooter className="flex justify-end">
-            <Button
-              onClick={activeTab === 'info' ? handleUpdateProfile : handleChangePassword}
-              disabled={loading}
-            >
-              {loading ? '保存中...' : '保存'}
-            </Button>
+            {(activeTab === 'info' || activeTab === 'password') && (
+              <Button
+                onClick={activeTab === 'info' ? handleUpdateProfile : handleChangePassword}
+                disabled={loading}
+              >
+                {loading ? '保存中...' : '保存'}
+              </Button>
+            )}
           </CardFooter>
         </Card>
       </div>

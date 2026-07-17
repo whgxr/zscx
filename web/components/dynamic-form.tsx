@@ -398,6 +398,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
                         backgroundColor: cell.bgColor || undefined,
                         color: cell.textColor || undefined,
                         whiteSpace: cell.wrapText ? 'normal' : 'nowrap',
+                        writingMode: cell.textOrientation === 'vertical' ? 'vertical-rl' : 'horizontal-tb',
                       }
 
                       return (
@@ -410,7 +411,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
                             if (part.field) {
                               const field = formFields.find(f => f.name === part.field)
                               if (!field) return <span key={i} className="text-red-400">[{part.field} 未找到]</span>
-                              return <span key={i}>{renderField(field)}</span>
+                              return <span key={i}>{renderField(field, cell.layoutDirection)}</span>
                             }
                             return <span key={i}>{part.text}</span>
                           })}
@@ -572,7 +573,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
     )
   }
 
-  const renderField = (field: TableField) => {
+  const renderField = (field: TableField, layoutDirection?: 'vertical' | 'horizontal') => {
     const value = values[field.name] || ''
     const isRequired = field.required
 
@@ -664,8 +665,9 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
       case FieldType.CHECKBOX:
         const multiOptions = field.options as any[] || []
         const selectedValues: string[] = Array.isArray(value) ? value : []
+        const isHorizontal = layoutDirection === 'horizontal'
         return (
-          <div className="space-y-2">
+          <div className={isHorizontal ? 'flex flex-row flex-wrap gap-x-4 gap-y-1' : 'space-y-2'}>
             {multiOptions.map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -849,7 +851,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
                               {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
                             </div>
                             <div className="excel-cell-value-vertical">
-                              {renderField(field)}
+                              {renderField(field, cell.layoutDirection)}
                               {field.description && (
                                 <p className="text-xs text-gray-400 mt-1">{field.description}</p>
                               )}
@@ -862,7 +864,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
                               {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
                             </div>
                             <div className="excel-cell-value" style={{ fontSize: `${fontSize}px` }}>
-                              {renderField(field)}
+                              {renderField(field, cell.layoutDirection)}
                             </div>
                           </div>
                         )}
@@ -879,7 +881,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
   }
 
   /** ========== 旧版 items 格式渲染（兼容） ========== */
-  const renderFieldCell = (field: TableField, width?: number, labelWidth?: number) => {
+  const renderFieldCell = (field: TableField, width?: number, labelWidth?: number, layoutDirection?: 'vertical' | 'horizontal') => {
     const isVertical = isVerticalField(field.type)
     const labelW = labelWidth || 90
 
@@ -888,7 +890,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
         <div key={field.id} className="excel-cell-vertical">
           <div className="excel-cell-label">{field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}</div>
           <div className="excel-cell-value-vertical">
-            {renderField(field)}
+            {renderField(field, layoutDirection)}
             {field.description && (
               <p className="text-xs text-gray-400 mt-1">{field.description}</p>
             )}
@@ -903,7 +905,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
           {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
         </div>
         <div className="excel-cell-value">
-          {renderField(field)}
+          {renderField(field, layoutDirection)}
         </div>
       </div>
     )
@@ -927,7 +929,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
               if (!field || !field.showInForm) return null
               return (
                 <div key={item.id} className={cn("excel-cell-inner", isLast && "border-b-0")}>
-                  {renderFieldCell(field, 1, item.labelWidth || subGroup.defaultLabelWidth)}
+                  {renderFieldCell(field, 1, item.labelWidth || subGroup.defaultLabelWidth, item.layoutDirection)}
                 </div>
               )
             }

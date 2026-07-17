@@ -529,6 +529,11 @@ export default function FormExcelDesigner({
   const handleCellClick = (row: number, col: number) => {
     setActiveCell({ row, col })
     setSelection({ start: { row, col }, end: { row, col } })
+  }
+
+  const handleCellMouseDown = (row: number, col: number) => {
+    setActiveCell({ row, col })
+    setSelection({ start: { row, col }, end: { row, col } })
     isSelecting.current = true
   }
 
@@ -1050,6 +1055,19 @@ export default function FormExcelDesigner({
             </Button>
             <Separator orientation="vertical" className="h-6 mx-1" />
 
+            {/* 多选字段排列方向 */}
+            <Button variant="ghost" size="sm" className="w-8 h-8"
+              title="多选纵向排列"
+              onClick={() => setRangeStyle({ layoutDirection: 'vertical' })}>
+              <span className="text-xs font-bold">⊣<br/>⊣</span>
+            </Button>
+            <Button variant="ghost" size="sm" className="w-8 h-8"
+              title="多选横向排列"
+              onClick={() => setRangeStyle({ layoutDirection: 'horizontal' })}>
+              <span className="text-xs font-bold">⊣ ⊣</span>
+            </Button>
+            <Separator orientation="vertical" className="h-6 mx-1" />
+
             <Button variant="outline" size="sm" className="h-8"
               onClick={() => setFieldDialogOpen(true)} disabled={!activeCell}>
               <Database className="w-4 h-4 mr-1" />
@@ -1172,6 +1190,7 @@ export default function FormExcelDesigner({
                       ${isSelected ? 'bg-blue-50' : ''}`}
                     style={style}
                     onClick={() => handleCellClick(ri, ci)}
+                    onMouseDown={() => handleCellMouseDown(ri, ci)}
                     onMouseEnter={() => handleCellMouseEnter(ri, ci)}>
                     {isActive ? (
                       <input

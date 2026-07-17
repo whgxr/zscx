@@ -28,34 +28,45 @@ model User {
   createdBy     Int?
 
   // 关系
-  role          Role         @relation(fields: [roleId], references: [id])
-  tablePermissions TablePermission[]
-  dataRecords      DataRecord[]      @relation("CreatedRecords")
-  uploadedFiles    UploadedFile[]
-  recordAttachments RecordAttachment[]
-  sessions         UserSession[]
+  role                    Role         @relation(fields: [roleId], references: [id])
+  tablePermissions        TablePermission[]
+  dataRecords             DataRecord[]      @relation("CreatedRecords")
+  uploadedFiles           UploadedFile[]
+  recordAttachments       RecordAttachment[]
+  sessions                UserSession[]
+  initiatedApprovals      ApprovalInstance[]       @relation("InitiatedApprovals")
+  assignedApprovals       ApprovalNodeInstance[]   @relation("AssignedApprovals")
+  transferredApprovals    ApprovalNodeInstance[]   @relation("TransferredApprovals")
+  approvalNodes           ApprovalNode[]           @relation("UserApprovalNodes")
+  thirdPartyBindings      UserThirdPartyBinding[]
+  notificationReadRecords NotificationRead[]
+  notificationSendLogs    NotificationSendLog[]
+  createdNotifications    Notification[]           @relation("CreatedNotifications")
 
   @@index([username])
   @@index([roleId])
 }
 
 model Role {
-  id          Int          @id @default(autoincrement())
-  name        String       @unique
-  label       String
-  description String?
-  canManageTables Boolean @default(false)
-  canManageUsers Boolean @default(false)
-  canManagePermissions Boolean @default(false)
-  canManageTemplates Boolean @default(false)
-  canViewLogs Boolean @default(false)
-  canManageSettings Boolean @default(false)
-  isSystem    Boolean      @default(false)
-  sortOrder   Int          @default(0)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id                  Int          @id @default(autoincrement())
+  name                String       @unique
+  label               String
+  description         String?
+  canManageTables     Boolean      @default(false)
+  canManageUsers      Boolean      @default(false)
+  canManagePermissions Boolean     @default(false)
+  canManageTemplates  Boolean      @default(false)
+  canViewLogs         Boolean      @default(false)
+  canManageSettings   Boolean      @default(false)
+  canManageApproval   Boolean      @default(false)
+  canPublishNotification Boolean    @default(false)
+  isSystem            Boolean      @default(false)
+  sortOrder           Int          @default(0)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
-  users       User[]
+  users               User[]
+  approvalNodes       ApprovalNode[]  @relation("RoleApprovalNodes")
 
   @@index([sortOrder])
 }
@@ -173,14 +184,16 @@ model DataTable {
   createdBy         Int?
 
   // 关系
-  fields         TableField[]
-  records        DataRecord[]
-  permissions    TablePermission[]
-  files          UploadedFile[]
-  attachments    RecordAttachment[]
-  exportTemplates ExportTemplate[]
+  fields             TableField[]
+  records            DataRecord[]
+  permissions        TablePermission[]
+  files              UploadedFile[]
+  attachments        RecordAttachment[]
+  exportTemplates    ExportTemplate[]
   sharedExportTemplates ExportTemplate[] @relation("SharedTemplates")
-  category       TableCategory?  @relation(fields: [categoryId], references: [id])
+  category           TableCategory?  @relation(fields: [categoryId], references: [id])
+  approvalWorkflows  ApprovalWorkflow[]
+  approvalInstances  ApprovalInstance[]
 
   @@unique([name])
   @@index([status])
@@ -260,10 +273,11 @@ model DataRecord {
   updatedBy     Int?
 
   // 关系
-  table         DataTable        @relation(fields: [tableId], references: [id])
-  creator       User?            @relation("CreatedRecords", fields: [createdBy], references: [id])
-  files         UploadedFile[]
-  attachments   RecordAttachment[]
+  table             DataTable        @relation(fields: [tableId], references: [id])
+  creator           User?            @relation("CreatedRecords", fields: [createdBy], references: [id])
+  files             UploadedFile[]
+  attachments       RecordAttachment[]
+  approvalInstances ApprovalInstance[]
 
   @@index([tableId])
   @@index([createdAt])
@@ -424,4 +438,282 @@ enum ExportType {
 enum TemplateCategory {
   EXPORT  // 导出模板
   PRINT   // 打印模板
+}
+
+// ==================== 审批流程系统 ====================
+
+enum WorkflowStatus {
+  ACTIVE    // 激活中
+  INACTIVE  // 已停用
+  DRAFT     // 草稿
+}
+
+enum NodeType {
+  ROLE       // 按角色指定审批人
+  USER       // 按用户指定审批人
+  FIELD      // 从表单字段读取审批人
+  CONDITION  // 条件判断节点
+  START      // 开始节点
+  END        // 结束节点
+}
+
+enum TimeoutAction {
+  AUTO_PASS
+  AUTO_REJECT
+  NONE
+}
+
+enum InstanceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum NodeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  TRANSFERRED
+  CANCELLED
+}
+
+enum ApprovalAction {
+  APPROVE
+  REJECT
+  TRANSFER
+  CANCEL
+}
+
+model ApprovalWorkflow {
+  id          Int            @id @default(autoincrement())
+  name        String         // 流程名称
+  tableId     Int            // 关联的数据表ID
+  description String?        // 流程描述
+  status      WorkflowStatus @default(ACTIVE)
+  version     Int            @default(1)      // 版本号
+  canvasData  Json?          // 流程画布数据（节点位置、连线等）
+  createdBy   Int?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  table       DataTable      @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  nodes       ApprovalNode[]
+  instances   ApprovalInstance[]
+
+  @@index([tableId])
+  @@index([status])
+  @@index([version])
+}
+
+model ApprovalNode {
+  id            Int           @id @default(autoincrement())
+  workflowId    Int
+  nodeType      NodeType
+  nodeOrder     Int           // 节点顺序
+  nodeName      String        // 节点名称
+
+  roleId        Int?
+  userId        Int?
+  fieldName     String?
+
+  canView       Boolean       @default(true)
+  canEdit       Boolean       @default(false)
+  canApprove    Boolean       @default(true)
+  canTransfer   Boolean       @default(true)
+
+  timeout       Int?
+  timeoutAction TimeoutAction?
+
+  conditionField  String?
+  conditionOp     String?
+  conditionValue  String?
+  nextNodeTrue    Int?
+  nextNodeFalse   Int?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  workflow      ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  role          Role?         @relation("RoleApprovalNodes", fields: [roleId], references: [id])
+  user          User?         @relation("UserApprovalNodes", fields: [userId], references: [id])
+  nodeInstances ApprovalNodeInstance[]
+
+  @@index([workflowId])
+  @@index([nodeOrder])
+}
+
+model ApprovalInstance {
+  id            Int               @id @default(autoincrement())
+  workflowId    Int
+  tableId       Int
+  recordId      Int
+  currentNodeId Int?
+  status        InstanceStatus    @default(PENDING)
+  initiatorId   Int?
+  startedAt     DateTime          @default(now())
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+  cancelReason  String?
+
+  workflow      ApprovalWorkflow  @relation(fields: [workflowId], references: [id])
+  table         DataTable         @relation(fields: [tableId], references: [id])
+  record        DataRecord        @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  initiator     User?             @relation("InitiatedApprovals", fields: [initiatorId], references: [id])
+  nodeInstances ApprovalNodeInstance[]
+
+  @@index([workflowId])
+  @@index([tableId])
+  @@index([recordId])
+  @@index([status])
+  @@index([initiatorId])
+}
+
+model ApprovalNodeInstance {
+  id            Int              @id @default(autoincrement())
+  instanceId    Int
+  nodeId        Int
+  assigneeId    Int?
+  status        NodeStatus       @default(PENDING)
+  action        ApprovalAction?
+  comment       String?          @db.Text
+  transferredTo Int?
+  processedAt   DateTime?
+  createdAt     DateTime         @default(now())
+
+  instance      ApprovalInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  node          ApprovalNode     @relation(fields: [nodeId], references: [id])
+  assignee      User?            @relation("AssignedApprovals", fields: [assigneeId], references: [id])
+  transferredUser User?          @relation("TransferredApprovals", fields: [transferredTo], references: [id])
+
+  @@unique([instanceId, nodeId, assigneeId])
+  @@index([instanceId])
+  @@index([assigneeId])
+  @@index([status])
+}
+
+// ==================== 第三方平台集成 ====================
+
+enum Platform {
+  FEISHU
+  WEWORK
+}
+
+enum BindingStatus {
+  ACTIVE
+  EXPIRED
+  UNBOUND
+}
+
+model UserThirdPartyBinding {
+  id               Int           @id @default(autoincrement())
+  userId           Int
+  platform         Platform
+  platformUserId   String
+  platformUserName String
+  accessToken      String?       @db.Text
+  refreshToken     String?       @db.Text
+  expiresAt        DateTime?
+  extraData        Json?
+  status           BindingStatus @default(ACTIVE)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform])
+  @@index([userId])
+  @@index([platform])
+  @@index([platformUserId])
+}
+
+// ==================== 通知系统 ====================
+
+enum NotificationType {
+  SYSTEM
+  BUSINESS
+  APPROVAL
+  ALERT
+}
+
+enum TargetType {
+  ALL
+  ROLE
+  USER
+}
+
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum SendChannel {
+  INTERNAL
+  FEISHU
+  WEWORK
+}
+
+enum SendStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model Notification {
+  id              Int                   @id @default(autoincrement())
+  type            NotificationType
+  title           String
+  content         String                @db.Text
+  targetType      TargetType
+  targetRoleId    Int?
+  targetUserIds   Json?
+  priority        NotificationPriority  @default(NORMAL)
+  linkUrl         String?
+  linkParams      Json?
+  createdBy       Int?
+  createdAt       DateTime              @default(now())
+  expiredAt       DateTime?
+
+  creator         User?                 @relation("CreatedNotifications", fields: [createdBy], references: [id])
+  readRecords     NotificationRead[]
+  sendLogs        NotificationSendLog[]
+
+  @@index([type])
+  @@index([targetType])
+  @@index([createdAt])
+  @@index([expiredAt])
+}
+
+model NotificationRead {
+  id             Int       @id @default(autoincrement())
+  notificationId Int
+  userId         Int
+  readAt         DateTime?
+  isDeleted      Boolean   @default(false)
+
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId])
+  @@index([readAt])
+}
+
+model NotificationSendLog {
+  id             Int         @id @default(autoincrement())
+  notificationId Int
+  userId         Int
+  channel        SendChannel
+  status         SendStatus  @default(PENDING)
+  sentAt         DateTime?
+  errorMessage   String?     @db.Text
+
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+  @@index([userId])
+  @@index([status])
 }

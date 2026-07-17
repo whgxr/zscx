@@ -27,6 +27,7 @@ export interface FieldLayoutItem extends BaseLayoutItem {
   fieldName: string
   labelWidth?: number
   rowHeight?: number
+  layoutDirection?: 'vertical' | 'horizontal'
 }
 
 export interface SubGroupLayoutItem extends BaseLayoutItem {
@@ -47,6 +48,7 @@ export interface FormCellData {
   fontSize: number
   colSpan: number
   rowSpan: number
+  layoutDirection?: 'vertical' | 'horizontal'
 }
 
 /** 分组（新版：网格模式） */
@@ -370,6 +372,13 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
     }))
   }
 
+  const setCellLayoutDirection = (groupId: string, row: number, col: number, direction: 'vertical' | 'horizontal') => {
+    updateGroup(groupId, g => ({
+      ...g,
+      rows: g.rows.map((r, ri) => ri !== row ? r : r.map((c, ci) => ci === col ? { ...c, layoutDirection: direction } : c)),
+    }))
+  }
+
   const addRow = (groupId: string) => {
     updateGroup(groupId, g => ({
       ...g,
@@ -513,6 +522,27 @@ export default function FormLayoutDesigner({ tableId, fields, initialConfig, onS
             {(cell.rowSpan || 1) > 1 && (
               <button onClick={e => { e.stopPropagation(); setCellRowSpan(groupId, rowIdx, colIdx, 1) }}
                 className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-green-600 rounded" title="取消行合并"><Split className="w-3 h-3 rotate-90" /></button>
+            )}
+            {/* 多选字段横竖排切换 */}
+            {field && (field.type === 'CHECKBOX' || field.type === 'MULTISELECT' || field.type === 'RADIO') && (
+              <>
+                <div className="w-px h-3 bg-gray-200 mx-0.5" />
+                <button
+                  onClick={e => {
+                    e.stopPropagation()
+                    const current = cell.layoutDirection || 'vertical'
+                    setCellLayoutDirection(groupId, rowIdx, colIdx, current === 'vertical' ? 'horizontal' : 'vertical')
+                  }}
+                  className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-blue-600 rounded"
+                  title={cell.layoutDirection === 'horizontal' ? '切换为竖排' : '切换为横排'}
+                >
+                  {cell.layoutDirection === 'horizontal' ? (
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+                  ) : (
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/></svg>
+                  )}
+                </button>
+              </>
             )}
             {/* 移除字段（仅有字段时显示） */}
             {field && (

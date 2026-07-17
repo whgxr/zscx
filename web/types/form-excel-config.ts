@@ -108,12 +108,18 @@ export function migrateFormLayoutToExcel(
         const excelRow: CellData[] = []
         for (const cell of row) {
           if (cell.fieldId != null && cell.fieldName) {
+            const cs = cell.colSpan || 1
+            const rs = cell.rowSpan || 1
             excelRow.push({
               value: `${cell.fieldName}：{{${cell.fieldName}}}`,
               fontSize: cell.fontSize || 13,
-              colSpan: cell.colSpan || 1,
-              rowSpan: cell.rowSpan || 1,
+              colSpan: cs > 1 ? cs : undefined,
+              rowSpan: rs > 1 ? rs : undefined,
             })
+            // 补齐被 colSpan 覆盖的列
+            for (let i = 1; i < cs; i++) {
+              excelRow.push({ value: '', mergeHidden: true })
+            }
           } else {
             excelRow.push({ value: '' })
           }
@@ -124,6 +130,100 @@ export function migrateFormLayoutToExcel(
           excelRow.push({ value: '' })
         }
         grid.push(excelRow)
+        rowHeights.push(32)
+      }
+    }
+    // 旧版 items 格式（包含 field 和 subgroup）
+    else if (group.items && group.items.length > 0) {
+      const items = group.items
+      const cols = group.columns || 2
+      const currentRow: CellData[] = []
+      let currentCol = 0
+
+      for (const item of items) {
+        if (item.type === 'field') {
+          const fieldSpan = item.width || 1
+          const cell: CellData = {
+            value: `${item.fieldName}：{{${item.fieldName}}}`,
+            fontSize: 13,
+            colSpan: fieldSpan > 1 ? fieldSpan : undefined,
+          }
+          currentRow.push(cell)
+          for (let i = 1; i < fieldSpan; i++) {
+            currentRow.push({ value: '', mergeHidden: true })
+          }
+          currentCol += fieldSpan
+        } else if (item.type === 'subgroup') {
+          const subgroupSpan = item.width || 1
+          const cell: CellData = {
+            value: item.title || '',
+            bold: true,
+            fontSize: 13,
+            colSpan: subgroupSpan > 1 ? subgroupSpan : undefined,
+            bgColor: '#F5F5F5',
+          }
+          currentRow.push(cell)
+          for (let i = 1; i < subgroupSpan; i++) {
+            currentRow.push({ value: '', mergeHidden: true })
+          }
+          currentCol += subgroupSpan
+        }
+
+        if (currentCol >= cols) {
+          while (currentRow.length < cols) {
+            currentRow.push({ value: '' })
+          }
+          grid.push([...currentRow])
+          rowHeights.push(32)
+          currentRow.length = 0
+          currentCol = 0
+        }
+      }
+
+      if (currentRow.length > 0) {
+        while (currentRow.length < cols) {
+          currentRow.push({ value: '' })
+        }
+        grid.push([...currentRow])
+        rowHeights.push(32)
+      }
+    }
+    // 最旧版 fields 格式
+    else if (group.fields && group.fields.length > 0) {
+      const fields = group.fields
+      const cols = group.columns || 2
+      const currentRow: CellData[] = []
+      let currentCol = 0
+
+      for (const fieldConfig of fields) {
+        const fieldSpan = fieldConfig.span || 1
+        const cell: CellData = {
+          value: `${fieldConfig.fieldName}：{{${fieldConfig.fieldName}}}`,
+          fontSize: 13,
+          colSpan: fieldSpan > 1 ? fieldSpan : undefined,
+        }
+        currentRow.push(cell)
+        for (let i = 1; i < fieldSpan; i++) {
+          currentRow.push({ value: '', mergeHidden: true })
+        }
+        currentCol += fieldSpan
+
+        if (currentCol >= cols) {
+          while (currentRow.length < cols) {
+            currentRow.push({ value: '' })
+          }
+          grid.push([...currentRow])
+          rowHeights.push(32)
+          currentRow.length = 0
+          currentCol = 0
+        }
+      }
+
+      if (currentRow.length > 0) {
+        while (currentRow.length < cols) {
+          currentRow.push({ value: '' })
+        }
+        grid.push([...currentRow])
         rowHeights.push(32)
       }
     }
