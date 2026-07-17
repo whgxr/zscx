@@ -5,6 +5,9 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import fs from 'fs/promises'
 import path from 'path'
+import { createReadStream, createWriteStream } from 'fs'
+import { createGunzip } from 'zlib'
+import { pipeline } from 'stream/promises'
 
 const execAsync = promisify(exec)
 
@@ -62,20 +65,50 @@ export async function POST(req: NextRequest) {
 
     const dbInfo = parseDbUrl()
 
-    // 根据文件类型选择恢复命令
+    // 如果是 .sql.gz，先用 Node.js zlib 解压为临时 .sql 文件（跨平台，不依赖 gunzip）
+    let sqlFilePath = filePath
     const isGzip = fileName.endsWith('.gz')
-    const restoreCmd = isGzip
-      ? `gunzip -c "${filePath}" | mysql -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' ${dbInfo.database}`
-      : `mysql -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' ${dbInfo.database} < "${filePath}"`
+
+    if (isGzip) {
+      sqlFilePath = filePath.replace(/\.gz$/, '')
+      try {
+        await pipeline(
+          createReadStream(filePath),
+          createGunzip(),
+          createWriteStream(sqlFilePath)
+        )
+      } catch (gzipError: any) {
+        console.error('gunzip error:', gzipError)
+        return NextResponse.json(
+          { message: '解压备份文件失败：' + (gzipError.message || '未知错误') },
+          { status: 500 }
+        )
+      }
+    }
+
+    // 使用 mysql 命令恢复（Windows 下重定向符 < 需要用 cmd /c 包裹）
+    const isWin = process.platform === 'win32'
+    const restoreCmd = isWin
+      ? `cmd /c "mysql -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' ${dbInfo.database} < "${sqlFilePath}""`
+      : `mysql -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' ${dbInfo.database} < "${sqlFilePath}"`
 
     try {
       await execAsync(restoreCmd, { timeout: 600000, maxBuffer: 1024 * 1024 * 100 })
     } catch (restoreError: any) {
       console.error('mysql restore error:', restoreError)
+      // 清理临时解压文件
+      if (isGzip) {
+        try { await fs.unlink(sqlFilePath) } catch {}
+      }
       return NextResponse.json(
         { message: '数据库恢复失败：' + (restoreError.message || '执行mysql命令失败') },
         { status: 500 }
       )
+    }
+
+    // 清理临时解压文件
+    if (isGzip) {
+      try { await fs.unlink(sqlFilePath) } catch {}
     }
 
     await prisma.operationLog.create({
