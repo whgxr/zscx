@@ -25,10 +25,28 @@ function parseDbUrl() {
   }
 }
 
+// 安全转义 shell 参数，防止命令注入
+// 注意：双引号内不转义反斜杠。在 POSIX /bin/sh 双引号中，\ 后跟非特殊字符（$, `, ", \, 换行）以外的字符时，反斜杠会原样保留；
+// 在 Windows cmd.exe 双引号内，反斜杠完全无特殊含义。若对 \ 二次转义，会破坏 Windows 路径（如 D:\backups\test.sql → D:\\backups\\test.sql），导致 mysql/psql 找不到文件。
+function escapeShellArg(arg: string): string {
+  // 对于敏感参数，使用环境变量传递而非命令行参数
+  // 这里只转义文件路径等非敏感参数
+  if (/^[a-zA-Z0-9_\-\.\/\\]+$/.test(arg)) {
+    return arg // 只包含安全字符，无需转义
+  }
+  // 其他情况用双引号包裹并转义特殊字符（不转义 \，见上方注释）
+  return `"${arg.replace(/(["$`!])/g, '\\$1')}"`
+}
+
 // 使用 exec 执行命令并返回 stdout（不使用 shell 重定向，避免 Windows 环境问题）
-function execWithOutput(cmd: string, timeout: number = 300000): Promise<string> {
+// 安全增强：密码通过环境变量传递，避免命令行暴露和注入风险
+function execWithOutput(cmd: string, env: Record<string, string> = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = exec(cmd, { timeout, maxBuffer: 1024 * 1024 * 100 })
+    const child = exec(cmd, {
+      timeout: 300000,
+      maxBuffer: 1024 * 1024 * 100,
+      env: { ...process.env, ...env } // 合并环境变量
+    })
     let stdout = ''
     let stderr = ''
     
@@ -79,17 +97,30 @@ export async function POST(req: NextRequest) {
     const filePath = path.join(BACKUP_DIR, fileName)
     const sqlFilePath = filePath.replace(/\.gz$/, '')
 
-    // 根据数据库类型选择备份命令
+    // 根据数据库类型选择备份命令（密码通过环境变量传递，避免命令行注入）
     let dumpCmd: string
+    let dumpEnv: Record<string, string> = {}
+    
     if (dbInfo.type === 'postgres') {
-      dumpCmd = `PGPASSWORD=${dbInfo.password} pg_dump -h ${dbInfo.host} -p ${dbInfo.port} -U ${dbInfo.user} -d ${dbInfo.database} -F p`
+      dumpCmd = `pg_dump -h ${escapeShellArg(dbInfo.host)} -p ${escapeShellArg(dbInfo.port)} -U ${escapeShellArg(dbInfo.user)} -d ${escapeShellArg(dbInfo.database)} -F p`
+      dumpEnv = { PGPASSWORD: dbInfo.password }
     } else {
-      dumpCmd = `mysqldump -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' --single-transaction --routines --triggers --quick --skip-ssl ${dbInfo.database}`
+      dumpCmd = `mysqldump -h ${escapeShellArg(dbInfo.host)} -P ${escapeShellArg(dbInfo.port)} -u ${escapeShellArg(dbInfo.user)} --single-transaction --routines --triggers --quick --skip-ssl ${escapeShellArg(dbInfo.database)}`
+      dumpEnv = { MYSQL_PWD: dbInfo.password }
     }
 
     let dumpOutput: string
     try {
-      dumpOutput = await execWithOutput(dumpCmd)
+      dumpOutput = await execWithOutput(dumpCmd, dumpEnv)
+
+      // 关键验证：防止空备份静默成功
+      if (!dumpOutput || dumpOutput.trim().length === 0) {
+        console.error('dump output is empty, possible connection failure')
+        return NextResponse.json(
+          { message: '数据库备份失败：备份输出为空，请检查数据库连接' },
+          { status: 500 }
+        )
+      }
     } catch (dumpError: any) {
       console.error('dump error:', dumpError)
       return NextResponse.json(
