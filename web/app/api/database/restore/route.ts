@@ -28,6 +28,16 @@ function parseDbUrl() {
   }
 }
 
+// 安全转义 shell 参数，防止命令注入
+// 注意：双引号内不转义反斜杠。在 POSIX /bin/sh 双引号中，\ 后跟非特殊字符（$, `, ", \, 换行）以外的字符时，反斜杠会原样保留；
+// 在 Windows cmd.exe 双引号内，反斜杠完全无特殊含义。若对 \ 二次转义，会破坏 Windows 路径（如 D:\backups\test.sql → D:\\backups\\test.sql），导致 mysql/psql 找不到文件。
+function escapeShellArg(arg: string): string {
+  if (/^[a-zA-Z0-9_\-\.\/\\]+$/.test(arg)) {
+    return arg
+  }
+  return `"${arg.replace(/(["$`!])/g, '\\$1')}"`
+}
+
 // 安全检查：防止路径穿越，允许系统备份和上传的备份文件名
 function isValidFileName(fileName: string): boolean {
   // 允许字母、数字、下划线、连字符，必须以 .sql.gz 或 .sql 结尾
@@ -35,14 +45,22 @@ function isValidFileName(fileName: string): boolean {
 }
 
 // 通用 SQL 语法转换：处理高版本 MySQL（5.6+）/PostgreSQL 向低版本 MySQL 5.5 兼容
-function convertSqlForLegacyMysql(sql: string): string {
+function convertSqlForLegacyMysql(sql: string): { sql: string; warnings: string[] } {
   let result = sql
+  const warnings: string[] = []
 
   // ========== PostgreSQL 特定语法 ==========
   result = result.replace(/\bSERIAL\b/g, 'INT AUTO_INCREMENT')
   result = result.replace(/\bBIGSERIAL\b/g, 'BIGINT AUTO_INCREMENT')
   result = result.replace(/\bSMALLSERIAL\b/g, 'SMALLINT AUTO_INCREMENT')
+
+  // 关键警告：ON CONFLICT 会导致 upsert 操作丢失，需要用户手动处理
+  const onConflictMatches = result.match(/\bON CONFLICT[^;]*;/g)
+  if (onConflictMatches && onConflictMatches.length > 0) {
+    warnings.push(`发现 ${onConflictMatches.length} 处 ON CONFLICT 子句将被删除，这些 upsert 操作会降级为普通 INSERT，可能导致数据重复或丢失`)
+  }
   result = result.replace(/\bON CONFLICT[^;]*;/g, ';')
+
   result = result.replace(/\bCREATE EXTENSION[^;]*;/g, '')
   result = result.replace(/\bALTER TABLE[^;]*OWNER TO[^;]*;/g, '')
   result = result.replace(/\bSET search_path[^;]*;/g, '')
@@ -135,7 +153,7 @@ function convertSqlForLegacyMysql(sql: string): string {
     return line
   })
 
-  return processedLines.join('\n')
+  return { sql: processedLines.join('\n'), warnings }
 }
 
 // 从服务器备份文件恢复
@@ -195,30 +213,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 根据数据库类型选择恢复命令
+    // 根据数据库类型选择恢复命令（密码通过环境变量传递，避免命令行注入）
     const isWin = process.platform === 'win32'
     let restoreCmd: string
+    let restoreEnv: Record<string, string> = {}
 
     if (dbInfo.type === 'postgres') {
-      restoreCmd = isWin
-        ? `cmd /c "set PGPASSWORD=${dbInfo.password} && psql -h ${dbInfo.host} -p ${dbInfo.port} -U ${dbInfo.user} -d ${dbInfo.database} -f "${sqlFilePath}""`
-        : `PGPASSWORD=${dbInfo.password} psql -h ${dbInfo.host} -p ${dbInfo.port} -U ${dbInfo.user} -d ${dbInfo.database} -f "${sqlFilePath}"`
+      restoreCmd = `psql -h ${escapeShellArg(dbInfo.host)} -p ${escapeShellArg(dbInfo.port)} -U ${escapeShellArg(dbInfo.user)} -d ${escapeShellArg(dbInfo.database)} -f "${escapeShellArg(sqlFilePath)}"`
+      restoreEnv = { PGPASSWORD: dbInfo.password }
     } else {
       // MySQL：高版本→低版本兼容性转换（MySQL 5.7+ → 5.5）
       const sqlContent = await fs.readFile(sqlFilePath, 'utf8')
-      const convertedSql = convertSqlForLegacyMysql(sqlContent)
+      const { sql: convertedSql, warnings } = convertSqlForLegacyMysql(sqlContent)
+
+      // 记录转换警告到操作日志
+      if (warnings.length > 0) {
+        console.warn('SQL conversion warnings:', warnings)
+      }
+
       const convertedFilePath = sqlFilePath + '.converted'
       tempFilesToClean.push(convertedFilePath)
       await fs.writeFile(convertedFilePath, convertedSql, 'utf8')
       sqlFilePath = convertedFilePath
 
-      restoreCmd = isWin
-        ? `cmd /c "mysql -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' --skip-ssl ${dbInfo.database} < "${sqlFilePath}""`
-        : `mysql -h ${dbInfo.host} -P ${dbInfo.port} -u ${dbInfo.user} -p'${dbInfo.password}' --skip-ssl ${dbInfo.database} < "${sqlFilePath}"`
+      restoreCmd = `mysql -h ${escapeShellArg(dbInfo.host)} -P ${escapeShellArg(dbInfo.port)} -u ${escapeShellArg(dbInfo.user)} --skip-ssl ${escapeShellArg(dbInfo.database)} < "${escapeShellArg(sqlFilePath)}"`
+      restoreEnv = { MYSQL_PWD: dbInfo.password }
     }
 
     try {
-      await execAsync(restoreCmd, { timeout: 600000, maxBuffer: 1024 * 1024 * 100 })
+      await execAsync(restoreCmd, {
+        timeout: 600000,
+        maxBuffer: 1024 * 1024 * 100,
+        env: { ...process.env, ...restoreEnv } // 安全传递密码环境变量
+      })
     } catch (restoreError: any) {
       console.error('restore error:', restoreError)
       // 清理临时文件
