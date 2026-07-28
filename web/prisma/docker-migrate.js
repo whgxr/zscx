@@ -439,10 +439,14 @@ async function main() {
   }
 
   // ==================== 10. 创建默认管理员（如果没有用户） ====================
-  if (hasUserTable || tableNames.includes('user')) {
+  // 在所有表创建完成后，再次检查 User 表是否存在且为空
+  const finalTables = await prisma.$queryRaw`SHOW TABLES`
+  const finalTableNames = finalTables.map(t => Object.values(t)[0].toLowerCase())
+  
+  if (finalTableNames.includes('user')) {
     const userCount = await prisma.$queryRaw`SELECT COUNT(*) as c FROM \`User\``
     if (userCount[0].c === 0) {
-      console.log('5. 创建默认管理员...')
+      console.log('10. 创建默认管理员...')
       const passwordHash = await bcrypt.hash('admin123', 10)
       await prisma.$executeRawUnsafe(`
         INSERT INTO \`User\` (\`username\`, \`passwordHash\`, \`realName\`, \`roleId\`, \`phone\`)
@@ -450,8 +454,12 @@ async function main() {
           (SELECT \`id\` FROM \`Role\` WHERE \`name\` = 'ADMIN'),
           '13800138000')
       `, passwordHash)
-      console.log('   ✅ 默认管理员: admin / admin123')
+      console.log('   ✅ 默认管理员已创建: admin / admin123')
+    } else {
+      console.log('10. 已有用户，跳过创建默认管理员')
     }
+  } else {
+    console.log('10. ⚠️ User 表不存在，无法创建默认管理员')
   }
 
   console.log('\n✅ 数据库迁移完成！')
