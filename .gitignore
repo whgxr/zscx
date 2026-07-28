@@ -50,3 +50,13 @@ server_chunk_*.js
 !docker/*.bat
 !docker-nas/*.sh
 !docker-nas/*.bat
+
+# 备份文件
+web/backups/
+
+# 开发工具
+.superpowers/
+docs/superpowers/
+
+# 临时打包
+*.tar.gz
