@@ -36,6 +36,8 @@ RUN mkdir -p ./public/uploads ./backups
 
 RUN chown -R nextjs:nodejs ./public/uploads ./backups
 
+RUN chmod -R 755 /app && chmod 644 /app/package.json /app/next.config.js
+
 USER nextjs
 
 EXPOSE 3000
