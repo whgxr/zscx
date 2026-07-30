@@ -68,25 +68,38 @@ function wrapText(
 ): string[] {
   if (!text) return ['']
   
-  const lines: string[] = []
-  let currentLine = ''
+  // First split by explicit newlines, then wrap each segment
+  const explicitLines = text.split('\n')
+  const result: string[] = []
   
-  for (const char of text) {
-    const testLine = currentLine + char
-    const width = font.widthOfTextAtSize(testLine, fontSize)
-    if (width > maxWidth && currentLine.length > 0) {
-      lines.push(currentLine)
-      currentLine = char
-    } else {
-      currentLine = testLine
+  for (const explicitLine of explicitLines) {
+    if (!explicitLine) {
+      result.push('')
+      continue
     }
+    
+    const lines: string[] = []
+    let currentLine = ''
+    
+    for (const char of explicitLine) {
+      const testLine = currentLine + char
+      const width = font.widthOfTextAtSize(testLine, fontSize)
+      if (width > maxWidth && currentLine.length > 0) {
+        lines.push(currentLine)
+        currentLine = char
+      } else {
+        currentLine = testLine
+      }
+    }
+    
+    if (currentLine) {
+      lines.push(currentLine)
+    }
+    
+    result.push(...(lines.length > 0 ? lines : ['']))
   }
   
-  if (currentLine) {
-    lines.push(currentLine)
-  }
-  
-  return lines.length > 0 ? lines : ['']
+  return result.length > 0 ? result : ['']
 }
 
 export async function GET(
@@ -1000,8 +1013,18 @@ async function exportTemplatePdf(
   const pageSetup = config.pageSetup || {}
 
   const isLandscape = pageSetup.orientation === 'landscape'
-  let pageWidth = isLandscape ? 842 : 595
-  let pageHeight = isLandscape ? 595 : 842
+  const paperSize = pageSetup.paperSize || 'A4'
+
+  // Paper dimensions in points (1 inch = 72 points)
+  // A4: 210x297mm = 595x842pt, A3: 297x420mm = 842x1191pt, Letter: 8.5x11in = 612x792pt
+  const paperDimensions: Record<string, { w: number; h: number }> = {
+    A4: { w: 595, h: 842 },
+    A3: { w: 842, h: 1191 },
+    Letter: { w: 612, h: 792 },
+  }
+  const dims = paperDimensions[paperSize] || paperDimensions.A4
+  let pageWidth = isLandscape ? dims.h : dims.w
+  let pageHeight = isLandscape ? dims.w : dims.h
 
   const marginLeft = (pageSetup.marginLeft || 0.5) * 72
   const marginRight = (pageSetup.marginRight || 0.5) * 72
@@ -1014,9 +1037,10 @@ async function exportTemplatePdf(
   let contentWidth = pageWidth - marginLeft - marginRight
   const totalColWidth = colWidths.reduce((sum: number, w: number) => sum + (w || 100), 0) || maxCol * 100
 
+  // Auto-switch to landscape if content doesn't fit in portrait
   if (totalColWidth > contentWidth && !isLandscape) {
-    pageWidth = 842
-    pageHeight = 595
+    pageWidth = dims.h
+    pageHeight = dims.w
     contentWidth = pageWidth - marginLeft - marginRight
   }
 
@@ -1093,37 +1117,68 @@ async function exportTemplatePdf(
       : { r: 0, g: 0, b: 0 }
 
     let fontSize = cellData.fontSize || 11
-    fontSize = Math.max(6, fontSize * 0.75 * scaleFactor)
+    // Font size: only convert pixels to points (0.75), do NOT apply scaleFactor
+    // Applying scaleFactor makes text too small when there are many columns
+    fontSize = Math.max(6, fontSize * 0.75)
 
     const font = cellData.bold ? fonts.bold : fonts.regular
     const align = cellData.align || 'left'
     const text = cellData.value || ''
-    const maxTextWidth = width - 10
-    const lines = wrapText(text, font, fontSize, maxTextWidth)
-    const lineHeight = fontSize * 1.2
 
-    const totalTextHeight = lines.length * lineHeight
-    let textY = y + (height - totalTextHeight) / 2 + fontSize * 0.7
+    // Handle vertical text orientation: draw each character stacked vertically
+    if (cellData.textOrientation === 'vertical') {
+      const charSpacing = fontSize * 1.15
+      const chars: string[] = Array.from(text)
+      const totalTextHeight = chars.length * charSpacing
+      let charY = y + (height - totalTextHeight) / 2 + fontSize * 0.7
 
-    lines.forEach((line) => {
-      let textX = x + 5
-      if (align === 'center') {
-        const textWidth = font.widthOfTextAtSize(line, fontSize)
-        textX = x + width / 2 - textWidth / 2
-      } else if (align === 'right') {
-        const textWidth = font.widthOfTextAtSize(line, fontSize)
-        textX = x + width - 5 - textWidth
-      }
+      chars.forEach((char) => {
+        let charX = x + 5
+        if (align === 'center') {
+          const charWidth = font.widthOfTextAtSize(char, fontSize)
+          charX = x + width / 2 - charWidth / 2
+        } else if (align === 'right') {
+          const charWidth = font.widthOfTextAtSize(char, fontSize)
+          charX = x + width - 5 - charWidth
+        }
 
-      page.drawText(line, {
-        x: textX,
-        y: textY,
-        font,
-        size: fontSize,
-        color: rgb(textColor.r, textColor.g, textColor.b),
+        page.drawText(char, {
+          x: charX,
+          y: charY,
+          font,
+          size: fontSize,
+          color: rgb(textColor.r, textColor.g, textColor.b),
+        })
+        charY -= charSpacing
       })
-      textY -= lineHeight
-    })
+    } else {
+      const maxTextWidth = width - 10
+      const lines = wrapText(text, font, fontSize, maxTextWidth)
+      const lineHeight = fontSize * 1.2
+
+      const totalTextHeight = lines.length * lineHeight
+      let textY = y + (height - totalTextHeight) / 2 + fontSize * 0.7
+
+      lines.forEach((line) => {
+        let textX = x + 5
+        if (align === 'center') {
+          const textWidth = font.widthOfTextAtSize(line, fontSize)
+          textX = x + width / 2 - textWidth / 2
+        } else if (align === 'right') {
+          const textWidth = font.widthOfTextAtSize(line, fontSize)
+          textX = x + width - 5 - textWidth
+        }
+
+        page.drawText(line, {
+          x: textX,
+          y: textY,
+          font,
+          size: fontSize,
+          color: rgb(textColor.r, textColor.g, textColor.b),
+        })
+        textY -= lineHeight
+      })
+    }
 
     const borderColor = rgb(200 / 255, 200 / 255, 200 / 255)
     const borderWidth = 0.5
@@ -1184,13 +1239,14 @@ async function exportTemplatePdf(
   const getRowHeight = (row: number, rowSpan: number) => {
     let height = 0
     for (let i = 0; i < rowSpan && row + i < maxRow; i++) {
-      height += (rowHeights[row + i] || 24) * 0.75 * scaleFactor
+      // Row height: only convert pixels to points (0.75), do NOT apply scaleFactor
+      height += (rowHeights[row + i] || 24) * 0.75
     }
     return height
   }
 
   for (let r = 0; r < maxRow; r++) {
-    const rowHeight = (rowHeights[r] || 24) * 0.75 * scaleFactor
+    const rowHeight = (rowHeights[r] || 24) * 0.75
     if (currentY - rowHeight < marginBottom) {
       page = pdfDoc.addPage([pageWidth, pageHeight])
       currentY = pageHeight - marginTop
@@ -1238,7 +1294,7 @@ async function exportTemplatePdf(
         const recordFilledGrid = fillGridData(record, data)
 
         for (let r = dataStartRow; r <= dataEndRow; r++) {
-          const rowHeight = (rowHeights[r] || 24) * 0.75 * scaleFactor
+          const rowHeight = (rowHeights[r] || 24) * 0.75
           if (currentY - rowHeight < marginBottom) {
             page = pdfDoc.addPage([pageWidth, pageHeight])
             currentY = pageHeight - marginTop

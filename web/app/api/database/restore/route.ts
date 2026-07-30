@@ -219,12 +219,77 @@ export async function POST(req: NextRequest) {
     let restoreEnv: Record<string, string> = {}
 
     if (dbInfo.type === 'postgres') {
+      // 安全验证：读取并检查 SQL 文件内容（与 MySQL 保持一致）
+      const sqlContent = await fs.readFile(sqlFilePath, 'utf8')
+
+      // 关键验证：防止空文件静默恢复
+      if (!sqlContent || sqlContent.trim().length === 0) {
+        console.error('restore file is empty')
+        return NextResponse.json(
+          { message: '数据库恢复失败：恢复文件为空' },
+          { status: 400 }
+        )
+      }
+
+      // 安全警告检测：检查极其危险的 SQL 语句
+      const dangerousPatterns = [
+        { pattern: /\bDROP\s+DATABASE\b/gi, name: 'DROP DATABASE' },
+        { pattern: /\bDROP\s+SCHEMA\b/gi, name: 'DROP SCHEMA' },
+      ]
+      const detectedDangers: string[] = []
+
+      for (const { pattern, name } of dangerousPatterns) {
+        const matches = sqlContent.match(pattern)
+        if (matches && matches.length > 0) {
+          detectedDangers.push(`${name} (${matches.length} 处)`)
+        }
+      }
+
+      if (detectedDangers.length > 0) {
+        console.error('Dangerous SQL patterns detected:', detectedDangers)
+        return NextResponse.json(
+          { message: `数据库恢复失败：检测到危险SQL语句 - ${detectedDangers.join(', ')}。请手动审核备份文件内容后再执行恢复。` },
+          { status: 400 }
+        )
+      }
+
       restoreCmd = `psql -h ${escapeShellArg(dbInfo.host)} -p ${escapeShellArg(dbInfo.port)} -U ${escapeShellArg(dbInfo.user)} -d ${escapeShellArg(dbInfo.database)} -f "${escapeShellArg(sqlFilePath)}"`
       restoreEnv = { PGPASSWORD: dbInfo.password }
     } else {
       // MySQL：高版本→低版本兼容性转换（MySQL 5.7+ → 5.5）
       const sqlContent = await fs.readFile(sqlFilePath, 'utf8')
+
+      // 关键验证：防止空文件静默恢复
+      if (!sqlContent || sqlContent.trim().length === 0) {
+        console.error('restore file is empty')
+        return NextResponse.json(
+          { message: '数据库恢复失败：恢复文件为空' },
+          { status: 400 }
+        )
+      }
+
       const { sql: convertedSql, warnings } = convertSqlForLegacyMysql(sqlContent)
+
+      // 安全警告检测：检查极其危险的 SQL 语句
+      const dangerousPatterns = [
+        { pattern: /\bDROP\s+DATABASE\b/gi, name: 'DROP DATABASE' },
+      ]
+      const detectedDangers: string[] = []
+
+      for (const { pattern, name } of dangerousPatterns) {
+        const matches = convertedSql.match(pattern)
+        if (matches && matches.length > 0) {
+          detectedDangers.push(`${name} (${matches.length} 处)`)
+        }
+      }
+
+      if (detectedDangers.length > 0) {
+        console.error('Dangerous SQL patterns detected:', detectedDangers)
+        return NextResponse.json(
+          { message: `数据库恢复失败：检测到危险SQL语句 - ${detectedDangers.join(', ')}。请手动审核备份文件内容后再执行恢复。` },
+          { status: 400 }
+        )
+      }
 
       // 记录转换警告到操作日志
       if (warnings.length > 0) {

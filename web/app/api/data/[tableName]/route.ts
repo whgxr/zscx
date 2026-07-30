@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { Prisma } from '@prisma/client'
 
 export async function GET(
   req: NextRequest,
@@ -40,21 +41,70 @@ export async function GET(
       }
     }
 
+    if (search) {
+      const escapedSearch = search.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
+      const searchPattern = `%${escapedSearch}%`
+
+      const statusCondition = status
+        ? Prisma.sql`AND r.status = ${status}`
+        : Prisma.empty
+
+      const [recordsRaw, totalRaw] = await Promise.all([
+        prisma.$queryRaw<any[]>(Prisma.sql`
+          SELECT 
+            r.id, r.tableId, r.data, r.status, r.createdAt, r.updatedAt, r.createdBy, r.updatedBy,
+            u.real_name AS creator_realName, u.username AS creator_username
+          FROM DataRecord r
+          LEFT JOIN User u ON r.createdBy = u.id
+          WHERE r.tableId = ${table.id}
+          ${statusCondition}
+          AND CAST(r.data AS CHAR) LIKE ${searchPattern}
+          ORDER BY r.createdAt DESC
+          LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+        `),
+        prisma.$queryRaw<{ total: number }[]>(Prisma.sql`
+          SELECT COUNT(*) AS total
+          FROM DataRecord
+          WHERE tableId = ${table.id}
+          ${statusCondition}
+          AND CAST(data AS CHAR) LIKE ${searchPattern}
+        `),
+      ])
+
+      const records = recordsRaw.map((row: any) => ({
+        id: row.id,
+        tableId: row.tableId,
+        data: typeof row.data === 'string' ? JSON.parse(row.data) : row.data,
+        status: row.status,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        createdBy: row.createdBy,
+        updatedBy: row.updatedBy,
+        creator: row.creator_realName || row.creator_username
+          ? { id: row.createdBy, realName: row.creator_realName, username: row.creator_username }
+          : null,
+      }))
+
+      const total = Number(totalRaw[0]?.total) || 0
+
+      return NextResponse.json({
+        records,
+        total,
+        page,
+        pageSize,
+        fields: table.fields,
+        table: {
+          id: table.id,
+          name: table.name,
+          label: table.label,
+        },
+      })
+    }
+
     const where: any = { tableId: table.id }
 
     if (status) {
       where.status = status
-    }
-
-    if (search) {
-      where.OR = [
-        {
-          data: {
-            path: [],
-            string_contains: search,
-          },
-        },
-      ]
     }
 
     const [records, total] = await Promise.all([
