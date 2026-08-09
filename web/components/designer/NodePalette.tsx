@@ -36,8 +36,13 @@ export function NodePalette({ onAddNode }: Props) {
         return (
           <button
             key={item.type}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('application/designer-node-type', item.type)
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
             onClick={() => onAddNode(item.type)}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg border bg-white hover:shadow-sm hover:border-blue-300 transition-all text-left group"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg border bg-white hover:shadow-sm hover:border-blue-300 transition-all text-left group cursor-grab active:cursor-grabbing"
           >
             <div
               className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"

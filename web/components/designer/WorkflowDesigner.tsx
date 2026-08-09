@@ -57,6 +57,12 @@ export function WorkflowDesigner({
     setState({ ...state, nodes: [...state.nodes, newNode] })
   }, [state])
 
+  // 拖入画布：在指定坐标新增节点
+  const handleAddNodeAt = useCallback((type: NodeType, position: { x: number; y: number }) => {
+    const newNode = createDefaultNode(type, position)
+    setState(s => ({ ...s, nodes: [...s.nodes, newNode] }))
+  }, [])
+
   // ── 删除节点 ──
   const handleDeleteNode = useCallback((id: string) => {
     const nodes = state.nodes
@@ -225,6 +231,7 @@ export function WorkflowDesigner({
             onStateChange={setState}
             selectedNodeId={selectedNodeId}
             onSelectNode={setSelectedNodeId}
+            onAddNodeAt={handleAddNodeAt}
           />
         </div>
         <PropertyPanel

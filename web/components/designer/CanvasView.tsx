@@ -5,21 +5,22 @@
  */
 'use client'
 
-import React, { useCallback, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   ReactFlow, Background, Controls, MiniMap,
   useNodesState, useEdgesState, addEdge, MarkerType,
-  type Connection, type Node, type Edge,
+  type Connection, type Node, type Edge, type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { CustomNodes } from './CustomNodes'
-import { NODE_COLORS, type DesignerNodeDef, type DesignerState } from './designer-types'
+import { NODE_COLORS, type DesignerNodeDef, type DesignerState, type NodeType } from './designer-types'
 
 type Props = {
   state: DesignerState
   onStateChange: (state: DesignerState) => void
   selectedNodeId: string | null
   onSelectNode: (id: string | null) => void
+  onAddNodeAt?: (type: NodeType, position: { x: number; y: number }) => void
 }
 
 const nodeTypes = { workflowNode: CustomNodes.workflowNode }
@@ -54,9 +55,46 @@ function toRfEdges(nodes: DesignerNodeDef[]): Edge[] {
   return edges
 }
 
-export function CanvasView({ state, onStateChange, selectedNodeId, onSelectNode }: Props) {
+export function CanvasView({ state, onStateChange, selectedNodeId, onSelectNode, onAddNodeAt }: Props) {
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(toRfNodes(state))
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(toRfEdges(state.nodes))
+  // 使用 onInit(instance) 方式保存 reactflow 实例，避免在 <ReactFlow> 渲染前就调用 useReactFlow() 导致
+  // "ReactFlowProvider as an ancestor" 错误（error 001）
+  const rfRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
+
+  // ⚠️ useNodesState / useEdgesState 只在挂载时读取 initial 值。
+  // 必须在外部 state（DesignerState.nodes / 连线信息）变化时手动同步给 ReactFlow 内部 nodes/edges，
+  // 否则左侧「点击新增节点」或 DnD 拖入节点虽然更新了父级 state，画布上却看不到。
+  useEffect(() => {
+    setRfNodes(toRfNodes(state))
+  }, [state, setRfNodes])
+
+  useEffect(() => {
+    setRfEdges(toRfEdges(state.nodes))
+  }, [state.nodes, setRfEdges])
+
+  const onInit = useCallback((instance: ReactFlowInstance<Node, Edge>) => {
+    rfRef.current = instance
+  }, [])
+
+  // 画布 DnD：接收左侧节点类型拖入
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    const type = e.dataTransfer.getData('application/designer-node-type') as NodeType
+    if (!type || !onAddNodeAt) return
+    const instance = rfRef.current as any
+    if (!instance) return
+    // 兼容 v11(v12) 两个可能的 API 名称
+    const toFlow = instance.screenToFlowCoordinate ?? instance.project
+    if (typeof toFlow !== 'function') return
+    const pos = toFlow.call(instance, { x: e.clientX, y: e.clientY })
+    onAddNodeAt(type, { x: Math.max(0, (pos?.x ?? 0) - 80), y: Math.max(0, (pos?.y ?? 0) - 30) })
+  }, [onAddNodeAt])
 
   // 节点位置变化 → 同步回 state
   const handleNodesChange = useCallback((changes: any) => {
@@ -120,6 +158,9 @@ export function CanvasView({ state, onStateChange, selectedNodeId, onSelectNode 
       onConnect={onConnect}
       onNodeClick={onNodeClick}
       onPaneClick={onPaneClick}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onInit={onInit}
       nodeTypes={nodeTypes}
       fitView
       proOptions={{ hideAttribution: true }}
