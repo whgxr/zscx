@@ -60,3 +60,16 @@ docs/superpowers/
 
 # 临时打包
 *.tar.gz
+
+# Agent/IDE 本地工作目录
+.qoder/
+.qoder-cn/
+
+# Capacitor / H5 本地构建产物与运行时 SDK
+web/.android-sdk/
+web/.jdk/
+web/android/
+web/www/
+
+# server schema 草稿（非核心文件，如需加入可手动取消忽略）
+server_schema.prisma
