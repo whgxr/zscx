@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { RecordStatus, FieldType } from '@prisma/client'
+import { triggerSyncForSurveyRecordIfNeeded } from '@/lib/levy-sync-detector'
+import { tryLevySaveAutoTrigger } from '@/lib/approval-service'
 
 export async function GET(
   req: NextRequest,
@@ -130,6 +132,20 @@ export async function PUT(
       data: updateData,
     })
 
+    // v1.2.2+ 同步检测
+    const ipAddress = (req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '').split(',')[0].trim() || null
+    const userAgent = req.headers.get('user-agent') || null
+    const { snapshotId, syncRequestIds } = await triggerSyncForSurveyRecordIfNeeded({
+      surveyTableId: table.id,
+      surveyRecordId: record.id,
+      newSurveyData: record.data as Record<string, any>,
+      oldSurveyData: (existingRecord.data as Record<string, any>) || null,
+      changedBy: user.id,
+      changeType: 'UPDATE',
+      ipAddress,
+      userAgent,
+    })
+
     await prisma.operationLog.create({
       data: {
         userId: user.id,
@@ -137,11 +153,20 @@ export async function PUT(
         module: 'DATA',
         tableId: table.id,
         recordId: record.id,
-        detail: body,
+        snapshotId: snapshotId ?? undefined,
+        detail: { before: existingRecord.data, after: record.data, syncRequestIds } as any,
+        ipAddress: ipAddress ?? undefined,
+        userAgent: userAgent ?? undefined,
       },
     })
 
-    return NextResponse.json({ record })
+    // v1.2.2+ M2-T4: 若是征收模块 + 绑定了 LEVY_SAVE 触发流程，自动发起审批
+    const levyTrigger = await tryLevySaveAutoTrigger({
+      table: { id: table.id, categoryId: table.categoryId, approvalTriggerConfig: table.approvalTriggerConfig, featureFlags: table.featureFlags },
+      recordId: record.id, initiatorId: user.id, ip: ipAddress, ua: userAgent,
+    })
+
+    return NextResponse.json({ record, levyTrigger: !levyTrigger.skipped ? { instanceId: (levyTrigger as any).instanceId, matched: (levyTrigger as any).matched } : null })
   } catch (error) {
     console.error('Update record error:', error)
     return NextResponse.json({ message: '更新数据失败' }, { status: 500 })
@@ -184,6 +209,21 @@ export async function DELETE(
       return NextResponse.json({ message: '记录不存在' }, { status: 404 })
     }
 
+    const ipAddress = (req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '').split(',')[0].trim() || null
+    const userAgent = req.headers.get('user-agent') || null
+
+    // v1.2.2+ 同步检测（删除前先写快照）
+    await triggerSyncForSurveyRecordIfNeeded({
+      surveyTableId: table.id,
+      surveyRecordId: record.id,
+      newSurveyData: {},
+      oldSurveyData: (record.data as Record<string, any>) || null,
+      changedBy: user.id,
+      changeType: 'DELETE',
+      ipAddress,
+      userAgent,
+    })
+
     await prisma.uploadedFile.deleteMany({ where: { recordId, tableId: table.id } })
 
     await prisma.dataRecord.delete({
@@ -197,6 +237,9 @@ export async function DELETE(
         module: 'DATA',
         tableId: table.id,
         recordId,
+        detail: { before: record.data } as any,
+        ipAddress: ipAddress ?? undefined,
+        userAgent: userAgent ?? undefined,
       },
     })
 

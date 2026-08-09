@@ -36,7 +36,7 @@ RUN mkdir -p ./public/uploads ./backups
 
 RUN chown -R nextjs:nodejs ./public/uploads ./backups
 
-RUN chmod 644 /app/package.json /app/next.config.js && chmod -R 755 /app/public && chmod +x /app/node_modules/.bin/*
+RUN chmod 644 /app/package.json /app/next.config.js && chmod -R 755 /app/public && chmod +x /app/node_modules/.bin/* && chmod -R a+rX /app/prisma
 
 USER nextjs
 

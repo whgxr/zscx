@@ -8,6 +8,7 @@ const createCategorySchema = z.object({
   parentId: z.number().nullable().optional(),
   icon: z.string().nullable().optional(),
   sortOrder: z.number().optional().default(0),
+  module: z.enum(['SURVEY', 'LEVY', 'BOTH']).optional().default('BOTH'),
 })
 
 function buildCategoryTree(categories: any[]): any[] {
@@ -43,7 +44,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ message: '未登录' }, { status: 401 })
     }
 
+    const { searchParams } = new URL(req.url)
+    const moduleParam = searchParams.get('module') as 'SURVEY' | 'LEVY' | 'BOTH' | null
+
+    // v1.2.2+ 支持按模块过滤：返回 module === BOTH 或匹配当前模块的分类
+    const where: any = {}
+    if (moduleParam) {
+      where.OR = [
+        { module: moduleParam },
+        { module: 'BOTH' },
+      ]
+    }
+
     const categories = await prisma.tableCategory.findMany({
+      where,
       orderBy: { sortOrder: 'asc' },
       include: {
         _count: {
@@ -92,6 +106,7 @@ export async function POST(req: NextRequest) {
         icon: data.icon || null,
         sortOrder: data.sortOrder,
         level,
+        module: data.module,
       },
     })
 
@@ -100,7 +115,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         action: 'CREATE_CATEGORY',
         module: 'CATEGORY',
-        detail: { id: category.id, name: data.name, level },
+        detail: { id: category.id, name: data.name, level, module: data.module },
       },
     })
 

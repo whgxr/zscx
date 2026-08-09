@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status')
     const categoryId = searchParams.get('categoryId')
     const uncategorized = searchParams.get('uncategorized')
+    const simple = searchParams.get('simple') === '1'
 
     const where: any = {}
     if (status) where.status = status
@@ -35,6 +36,15 @@ export async function GET(req: NextRequest) {
       if (!isNaN(catId)) {
         where.categoryId = catId
       }
+    }
+
+    if (simple) {
+      const rows = await prisma.dataTable.findMany({
+        where,
+        select: { id: true, label: true, name: true },
+        orderBy: [{ categoryId: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
+      })
+      return NextResponse.json({ ok: true, data: rows })
     }
 
     const tables = await prisma.dataTable.findMany({

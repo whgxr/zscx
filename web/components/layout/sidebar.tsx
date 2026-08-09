@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
-  LayoutDashboard, 
-  Table2, 
-  Users, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Table2,
+  Users,
+  Settings,
   Building2,
   FileBarChart,
   ShieldCheck,
@@ -15,6 +15,10 @@ import {
   FolderTree,
   GitBranch,
   Bell,
+  ClipboardList,
+  Scale,
+  FileSearch,
+  AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Role } from '@prisma/client'
@@ -32,6 +36,7 @@ interface SidebarProps {
     name: string
     label: string
     icon?: string | null
+    category?: { id: number; name: string; module: string } | null
   }[]
 }
 
@@ -87,21 +92,54 @@ export function Sidebar({ user, tables }: SidebarProps) {
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 mb-2">
             项目管理
           </p>
-          {tables.map((table) => (
-            <Link
-              key={table.id}
-              href={`/dashboard/data/${table.name}`}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-                pathname.startsWith(`/dashboard/data/${table.name}`)
-                  ? "bg-primary/10 text-primary font-medium"
-                  : "text-gray-600 hover:bg-gray-100"
-              )}
-            >
-              {table.icon && iconMap[table.icon] ? iconMap[table.icon] : <Table2 className="w-5 h-5" />}
-              {table.label}
-            </Link>
-          ))}
+          {(() => {
+            // 调查分组：module = SURVEY / BOTH / 空（兼容旧数据）
+            const surveyTables = tables.filter(t => !t.category?.module || t.category?.module === 'SURVEY' || t.category?.module === 'BOTH')
+            // 征收分组：module = LEVY / BOTH / SURVEY（按用户要求：调查里的项目，征收里也要出现，方便数据同步）
+            const levyTables = tables.filter(t => t.category?.module === 'LEVY' || t.category?.module === 'BOTH' || t.category?.module === 'SURVEY' || !t.category?.module)
+
+            const renderTable = (table: typeof tables[0]) => (
+              <Link
+                key={table.id}
+                href={`/dashboard/data/${table.name}`}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+                  pathname.startsWith(`/dashboard/data/${table.name}`)
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-gray-600 hover:bg-gray-100"
+                )}
+              >
+                {table.icon && iconMap[table.icon] ? iconMap[table.icon] : <Table2 className="w-5 h-5" />}
+                {table.label}
+              </Link>
+            )
+
+            return (
+              <div className="space-y-3">
+                {surveyTables.length > 0 && (
+                  <div>
+                    <p className="text-xs text-blue-500 font-medium px-3 mb-1 flex items-center gap-1">
+                      <ClipboardList className="w-3.5 h-3.5" /> 调查
+                    </p>
+                    {surveyTables.map(renderTable)}
+                  </div>
+                )}
+                {levyTables.length > 0 && (
+                  <div>
+                    <p className="text-xs text-orange-500 font-medium px-3 mb-1 flex items-center gap-1">
+                      <Scale className="w-3.5 h-3.5" /> 征收
+                    </p>
+                    {levyTables.map(renderTable)}
+                  </div>
+                )}
+                {surveyTables.length === 0 && levyTables.length === 0 && (
+                  <p className="px-3 py-4 text-xs text-gray-400 text-center">
+                    暂无项目，请先在「项目管理」中创建数据表
+                  </p>
+                )}
+              </div>
+            )
+          })()}
         </div>
 
         {isAdmin && (
@@ -220,18 +258,32 @@ export function Sidebar({ user, tables }: SidebarProps) {
               系统设置
             </Link>
             {isSuperAdmin && (
-              <Link
-                href="/dashboard/logs"
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-                  pathname.startsWith('/dashboard/logs')
-                    ? "bg-primary/10 text-primary font-medium"
-                    : "text-gray-600 hover:bg-gray-100"
-                )}
-              >
-                <Activity className="w-5 h-5" />
-                操作日志
-              </Link>
+              <>
+                <Link
+                  href="/dashboard/audit"
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+                    pathname.startsWith('/dashboard/audit')
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-gray-600 hover:bg-gray-100"
+                  )}
+                >
+                  <FileSearch className="w-5 h-5" />
+                  审计日志中心
+                </Link>
+                <Link
+                  href="/dashboard/error-logs"
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
+                    pathname.startsWith('/dashboard/error-logs')
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-gray-600 hover:bg-gray-100"
+                  )}
+                >
+                  <AlertTriangle className="w-5 h-5" />
+                  错误日志
+                </Link>
+              </>
             )}
           </div>
         )}

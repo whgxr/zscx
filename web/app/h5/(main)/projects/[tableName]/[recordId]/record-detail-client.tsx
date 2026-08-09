@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import {
   ArrowLeft, Save, Edit, X, Paperclip, Image as ImageIcon,
-  FileText, Upload, Plus, Trash2, Eye, Download, Camera
+  FileText, Upload, Plus, Trash2, Eye, Download, Camera,
+  Send, FileSignature, RefreshCcw, QrCode, Share2, Check, Copy,
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { FieldType, RecordStatus } from '@prisma/client'
@@ -20,6 +21,10 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   REVIEWED: { label: '已审核', variant: 'success' },
   REJECTED: { label: '已驳回', variant: 'destructive' },
   ARCHIVED: { label: '已归档', variant: 'outline' },
+  // v1.2.2+ 征收模块状态
+  PENDING_APPROVAL: { label: '待审批', variant: 'warning' },
+  CHANGED: { label: '已变更', variant: 'default' },
+  SYNC_PENDING: { label: '待同步', variant: 'default' },
 }
 
 const statusColorMap: Record<string, string> = {
@@ -320,6 +325,103 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
 
       {/* 内容 */}
       <div className="flex-1 px-4 py-4 space-y-4">
+
+        {/* 快捷操作栏 */}
+        {!isEditing && (
+          <div className="bg-white rounded-xl p-3 shadow-sm">
+            <p className="text-xs text-gray-400 mb-2 flex items-center gap-1">
+              <Download className="w-3 h-3" /> 快捷操作
+            </p>
+            <div className="grid grid-cols-5 gap-1.5">
+              <button
+                onClick={async () => {
+                  if (!confirm('确认发起审批？')) return
+                  try {
+                    const res = await fetch('/api/approval/instances', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ tableId: table.id, recordId: record.id, triggerEvent: 'MANUAL' }),
+                    })
+                    const data = await res.json()
+                    if (res.ok) alert('已发起审批')
+                    else alert(data.message || '发起失败')
+                  } catch { alert('发起失败') }
+                }}
+                className="flex flex-col items-center gap-1 p-2 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100"
+              >
+                <Send className="w-4 h-4" />
+                <span className="text-[10px] font-medium">发起审批</span>
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/documents/generate', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ tableId: table.id, recordId: record.id }),
+                    })
+                    const data = await res.json()
+                    if (res.ok && data.downloadUrl) { window.open(data.downloadUrl, '_blank'); return }
+                    if (res.ok && data.jobId) { alert('文书生成任务已提交，完成后在通知中查看'); return }
+                    alert(data.message || '生成失败')
+                  } catch { alert('生成失败') }
+                }}
+                className="flex flex-col items-center gap-1 p-2 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100"
+              >
+                <FileSignature className="w-4 h-4" />
+                <span className="text-[10px] font-medium">生成文书</span>
+              </button>
+              {canEdit && (
+                <button
+                  onClick={async () => {
+                    if (!confirm('确认触发「调查↔征收」同步？')) return
+                    try {
+                      const res = await fetch('/api/sync-requests', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tableId: table.id, recordId: record.id }),
+                      })
+                      const data = await res.json()
+                      if (res.ok) alert('同步请求已提交')
+                      else alert(data.message || '同步失败')
+                    } catch { alert('同步失败') }
+                  }}
+                  className="flex flex-col items-center gap-1 p-2 rounded-lg bg-amber-50 text-amber-600 border border-amber-100"
+                >
+                  <RefreshCcw className="w-4 h-4" />
+                  <span className="text-[10px] font-medium">同步</span>
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  const url = `${window.location.origin}/view/${table.name}/${record.id}`
+                  navigator.clipboard?.writeText(url).catch(() => {})
+                  alert('查看链接已复制到剪贴板')
+                }}
+                className="flex flex-col items-center gap-1 p-2 rounded-lg bg-blue-50 text-blue-600 border border-blue-100"
+              >
+                <QrCode className="w-4 h-4" />
+                <span className="text-[10px] font-medium">复制链接</span>
+              </button>
+              <button
+                onClick={async () => {
+                  const url = `${window.location.origin}/view/${table.name}/${record.id}`
+                  const title = `${table.label} - 记录 #${record.id}`
+                  if (navigator.share) {
+                    try { await navigator.share({ title, url }); return } catch {}
+                  }
+                  try { await navigator.clipboard.writeText(url); alert('链接已复制，可粘贴分享给微信好友') }
+                  catch { alert('链接：' + url) }
+                }}
+                className="flex flex-col items-center gap-1 p-2 rounded-lg bg-green-50 text-green-600 border border-green-100"
+              >
+                <Share2 className="w-4 h-4" />
+                <span className="text-[10px] font-medium">分享</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* 基本信息 */}
         <div className="bg-white rounded-xl p-4 shadow-sm">
           <h3 className="text-sm font-medium text-gray-900 mb-3">

@@ -1,6 +1,6 @@
 {
   "name": "zscx-web",
-  "version": "1.1.1",
+  "version": "1.2.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17,6 +17,13 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/camera": "^8.2.2",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/preferences": "^8.0.1",
     "@fontsource/noto-sans-sc": "^5.2.9",
     "@handsontable/react-wrapper": "^18.0.0",
     "@pdf-lib/fontkit": "^1.1.1",
@@ -36,6 +43,7 @@
     "bcryptjs": "^2.4.3",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
+    "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "handsontable": "^18.0.0",
     "jsonwebtoken": "^9.0.2",

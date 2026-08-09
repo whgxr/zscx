@@ -59,6 +59,7 @@ import {
   Printer,
   FileType,
   Paperclip,
+  RefreshCw,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
 import { ImportDialog } from '@/components/import/import-dialog'
@@ -94,6 +95,10 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   REVIEWED: { label: '已审核', variant: 'success' },
   REJECTED: { label: '已驳回', variant: 'destructive' },
   ARCHIVED: { label: '已归档', variant: 'outline' },
+  // v1.2.2+ 征收模块状态
+  PENDING_APPROVAL: { label: '待审批', variant: 'warning' },
+  CHANGED: { label: '已变更', variant: 'default' },
+  SYNC_PENDING: { label: '待同步', variant: 'default' },
 }
 
 function ImageThumbnail({ src, alt = '' }: { src: string; alt?: string }) {
@@ -1014,6 +1019,32 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                               <Printer className="w-4 h-4" />
                             </Button>
                           )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="调查 ↔ 征收 同步"
+                            className="text-orange-600 hover:text-orange-700"
+                            onClick={async () => {
+                              if (!confirm('确认提交「调查→征收」同步请求？将由征收侧管理员审核后生效。')) return
+                              try {
+                                const res = await fetch('/api/sync-requests', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ tableId: table.id, recordId: record.id }),
+                                })
+                                const data = await res.json()
+                                if (res.ok) {
+                                  alert(data.message || `已提交 ${data.count ?? 1} 条同步请求`)
+                                } else {
+                                  alert(data.message || '同步失败')
+                                }
+                              } catch (error) {
+                                alert('网络错误')
+                              }
+                            }}
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"

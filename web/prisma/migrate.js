@@ -749,7 +749,311 @@ async function main() {
   } else {
     console.log('   NotificationSendLog 表已存在')
   }
-  
+
+  // ==================== 25. TableCategory 扩展 module 字段（v1.2.2） ====================
+  console.log('\n25. 扩展 TableCategory - 添加 module 字段...')
+  const [catCols] = await conn.execute('DESCRIBE `TableCategory`')
+  const catColNames = catCols.map(c => c.Field)
+  if (!catColNames.includes('module')) {
+    await conn.execute(`ALTER TABLE \`TableCategory\` ADD COLUMN \`module\` ENUM('SURVEY','LEVY','BOTH') NOT NULL DEFAULT 'BOTH'`)
+    await conn.execute(`ALTER TABLE \`TableCategory\` ADD INDEX \`TableCategory_module_idx\` (\`module\`)`)
+    console.log('   ✅ TableCategory.module 字段添加完成')
+  } else {
+    console.log('   TableCategory.module 已存在')
+  }
+
+  // ==================== 26. TableField.type 追加 LEVY_RELATION（v1.2.2） ====================
+  console.log('\n26. 扩展 TableField.type 枚举 - 添加 LEVY_RELATION...')
+  try {
+    await conn.execute(`
+      ALTER TABLE \`TableField\`
+      MODIFY COLUMN \`type\` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION','DETAIL_TABLE','LEVY_RELATION') NOT NULL
+    `)
+    console.log('   ✅ TableField.type 枚举扩展完成')
+  } catch (e) {
+    if (e.message && e.message.includes('Duplicate')) {
+      console.log('   TableField.type 枚举已包含 LEVY_RELATION')
+    } else {
+      console.log('   ⚠️  TableField.type 修改跳过:', e.message)
+    }
+  }
+
+  // ==================== 27. DataRecord.status 枚举追加 v1.2.2 新值 ====================
+  console.log('\n27. 扩展 DataRecord.status 枚举 - 添加 PENDING_APPROVAL/CHANGED/SYNC_PENDING...')
+  try {
+    await conn.execute(`
+      ALTER TABLE \`DataRecord\`
+      MODIFY COLUMN \`status\` ENUM('DRAFT','SUBMITTED','REVIEWED','REJECTED','ARCHIVED','PENDING_APPROVAL','CHANGED','SYNC_PENDING') NOT NULL DEFAULT 'DRAFT'
+    `)
+    console.log('   ✅ DataRecord.status 枚举扩展完成')
+  } catch (e) {
+    console.log('   ⚠️  DataRecord.status 修改跳过:', e.message)
+  }
+
+  // ==================== 28. DataSnapshot 数据快照表（v1.2.2） ====================
+  console.log('\n28. 创建 DataSnapshot 表...')
+  if (!tableNames.includes('datasnapshot')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`DataSnapshot\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`tableId\` INT NOT NULL,
+        \`recordId\` INT NULL,
+        \`beforeData\` LONGTEXT NULL,
+        \`afterData\` LONGTEXT NULL,
+        \`changedBy\` INT NULL,
+        \`changeType\` VARCHAR(191) NOT NULL,
+        \`diff\` LONGTEXT NULL,
+        \`metadata\` LONGTEXT NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX \`DataSnapshot_tableId_idx\` (\`tableId\`),
+        INDEX \`DataSnapshot_recordId_idx\` (\`recordId\`),
+        INDEX \`DataSnapshot_changedBy_idx\` (\`changedBy\`),
+        INDEX \`DataSnapshot_createdAt_idx\` (\`createdAt\`),
+        CONSTRAINT \`DataSnapshot_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`DataSnapshot_recordId_fkey\` FOREIGN KEY (\`recordId\`) REFERENCES \`DataRecord\`(\`id\`) ON DELETE SET NULL,
+        CONSTRAINT \`DataSnapshot_changedBy_fkey\` FOREIGN KEY (\`changedBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    console.log('   ✅ DataSnapshot 表创建完成')
+  } else {
+    console.log('   DataSnapshot 表已存在')
+  }
+
+  // ==================== 29. DataSyncRequest 同步请求表（v1.2.2） ====================
+  console.log('\n29. 创建 DataSyncRequest 表...')
+  if (!tableNames.includes('datasyncrequest')) {
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS \`DataSyncRequest\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`source\` ENUM('SURVEY','LEVY') NOT NULL DEFAULT 'SURVEY',
+        \`requestedBy\` INT NULL,
+        \`surveyTableId\` INT NOT NULL,
+        \`surveyRecordId\` INT NOT NULL,
+        \`levyTableId\` INT NOT NULL,
+        \`levyRecordId\` INT NOT NULL,
+        \`relationFieldId\` INT NULL,
+        \`snapshotId\` INT NOT NULL,
+        \`fieldDiffs\` LONGTEXT NOT NULL,
+        \`status\` ENUM('PENDING','APPROVED','REJECTED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+        \`approvalInstanceId\` INT NULL,
+        \`reviewedBy\` INT NULL,
+        \`reviewedAt\` DATETIME NULL,
+        \`reviewComment\` TEXT NULL,
+        \`createdAt\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updatedAt\` DATETIME NULL,
+        UNIQUE INDEX \`DataSyncRequest_snapshotId_key\` (\`snapshotId\`),
+        INDEX \`DataSyncRequest_survey_idx\` (\`surveyTableId\`, \`surveyRecordId\`),
+        INDEX \`DataSyncRequest_levy_idx\` (\`levyTableId\`, \`levyRecordId\`),
+        INDEX \`DataSyncRequest_status_idx\` (\`status\`),
+        INDEX \`DataSyncRequest_createdAt_idx\` (\`createdAt\`),
+        INDEX \`DataSyncRequest_requestedBy_idx\` (\`requestedBy\`),
+        CONSTRAINT \`DataSyncRequest_snapshotId_fkey\` FOREIGN KEY (\`snapshotId\`) REFERENCES \`DataSnapshot\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`DataSyncRequest_requestedBy_fkey\` FOREIGN KEY (\`requestedBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL,
+        CONSTRAINT \`DataSyncRequest_surveyTableId_fkey\` FOREIGN KEY (\`surveyTableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`DataSyncRequest_surveyRecordId_fkey\` FOREIGN KEY (\`surveyRecordId\`) REFERENCES \`DataRecord\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`DataSyncRequest_levyTableId_fkey\` FOREIGN KEY (\`levyTableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`DataSyncRequest_levyRecordId_fkey\` FOREIGN KEY (\`levyRecordId\`) REFERENCES \`DataRecord\`(\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`DataSyncRequest_relationFieldId_fkey\` FOREIGN KEY (\`relationFieldId\`) REFERENCES \`TableField\`(\`id\`) ON DELETE SET NULL,
+        CONSTRAINT \`DataSyncRequest_reviewedBy_fkey\` FOREIGN KEY (\`reviewedBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `)
+    await createUpdateTrigger('DataSyncRequest')
+    console.log('   ✅ DataSyncRequest 表创建完成')
+  } else {
+    console.log('   DataSyncRequest 表已存在，补 requestedBy 列（若缺失）...')
+    const [dsrCols] = await conn.execute('DESCRIBE `DataSyncRequest`')
+    const dsrColNames = dsrCols.map(c => c.Field)
+    if (!dsrColNames.includes('requestedBy')) {
+      await conn.execute(`ALTER TABLE \`DataSyncRequest\` ADD COLUMN \`requestedBy\` INT NULL`)
+      await conn.execute(`ALTER TABLE \`DataSyncRequest\` ADD INDEX \`DataSyncRequest_requestedBy_idx\` (\`requestedBy\`)`)
+      await conn.execute(`ALTER TABLE \`DataSyncRequest\` ADD CONSTRAINT \`DataSyncRequest_requestedBy_fkey\` FOREIGN KEY (\`requestedBy\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL`)
+      console.log('     ✅ requestedBy 列与索引/FK 已补')
+    } else {
+      console.log('     requestedBy 列已存在')
+    }
+  }
+
+  // ==================== 30. OperationLog 扩展关联字段（v1.2.2） ====================
+  console.log('\n30. 扩展 OperationLog - 添加 snapshotId/syncRequestId/approvalInstanceId...')
+  const [opCols] = await conn.execute('DESCRIBE `OperationLog`')
+  const opColNames = opCols.map(c => c.Field)
+  if (!opColNames.includes('snapshotId')) {
+    await conn.execute(`ALTER TABLE \`OperationLog\` ADD COLUMN \`snapshotId\` INT NULL`)
+    await conn.execute(`ALTER TABLE \`OperationLog\` ADD INDEX \`OperationLog_snapshotId_idx\` (\`snapshotId\`)`)
+    try { await conn.execute(`ALTER TABLE \`OperationLog\` ADD CONSTRAINT \`OperationLog_snapshotId_fkey\` FOREIGN KEY (\`snapshotId\`) REFERENCES \`DataSnapshot\`(\`id\`) ON DELETE SET NULL`) } catch(e) {}
+  }
+  if (!opColNames.includes('syncRequestId')) {
+    await conn.execute(`ALTER TABLE \`OperationLog\` ADD COLUMN \`syncRequestId\` INT NULL`)
+    await conn.execute(`ALTER TABLE \`OperationLog\` ADD INDEX \`OperationLog_syncRequestId_idx\` (\`syncRequestId\`)`)
+    try { await conn.execute(`ALTER TABLE \`OperationLog\` ADD CONSTRAINT \`OperationLog_syncRequestId_fkey\` FOREIGN KEY (\`syncRequestId\`) REFERENCES \`DataSyncRequest\`(\`id\`) ON DELETE SET NULL`) } catch(e) {}
+  }
+  if (!opColNames.includes('approvalInstanceId')) {
+    await conn.execute(`ALTER TABLE \`OperationLog\` ADD COLUMN \`approvalInstanceId\` INT NULL`)
+    await conn.execute(`ALTER TABLE \`OperationLog\` ADD INDEX \`OperationLog_approvalInstanceId_idx\` (\`approvalInstanceId\`)`)
+  }
+  console.log('   ✅ OperationLog 扩展完成')
+
+  // ==================== 31. DataTable 扩展：approvalTriggerConfig + featureFlags（v1.2.2 M2） ====================
+  console.log('\n31. 扩展 DataTable - 添加 approvalTriggerConfig / featureFlags / formLayoutConfig ...')
+  {
+    const [cols] = await conn.execute('DESCRIBE `DataTable`')
+    const colNames = cols.map(c => c.Field)
+    if (!colNames.includes('formLayoutConfig')) {
+      await conn.execute('ALTER TABLE `DataTable` ADD COLUMN `formLayoutConfig` LONGTEXT NULL')
+    }
+    if (!colNames.includes('approvalTriggerConfig')) {
+      await conn.execute('ALTER TABLE `DataTable` ADD COLUMN `approvalTriggerConfig` LONGTEXT NULL')
+    }
+    if (!colNames.includes('featureFlags')) {
+      await conn.execute('ALTER TABLE `DataTable` ADD COLUMN `featureFlags` LONGTEXT NULL')
+    }
+    console.log('   ✅ DataTable 扩展列完成')
+  }
+
+  // ==================== 32. ApprovalWorkflow 表 v2 列扩展（M2-T1） ====================
+  console.log('\n32. 扩展 ApprovalWorkflow - 添加 jsonDefinition / triggerEvents / timeoutPolicy / isDefault / featureFlag / publishedAt / publishedBy ...')
+  {
+    const [cols] = await conn.execute('DESCRIBE `ApprovalWorkflow`')
+    const colNames = cols.map(c => c.Field)
+    // status 枚举升级：ACTIVE/INACTIVE/DRAFT → DRAFT/PUBLISHED/ACTIVE/INACTIVE/ARCHIVED
+    try {
+      await conn.execute(`ALTER TABLE \`ApprovalWorkflow\` MODIFY COLUMN \`status\` ENUM('DRAFT','PUBLISHED','ACTIVE','INACTIVE','ARCHIVED') NOT NULL DEFAULT 'DRAFT'`)
+    } catch (e) { console.log('   ⚠️ status 枚举跳过:', e.message) }
+    if (!colNames.includes('jsonDefinition'))  await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `jsonDefinition` LONGTEXT NULL')
+    if (!colNames.includes('triggerEvents'))   await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `triggerEvents` LONGTEXT NULL')
+    if (!colNames.includes('timeoutPolicy'))   await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `timeoutPolicy` LONGTEXT NULL')
+    if (!colNames.includes('isDefault'))       await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `isDefault` TINYINT(1) NOT NULL DEFAULT 0')
+    if (!colNames.includes('featureFlag'))     await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `featureFlag` VARCHAR(191) NULL')
+    if (!colNames.includes('publishedAt'))     await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `publishedAt` DATETIME NULL')
+    if (!colNames.includes('publishedBy')) {
+      await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `publishedBy` INT NULL')
+      try { await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD CONSTRAINT `ApprovalWorkflow_publishedBy_fkey` FOREIGN KEY (`publishedBy`) REFERENCES `User`(`id`) ON DELETE SET NULL') } catch(e) {}
+    }
+    if (!colNames.includes('createdBy')) {
+      await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `createdBy` INT NULL')
+      try { await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD CONSTRAINT `ApprovalWorkflow_createdBy_fkey` FOREIGN KEY (`createdBy`) REFERENCES `User`(`id`) ON DELETE SET NULL') } catch(e) {}
+    }
+    // 索引
+    try { await conn.execute('CREATE INDEX `ApprovalWorkflow_isDefault_idx` ON `ApprovalWorkflow`(`isDefault`)') } catch(e) {}
+    try { await conn.execute('CREATE INDEX `ApprovalWorkflow_publishedBy_idx` ON `ApprovalWorkflow`(`publishedBy`)') } catch(e) {}
+    console.log('   ✅ ApprovalWorkflow v2 扩展完成')
+  }
+
+  // ==================== 33. ApprovalNode 表 v2 列扩展（M2-T1） ====================
+  console.log('\n33. 扩展 ApprovalNode - nodeKey / approvalMode / approverKind / approverCandidates / countersignQuorum / conditionExpression / parallelWaitMode / onRejectAction / gotoNodeKey / timeoutHours / timeoutNodeAction / ccTargets / notifyTemplateId / nodeConfig ...')
+  {
+    const [cols] = await conn.execute('DESCRIBE `ApprovalNode`')
+    const colNames = cols.map(c => c.Field)
+    // nodeType 枚举升级
+    try {
+      await conn.execute(`ALTER TABLE \`ApprovalNode\` MODIFY COLUMN \`nodeType\` ENUM('START','END','APPROVER_SINGLE','APPROVER_COUNTERSIGN','APPROVER_ORSIGN','CONDITION_BRANCH','PARALLEL','CC','ROLE','USER','FIELD','CONDITION') NOT NULL`)
+    } catch (e) { console.log('   ⚠️ nodeType 枚举跳过:', e.message) }
+    if (!colNames.includes('nodeKey'))              await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `nodeKey` VARCHAR(191) NULL')
+    if (!colNames.includes('approvalMode'))         await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `approvalMode` VARCHAR(191) NULL')
+    if (!colNames.includes('approverKind'))         await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `approverKind` VARCHAR(191) NULL')
+    if (!colNames.includes('approverCandidates'))   await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `approverCandidates` LONGTEXT NULL')
+    if (!colNames.includes('countersignQuorum'))    await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `countersignQuorum` INT NULL')
+    if (!colNames.includes('conditionExpression'))  await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `conditionExpression` LONGTEXT NULL')
+    if (!colNames.includes('parallelWaitMode'))     await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `parallelWaitMode` VARCHAR(191) NULL DEFAULT \'ALL\'')
+    if (!colNames.includes('onRejectAction'))       await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `onRejectAction` VARCHAR(191) NULL DEFAULT \'REJECT_INSTANCE\'')
+    if (!colNames.includes('gotoNodeKey'))          await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `gotoNodeKey` VARCHAR(191) NULL')
+    if (!colNames.includes('timeoutHours'))         await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `timeoutHours` INT NULL')
+    if (!colNames.includes('timeoutNodeAction')) {
+      try {
+        await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `timeoutNodeAction` ENUM(\'AUTO_PASS\',\'AUTO_REJECT\',\'NONE\') NULL DEFAULT \'NONE\'')
+      } catch (e) { console.log('   ⚠️ timeoutNodeAction 跳过:', e.message) }
+    }
+    if (!colNames.includes('ccTargets'))            await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `ccTargets` LONGTEXT NULL')
+    if (!colNames.includes('notifyTemplateId'))     await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `notifyTemplateId` INT NULL')
+    if (!colNames.includes('nodeConfig'))           await conn.execute('ALTER TABLE `ApprovalNode` ADD COLUMN `nodeConfig` LONGTEXT NULL')
+    console.log('   ✅ ApprovalNode v2 扩展完成')
+  }
+
+  // ==================== 34. ApprovalInstance 表 v2 列扩展（M2-T1） ====================
+  console.log('\n34. 扩展 ApprovalInstance - workflowVersion / triggerEvent / snapshotDataBefore / snapshotDataAfter / optimisticLock / parentInstanceId / ccList / approvalChain ...')
+  {
+    const [cols] = await conn.execute('DESCRIBE `ApprovalInstance`')
+    const colNames = cols.map(c => c.Field)
+    // status 枚举升级
+    try {
+      await conn.execute(`ALTER TABLE \`ApprovalInstance\` MODIFY COLUMN \`status\` ENUM('PENDING','APPROVED','REJECTED','CANCELLED','COMPLETED','RESTARTED') NOT NULL DEFAULT 'PENDING'`)
+    } catch (e) { console.log('   ⚠️ status 枚举跳过:', e.message) }
+    if (!colNames.includes('workflowVersion'))     await conn.execute('ALTER TABLE `ApprovalInstance` ADD COLUMN `workflowVersion` INT NULL')
+    if (!colNames.includes('triggerEvent'))        await conn.execute('ALTER TABLE `ApprovalInstance` ADD COLUMN `triggerEvent` VARCHAR(191) NULL')
+    if (!colNames.includes('snapshotDataBefore'))  await conn.execute('ALTER TABLE `ApprovalInstance` ADD COLUMN `snapshotDataBefore` LONGTEXT NULL')
+    if (!colNames.includes('snapshotDataAfter'))   await conn.execute('ALTER TABLE `ApprovalInstance` ADD COLUMN `snapshotDataAfter` LONGTEXT NULL')
+    if (!colNames.includes('optimisticLock'))      await conn.execute('ALTER TABLE `ApprovalInstance` ADD COLUMN `optimisticLock` DATETIME NULL')
+    if (!colNames.includes('parentInstanceId')) {
+      await conn.execute('ALTER TABLE `ApprovalInstance` ADD COLUMN `parentInstanceId` INT NULL')
+      try { await conn.execute('ALTER TABLE `ApprovalInstance` ADD CONSTRAINT `ApprovalInstance_parentInstanceId_fkey` FOREIGN KEY (`parentInstanceId`) REFERENCES `ApprovalInstance`(`id`) ON DELETE SET NULL') } catch(e) {}
+    }
+    if (!colNames.includes('ccList'))              await conn.execute('ALTER TABLE `ApprovalInstance` ADD COLUMN `ccList` LONGTEXT NULL')
+    if (!colNames.includes('approvalChain'))       await conn.execute('ALTER TABLE `ApprovalInstance` ADD COLUMN `approvalChain` LONGTEXT NULL')
+    // 索引
+    try { await conn.execute('CREATE INDEX `ApprovalInstance_workflowVersion_idx` ON `ApprovalInstance`(`workflowVersion`)') } catch(e) {}
+    try { await conn.execute('CREATE INDEX `ApprovalInstance_triggerEvent_idx` ON `ApprovalInstance`(`triggerEvent`)') } catch(e) {}
+    try { await conn.execute('CREATE INDEX `ApprovalInstance_parentInstanceId_idx` ON `ApprovalInstance`(`parentInstanceId`)') } catch(e) {}
+    console.log('   ✅ ApprovalInstance v2 扩展完成')
+  }
+
+  // ==================== 34b. M3-T2 ExportTemplate 扩展（Word 文书：documentConfig / paperSize / orientation / outputFormat + type 字段升级） ====================
+  console.log('\n34b. 扩展 ExportTemplate - documentConfig / paperSize / orientation / outputFormat / type 枚举 ...')
+  {
+    const [cols] = await conn.execute('DESCRIBE `ExportTemplate`')
+    const colNames = cols.map(c => c.Field)
+    try {
+      await conn.execute(`ALTER TABLE \`ExportTemplate\` MODIFY COLUMN \`type\` ENUM('STANDARD','CARD','GROUPED','FORM','WORD') NOT NULL DEFAULT 'STANDARD'`)
+    } catch (e) { console.log('   ⚠️ ExportType 枚举跳过:', e.message) }
+    if (!colNames.includes('documentConfig')) await conn.execute('ALTER TABLE `ExportTemplate` ADD COLUMN `documentConfig` LONGTEXT NULL')
+    if (!colNames.includes('paperSize'))      await conn.execute('ALTER TABLE `ExportTemplate` ADD COLUMN `paperSize` VARCHAR(191) NULL')
+    if (!colNames.includes('orientation'))    await conn.execute('ALTER TABLE `ExportTemplate` ADD COLUMN `orientation` VARCHAR(191) NULL')
+    if (!colNames.includes('outputFormat'))   await conn.execute('ALTER TABLE `ExportTemplate` ADD COLUMN `outputFormat` VARCHAR(191) NULL')
+    try { await conn.execute('CREATE INDEX `ExportTemplate_type_idx` ON `ExportTemplate`(`type`)') } catch(e) {}
+    console.log('   ✅ ExportTemplate v1.2.2 扩展完成')
+  }
+
+  // ==================== 35. ApprovalNodeInstance 表 v2 列扩展（M2-T1） ====================
+  console.log('\n35. 扩展 ApprovalNodeInstance - transferredFrom / countersignTotal / countersignApprovedCount / actionDetail / prevInstanceIds / dueAt / actualDurationSeconds / ipAddress / userAgent ...')
+  {
+    const [cols] = await conn.execute('DESCRIBE `ApprovalNodeInstance`')
+    const colNames = cols.map(c => c.Field)
+    // status 枚举升级
+    try {
+      await conn.execute(`ALTER TABLE \`ApprovalNodeInstance\` MODIFY COLUMN \`status\` ENUM('PENDING','APPROVED','REJECTED','TRANSFERRED','CANCELLED','TIMEOUT') NOT NULL DEFAULT 'PENDING'`)
+    } catch (e) { console.log('   ⚠️ status 枚举跳过:', e.message) }
+    // action 枚举升级
+    try {
+      await conn.execute(`ALTER TABLE \`ApprovalNodeInstance\` MODIFY COLUMN \`action\` ENUM('APPROVE','REJECT','TRANSFER','CANCEL','COUNTERSIGN_ADD','TIMEOUT','REVOKE','ESCALATE') NULL`)
+    } catch (e) { console.log('   ⚠️ action 枚举跳过:', e.message) }
+    if (!colNames.includes('transferredFrom')) {
+      await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `transferredFrom` INT NULL')
+      try { await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD CONSTRAINT `ApprovalNodeInstance_transferredFrom_fkey` FOREIGN KEY (`transferredFrom`) REFERENCES `User`(`id`) ON DELETE SET NULL') } catch(e) {}
+    }
+    if (!colNames.includes('countersignTotal'))        await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `countersignTotal` INT NULL')
+    if (!colNames.includes('countersignApprovedCount'))await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `countersignApprovedCount` INT NULL')
+    if (!colNames.includes('actionDetail'))            await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `actionDetail` LONGTEXT NULL')
+    if (!colNames.includes('prevInstanceIds'))         await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `prevInstanceIds` LONGTEXT NULL')
+    if (!colNames.includes('dueAt')) {
+      await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `dueAt` DATETIME NULL')
+      try { await conn.execute('CREATE INDEX `ApprovalNodeInstance_dueAt_idx` ON `ApprovalNodeInstance`(`dueAt`)') } catch(e) {}
+    }
+    if (!colNames.includes('actualDurationSeconds'))   await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `actualDurationSeconds` INT NULL')
+    if (!colNames.includes('ipAddress'))               await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `ipAddress` VARCHAR(191) NULL')
+    if (!colNames.includes('userAgent'))               await conn.execute('ALTER TABLE `ApprovalNodeInstance` ADD COLUMN `userAgent` TEXT NULL')
+    console.log('   ✅ ApprovalNodeInstance v2 扩展完成')
+  }
+
+  // ==================== 36. TableField.config 补默认（为 LEVY_RELATION 存储 surveyTableId 的配置） ====================
+  console.log('\n36. 校验 TableField.config / validation / options 列...')
+  {
+    const [cols] = await conn.execute('DESCRIBE `TableField`')
+    const colNames = cols.map(c => c.Field)
+    if (!colNames.includes('config'))      await conn.execute('ALTER TABLE `TableField` ADD COLUMN `config` LONGTEXT NULL')
+    if (!colNames.includes('validation'))  await conn.execute('ALTER TABLE `TableField` ADD COLUMN `validation` LONGTEXT NULL')
+    if (!colNames.includes('options'))     await conn.execute('ALTER TABLE `TableField` ADD COLUMN `options` LONGTEXT NULL')
+    console.log('   ✅ TableField 列校验完成')
+  }
+
   // ==================== 验证 ====================
   console.log('\n✅ 迁移完成！')
   const [finalTables] = await conn.execute('SHOW TABLES')

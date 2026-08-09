@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import {
   Database, Users, FileText, Paperclip,
   Clock, LogOut, ChevronRight, Shield, Server,
-  Monitor, Smartphone, Wrench, HardDrive
+  Monitor, Smartphone, Wrench, HardDrive, BadgeCheck, FileSignature, ClipboardCheck,
 } from 'lucide-react'
 
 interface H5SettingsClientProps {
@@ -72,6 +72,13 @@ export function H5SettingsClient({ user, stats, settings }: H5SettingsClientProp
       href: '/h5/admin/tables',
     },
     {
+      label: '审批中心',
+      desc: '待办 / 我发起的审批',
+      icon: ClipboardCheck,
+      color: 'bg-indigo-50 text-indigo-500',
+      href: '/h5/approval',
+    },
+    {
       label: '用户管理',
       desc: '管理用户账号和角色',
       icon: Users,
@@ -88,9 +95,16 @@ export function H5SettingsClient({ user, stats, settings }: H5SettingsClientProp
     {
       label: '模板管理',
       desc: '设计导出打印模板',
-      icon: Wrench,
+      icon: FileSignature,
       color: 'bg-orange-50 text-orange-500',
       href: '/h5/admin/templates',
+    },
+    {
+      label: '消息通知',
+      desc: '系统消息与文档生成',
+      icon: Paperclip,
+      color: 'bg-emerald-50 text-emerald-500',
+      href: '/h5/notifications',
     },
   ]
 
@@ -132,7 +146,12 @@ export function H5SettingsClient({ user, stats, settings }: H5SettingsClientProp
             </div>
             <div>
               <p className="text-xs text-gray-400">版本</p>
-              <p className="mt-0.5 text-gray-900">v1.1.1</p>
+              <p className="mt-0.5 text-gray-900 flex items-center gap-1.5">
+                v1.2.2
+                <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100">
+                  <BadgeCheck className="w-3 h-3" /> 权限树 + 审计中心
+                </span>
+              </p>
             </div>
             <div>
               <p className="text-xs text-gray-400">数据库</p>

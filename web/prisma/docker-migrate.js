@@ -259,37 +259,68 @@ async function main() {
   }
 
   if (!tableNames.includes('approvalnode')) {
+    // v2 精简结构：仅 nodeKey/nodeType/nodeName（完整定义存 jsonDefinition）
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS \`ApprovalNode\` (
         \`id\` INT AUTO_INCREMENT PRIMARY KEY,
         \`workflowId\` INT NOT NULL,
-        \`nodeType\` ENUM('ROLE','USER','FIELD','CONDITION') NOT NULL,
-        \`nodeOrder\` INT NOT NULL,
+        \`nodeKey\` VARCHAR(191) NOT NULL,
+        \`nodeType\` VARCHAR(191) NOT NULL,
         \`nodeName\` VARCHAR(191) NOT NULL,
-        \`roleId\` INT NULL,
-        \`userId\` INT NULL,
-        \`fieldName\` VARCHAR(191) NULL,
-        \`canView\` TINYINT(1) NOT NULL DEFAULT 1,
-        \`canEdit\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`canApprove\` TINYINT(1) NOT NULL DEFAULT 1,
-        \`canTransfer\` TINYINT(1) NOT NULL DEFAULT 1,
-        \`timeout\` INT NULL,
-        \`timeoutAction\` ENUM('AUTO_PASS','AUTO_REJECT','NONE') NULL,
-        \`conditionField\` VARCHAR(191) NULL,
-        \`conditionOp\` VARCHAR(191) NULL,
-        \`conditionValue\` VARCHAR(191) NULL,
-        \`nextNodeTrue\` INT NULL,
-        \`nextNodeFalse\` INT NULL,
         \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        UNIQUE INDEX \`ApprovalNode_workflowId_nodeKey_key\` (\`workflowId\`, \`nodeKey\`),
         INDEX \`ApprovalNode_workflowId_idx\` (\`workflowId\`),
-        INDEX \`ApprovalNode_nodeOrder_idx\` (\`nodeOrder\`),
-        CONSTRAINT \`ApprovalNode_workflowId_fkey\` FOREIGN KEY (\`workflowId\`) REFERENCES \`ApprovalWorkflow\`(\`id\`) ON DELETE CASCADE,
-        CONSTRAINT \`ApprovalNode_roleId_fkey\` FOREIGN KEY (\`roleId\`) REFERENCES \`Role\`(\`id\`) ON DELETE SET NULL,
-        CONSTRAINT \`ApprovalNode_userId_fkey\` FOREIGN KEY (\`userId\`) REFERENCES \`User\`(\`id\`) ON DELETE SET NULL
+        CONSTRAINT \`ApprovalNode_workflowId_fkey\` FOREIGN KEY (\`workflowId\`) REFERENCES \`ApprovalWorkflow\`(\`id\`) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `)
     console.log('   ✅ ApprovalNode 表创建完成')
+  } else {
+    // 旧版 ApprovalNode（30+ 字段）→ v2 精简结构迁移
+    console.log('   检查 ApprovalNode 表结构（v2 精简迁移）...')
+    const anCols = await prisma.$queryRaw`DESCRIBE \`ApprovalNode\``
+    const anColNames = anCols.map(c => c.Field)
+    if (anColNames.includes('nodeOrder')) {
+      console.log('   迁移 ApprovalNode: 旧结构 -> v2 精简结构')
+      if (!anColNames.includes('nodeKey')) {
+        await prisma.$executeRawUnsafe('ALTER TABLE `ApprovalNode` ADD COLUMN `nodeKey` VARCHAR(191) NULL')
+        await prisma.$executeRawUnsafe('UPDATE `ApprovalNode` SET `nodeKey` = CAST(`id` AS CHAR) WHERE `nodeKey` IS NULL')
+      }
+      // 删除旧索引
+      const anIdx = await prisma.$queryRaw`SHOW INDEX FROM \`ApprovalNode\``
+      const idxNames = [...new Set(anIdx.map(i => i.Key_name))]
+      for (const name of idxNames) {
+        if (name === 'PRIMARY' || name === 'ApprovalNode_workflowId_nodeKey_key') continue
+        try { await prisma.$executeRawUnsafe(`ALTER TABLE \`ApprovalNode\` DROP INDEX \`${name}\``) } catch {}
+      }
+      // 删除指向旧字段的外键约束
+      const fks = await prisma.$queryRaw`
+        SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ApprovalNode' AND REFERENCED_TABLE_NAME IS NOT NULL`
+      for (const f of fks) {
+        const cname = f.CONSTRAINT_NAME || f.constraint_name
+        if (cname === 'ApprovalNode_workflowId_fkey') continue
+        try { await prisma.$executeRawUnsafe(`ALTER TABLE \`ApprovalNode\` DROP FOREIGN KEY \`${cname}\``) } catch {}
+      }
+      // 删除旧列
+      const oldCols = ['nodeOrder','roleId','userId','fieldName','canView','canEdit','canApprove','canTransfer','timeout','timeoutAction','conditionField','conditionOp','conditionValue','nextNodeTrue','nextNodeFalse','approvalMode','approverKind','approverCandidates','ccTargets','expression','label','featureFlag','dueSeconds']
+      for (const c of oldCols) {
+        if (anColNames.includes(c)) {
+          try { await prisma.$executeRawUnsafe(`ALTER TABLE \`ApprovalNode\` DROP COLUMN \`${c}\``) } catch {}
+        }
+      }
+      // nodeType: ENUM -> VARCHAR(191)
+      await prisma.$executeRawUnsafe('ALTER TABLE `ApprovalNode` MODIFY COLUMN `nodeType` VARCHAR(191) NOT NULL')
+      await prisma.$executeRawUnsafe('ALTER TABLE `ApprovalNode` MODIFY COLUMN `nodeKey` VARCHAR(191) NOT NULL')
+      // 唯一索引（先清理重复的 workflowId+nodeKey）
+      try {
+        await prisma.$executeRawUnsafe(`
+          DELETE a FROM \`ApprovalNode\` a
+          JOIN \`ApprovalNode\` b ON a.workflowId = b.workflowId AND a.nodeKey = b.nodeKey AND a.id > b.id`)
+        await prisma.$executeRawUnsafe('ALTER TABLE `ApprovalNode` ADD UNIQUE INDEX `ApprovalNode_workflowId_nodeKey_key` (`workflowId`, `nodeKey`)')
+      } catch {}
+      console.log('   ✅ ApprovalNode v2 精简迁移完成')
+    }
   }
 
   if (!tableNames.includes('approvalinstance')) {

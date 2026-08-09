@@ -17,11 +17,18 @@ export default async function H5NewRecordPage({ params }: { params: { tableName:
   }
 
   const isAdmin = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER'
+  let canCreate = isAdmin
   if (!isAdmin) {
     const perm = await prisma.tablePermission.findFirst({
       where: { userId: user.id, tableId: table.id },
     })
-    if (!perm || !perm.canCreate) {
+    canCreate = !!perm?.canCreate
+    // M4 树形权限
+    const rolePerms: string[] = (user.role as any)?.permissions ?? []
+    if (rolePerms.length) {
+      canCreate = canCreate || new Set(rolePerms).has(`tableOp:${table.id}:CREATE`)
+    }
+    if (!canCreate) {
       return <div className="p-8 text-center text-gray-500">无权限新增</div>
     }
   }

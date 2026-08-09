@@ -9,7 +9,7 @@ export default async function TemplateDetailPage({
   params: { id: string }
 }) {
   const user = await getCurrentUser()
-  
+
   if (!user) {
     redirect('/login')
   }
@@ -33,6 +33,11 @@ export default async function TemplateDetailPage({
 
   if (!template) {
     redirect('/dashboard/export-templates')
+  }
+
+  // v1.2.2+: WORD 类型模板走专用 Word 设计器
+  if (template.type === 'WORD') {
+    redirect(`/dashboard/word-templates/${template.id}`)
   }
 
   return <ExcelTemplateDesigner template={template as any} />

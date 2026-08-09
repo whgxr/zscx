@@ -24,15 +24,16 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogTrigger 
-} from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ApprovalFlowDesigner } from '@/components/approval-flow-designer'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import type { User } from '@prisma/client'
 
 interface WorkflowTable {
@@ -112,15 +113,35 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
   const router = useRouter()
   const [workflows, setWorkflows] = useState<ApprovalWorkflowWithTable[]>([])
   const [instances, setInstances] = useState<ApprovalInstanceWithRelations[]>([])
-  const [selectedWorkflow, setSelectedWorkflow] = useState<ApprovalWorkflowWithTable | null>(null)
-  const [showDesigner, setShowDesigner] = useState(false)
+  const [tables, setTables] = useState<WorkflowTable[]>([])
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [newWorkflowName, setNewWorkflowName] = useState('新审批流程')
+  const [newWorkflowTableId, setNewWorkflowTableId] = useState<number | ''>('')
+  const [creating, setCreating] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [activeTab, setActiveTab] = useState('workflows')
 
   useEffect(() => {
     loadWorkflows()
     loadInstances()
+    loadTables()
   }, [])
+
+  const loadTables = async () => {
+    try {
+      const res = await fetch('/api/tables')
+      if (res.ok) {
+        const data = await res.json()
+        const list = (data.tables || data.data || []) as any[]
+        setTables(list.map(t => ({ label: t.label || t.name, name: t.name })))
+        if (list.length && !newWorkflowTableId) {
+          setNewWorkflowTableId(list[0].id ?? list[0].tableId ?? '')
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const loadWorkflows = async () => {
     try {
@@ -146,31 +167,25 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
     }
   }
 
-  const handleSaveWorkflow = async (nodes: any[]) => {
+  const handleCreateWorkflow = async () => {
+    if (!newWorkflowTableId) { alert('请先选择关联数据表'); return }
     try {
-      const data = {
-        name: selectedWorkflow?.name || '新流程',
-        tableId: selectedWorkflow?.tableId || 1,
-        description: selectedWorkflow?.description || '',
-        nodes,
-      }
-      if (selectedWorkflow?.id) {
-        await fetch(`/api/approval/workflows/${selectedWorkflow.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
-        })
-      } else {
-        await fetch('/api/approval/workflows', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
-        })
-      }
-      setShowDesigner(false)
-      loadWorkflows()
-    } catch (error) {
-      console.error('Failed to save workflow:', error)
+      setCreating(true)
+      const res = await fetch('/api/approval/v2/workflows/blank', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newWorkflowName.trim() || '新审批流程',
+          tableId: Number(newWorkflowTableId),
+        }),
+      })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? '创建失败')
+      router.push(`/approval/workflows/${json.data.workflowId}/designer`)
+    } catch (e: any) {
+      alert('创建流程失败：' + (e.message || e))
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -261,10 +276,7 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
               onChange={(e) => setSearchKeyword(e.target.value)}
               className="w-64"
             />
-            <Button onClick={() => {
-              setSelectedWorkflow(null)
-              setShowDesigner(true)
-            }}>
+            <Button onClick={() => setShowCreateDialog(true)}>
               <Plus className="w-4 h-4 mr-2" />
               创建流程
             </Button>
@@ -292,11 +304,10 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
                 
                 <div className="flex items-center gap-2 mt-4 pt-4 border-t">
                   <Button variant="ghost" size="sm" onClick={() => {
-                    setSelectedWorkflow(workflow)
-                    setShowDesigner(true)
+                    router.push(`/approval/workflows/${workflow.id}/designer`)
                   }}>
                     <Edit className="w-4 h-4 mr-1" />
-                    编辑
+                    设计器编辑
                   </Button>
                   {workflow.status === 'INACTIVE' ? (
                     <Button variant="ghost" size="sm" onClick={() => handleActivateWorkflow(workflow.id)}>
@@ -433,17 +444,61 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={showDesigner} onOpenChange={setShowDesigner}>
-        <DialogContent className="max-w-full max-h-[90vh] p-0">
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>{selectedWorkflow ? '编辑审批流程' : '创建审批流程'}</DialogTitle>
+            <DialogTitle>创建审批流程</DialogTitle>
+            <DialogDescription>
+              创建后将跳转到完整流程设计器（支持审批节点、条件分支、抄送、全局启动条件等配置）。
+            </DialogDescription>
           </DialogHeader>
-          <div className="h-[70vh]">
-            <ApprovalFlowDesigner 
-              nodes={selectedWorkflow?.nodes || []} 
-              onSave={handleSaveWorkflow} 
-            />
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-sm">流程名称</Label>
+              <Input
+                value={newWorkflowName}
+                onChange={e => setNewWorkflowName(e.target.value)}
+                placeholder="例如：住户调查审批流程"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm">绑定数据表</Label>
+              {tables.length > 0 ? (
+                <Select
+                  value={String(newWorkflowTableId)}
+                  onValueChange={v => setNewWorkflowTableId(Number(v))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="请选择数据表" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tables.map((t, idx) => (
+                      <SelectItem
+                        key={t.name + '_' + idx}
+                        // tables list 里没有 id，这里通过 name 去反查不太准；优先用 tableId（若在 tables 返回有）否则用 index+1
+                        value={String((t as any).id ?? (t as any).tableId ?? (idx + 1))}
+                      >
+                        {t.label ?? t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input disabled placeholder="正在加载数据表..." />
+              )}
+              <p className="text-[11px] text-gray-500">
+                流程绑定后，该表的数据审批会自动根据「流程启动条件」命中本流程或其他同表流程。
+              </p>
+            </div>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)} disabled={creating}>
+              取消
+            </Button>
+            <Button onClick={handleCreateWorkflow} disabled={creating || !newWorkflowTableId}>
+              {creating ? '创建中...' : '创建并进入设计器'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

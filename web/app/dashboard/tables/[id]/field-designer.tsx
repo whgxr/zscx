@@ -63,6 +63,7 @@ import {
   Settings,
   Table2,
   Layers,
+  Link2,
 } from 'lucide-react'
 import { FieldType, DataTable, TableField, Role } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
@@ -98,6 +99,8 @@ const fieldTypeConfig: Record<FieldType, { label: string; icon: any }> = {
   RICHTEXT: { label: '富文本', icon: AlignLeft },
   RELATION: { label: '关联表', icon: Table },
   DETAIL_TABLE: { label: '明细表单', icon: Layers },
+  // v1.2.2+ 征收关联调查（一户一协议，1:1，写入时自动同步数据快照）
+  LEVY_RELATION: { label: '征收·关联调查', icon: Link2 },
 }
 
 interface ImportField {

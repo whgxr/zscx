@@ -11,6 +11,10 @@ const createTemplateSchema = z.object({
   category: z.union([z.string(), z.array(z.string())]).optional(),
   description: z.string().optional().nullable(),
   config: z.record(z.any()),
+  documentConfig: z.any().optional(),
+  paperSize: z.string().optional(),
+  orientation: z.string().optional(),
+  outputFormat: z.string().optional(),
   isDefault: z.boolean().optional(),
 })
 
@@ -115,6 +119,10 @@ export async function POST(req: NextRequest) {
         category: normalizeCategory(data.category),
         description: data.description || null,
         config: data.config as any,
+        documentConfig: data.documentConfig ?? undefined,
+        paperSize: data.paperSize ?? undefined,
+        orientation: data.orientation ?? undefined,
+        outputFormat: data.outputFormat ?? undefined,
         isDefault: data.isDefault || false,
         createdBy: user.id,
       },

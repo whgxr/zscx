@@ -77,6 +77,7 @@ const typeIcons: Record<string, any> = {
   CARD: LayoutGrid,
   GROUPED: Layers,
   FORM: FileCheck,
+  WORD: FileText,
 }
 
 const typeLabels: Record<string, string> = {
@@ -84,6 +85,7 @@ const typeLabels: Record<string, string> = {
   CARD: '卡片式',
   GROUPED: '分组汇总',
   FORM: '表单式',
+  WORD: 'Word 文书',
 }
 
 const categoryLabels: Record<string, string> = {
@@ -140,33 +142,48 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
     setLoading(true)
     try {
       const table = tables.find(t => t.id.toString() === formData.tableId)
-      const defaultConfig = {
-        fields: table?.fields.filter(f => (f as any).showInList).map(f => ({ name: f.name, label: f.label })) || [],
-        zebraStripes: true,
-        showBorder: true,
-        columnWidth: 15,
-        fontSize: 11,
-        cardsPerRow: 2,
-        groupField: table?.fields[0]?.name || '',
-        columnsPerRow: 2,
+      const isWord = formData.type === 'WORD'
+      const defaultConfig = isWord
+        ? { blocks: [] }
+        : {
+            fields: table?.fields.filter(f => (f as any).showInList).map(f => ({ name: f.name, label: f.label })) || [],
+            zebraStripes: true,
+            showBorder: true,
+            columnWidth: 15,
+            fontSize: 11,
+            cardsPerRow: 2,
+            groupField: table?.fields[0]?.name || '',
+            columnsPerRow: 2,
+          }
+
+      const payload: any = {
+        ...formData,
+        tableId: parseInt(formData.tableId),
+        category: formData.categories,
+        config: defaultConfig,
+      }
+      if (isWord) {
+        payload.documentConfig = { blocks: [] }
+        payload.paperSize = 'A4'
+        payload.orientation = 'portrait'
+        payload.outputFormat = 'DOCX'
       }
 
       const res = await fetch('/api/export-templates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          tableId: parseInt(formData.tableId),
-          category: formData.categories,
-          config: defaultConfig,
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (res.ok) {
         const data = await res.json()
         setDialogOpen(false)
         setFormData({ name: '', tableId: '', type: 'STANDARD', categories: ['EXPORT'], description: '' })
-        router.push(`/dashboard/export-templates/${data.template.id}`)
+        if (isWord) {
+          router.push(`/dashboard/word-templates/${data.template.id}`)
+        } else {
+          router.push(`/dashboard/export-templates/${data.template.id}`)
+        }
       } else {
         const data = await res.json()
         alert(data.message || '创建失败')
@@ -530,6 +547,7 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
                     <SelectItem value="CARD">卡片式</SelectItem>
                     <SelectItem value="GROUPED">分组汇总</SelectItem>
                     <SelectItem value="FORM">表单式</SelectItem>
+                    <SelectItem value="WORD">Word 文书</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -697,7 +715,7 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
                             variant="ghost"
                             size="sm"
                             title="编辑模板"
-                            onClick={() => router.push(`/dashboard/export-templates/${template.id}`)}
+                            onClick={() => router.push(template.type === 'WORD' ? `/dashboard/word-templates/${template.id}` : `/dashboard/export-templates/${template.id}`)}
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
@@ -813,6 +831,7 @@ export function ExportTemplatesClient({ initialTemplates, tables, userRole }: Ex
                   <SelectItem value="CARD">卡片式</SelectItem>
                   <SelectItem value="GROUPED">分组汇总</SelectItem>
                   <SelectItem value="FORM">表单式</SelectItem>
+                  <SelectItem value="WORD">Word 文书</SelectItem>
                 </SelectContent>
               </Select>
             </div>

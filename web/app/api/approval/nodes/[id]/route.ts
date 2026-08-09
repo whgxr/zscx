@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { approvalEngine } from '@/lib/approval-engine'
+import { executeNodeAction } from '@/lib/approval-service'
 import { getCurrentUser } from '@/lib/auth'
 import { z } from 'zod'
 
@@ -20,20 +20,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const data = actionSchema.parse(body)
 
     const nodeInstanceId = parseInt(params.id)
+    const ip = (req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '').split(',')[0].trim() || null
+    const ua = req.headers.get('user-agent') || null
 
-    switch (data.action) {
-      case 'APPROVE':
-        await approvalEngine.approve(nodeInstanceId, user.id, data.comment)
-        break
-      case 'REJECT':
-        await approvalEngine.reject(nodeInstanceId, user.id, data.comment)
-        break
-      case 'TRANSFER':
-        if (!data.transferredTo) {
-          return NextResponse.json({ message: '请指定转交对象' }, { status: 400 })
-        }
-        await approvalEngine.transfer(nodeInstanceId, user.id, data.transferredTo, data.comment)
-        break
+    const res = await executeNodeAction({
+      nodeInstanceId,
+      assigneeId: user.id,
+      action: data.action,
+      comment: data.comment ?? null,
+      transferredTo: data.transferredTo ?? null,
+      ip,
+      ua,
+    })
+
+    if (!res.ok) {
+      return NextResponse.json({ message: res.error ?? '操作失败' }, { status: res.status ?? 400 })
     }
 
     return NextResponse.json({ message: '操作成功' })

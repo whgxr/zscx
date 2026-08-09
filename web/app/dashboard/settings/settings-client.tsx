@@ -355,7 +355,7 @@ export function SettingsClient({ userRole, stats }: SettingsClientProps) {
             </div>
             <div>
               <span className="text-gray-500">版本</span>
-              <p className="font-medium mt-1">v1.2.1</p>
+              <p className="font-medium mt-1">v1.2.2</p>
             </div>
             <div>
               <span className="text-gray-500">数据库</span>

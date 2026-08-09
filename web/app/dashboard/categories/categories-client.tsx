@@ -81,6 +81,7 @@ interface CategoryItem {
   level: number
   sortOrder: number
   icon: string | null
+  module: string | null
   createdAt: Date
   updatedAt: Date
   _count: {
@@ -220,6 +221,7 @@ export function CategoriesClient({ initialCategories, userRole }: CategoriesClie
     name: '',
     icon: '',
     sortOrder: 0,
+    module: 'BOTH' as string,
   })
 
   const tree = buildTree(categories)
@@ -244,6 +246,7 @@ export function CategoriesClient({ initialCategories, userRole }: CategoriesClie
       name: '',
       icon: '',
       sortOrder: 0,
+      module: 'BOTH',
     })
     setDialogOpen(true)
   }
@@ -255,6 +258,7 @@ export function CategoriesClient({ initialCategories, userRole }: CategoriesClie
       name: category.name,
       icon: category.icon || '',
       sortOrder: category.sortOrder,
+      module: category.module || 'BOTH',
     })
     setDialogOpen(true)
   }
@@ -272,6 +276,7 @@ export function CategoriesClient({ initialCategories, userRole }: CategoriesClie
         parentId: parentId,
         icon: formData.icon || null,
         sortOrder: formData.sortOrder,
+        module: formData.module,
       }
 
       let url = '/api/categories'
@@ -448,6 +453,13 @@ export function CategoriesClient({ initialCategories, userRole }: CategoriesClie
             第{node.level}级
           </Badge>
 
+          <Badge
+            variant={node.module === 'LEVY' ? 'default' : node.module === 'SURVEY' ? 'secondary' : 'outline'}
+            className="text-xs"
+          >
+            {node.module === 'SURVEY' ? '调查' : node.module === 'LEVY' ? '征收' : '调查+征收'}
+          </Badge>
+
           <Badge variant="secondary" className="text-xs">
             {node._count.tables} 个项目
           </Badge>
@@ -599,6 +611,26 @@ export function CategoriesClient({ initialCategories, userRole }: CategoriesClie
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>功能模块</Label>
+                <Select
+                  value={formData.module}
+                  onValueChange={(value) => setFormData({ ...formData, module: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BOTH">调查 + 征收</SelectItem>
+                    <SelectItem value="SURVEY">仅调查</SelectItem>
+                    <SelectItem value="LEVY">仅征收</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">
+                  设置该分类所属功能模块，侧边栏将按「调查」「征收」分组显示
+                </p>
               </div>
 
               <div className="space-y-2">

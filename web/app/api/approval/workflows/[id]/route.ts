@@ -38,13 +38,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       where: { id: parseInt(params.id) },
       include: {
         table: { select: { label: true, name: true } },
-        nodes: {
-          orderBy: { nodeOrder: 'asc' },
-          include: {
-            role: { select: { name: true, label: true } },
-            user: { select: { realName: true, username: true } },
-          },
-        },
+        nodes: { orderBy: { id: 'asc' } },
       },
     })
 
@@ -94,22 +88,10 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     if (data.nodes) {
       await prisma.approvalNode.deleteMany({ where: { workflowId: parseInt(params.id) } })
       updateData.nodes = {
-        create: data.nodes.map(node => ({
-          nodeType: node.nodeType,
-          nodeOrder: node.nodeOrder,
-          label: node.label,
-          userId: node.userId,
-          roleId: node.roleId,
-          fieldName: node.fieldName,
-          conditionField: node.conditionField,
-          conditionOp: node.conditionOp,
-          conditionValue: node.conditionValue,
-          nextNodeTrue: node.nextNodeTrue,
-          nextNodeFalse: node.nextNodeFalse,
-          canView: node.canView,
-          canEdit: node.canEdit,
-          canApprove: node.canApprove,
-          canTransfer: node.canTransfer,
+        create: data.nodes.map((node, idx) => ({
+          nodeKey: `node_${idx}_${Date.now()}`,
+          nodeType: node.nodeType === 'USER' ? 'APPROVER_SINGLE' : node.nodeType === 'ROLE' ? 'APPROVER_SINGLE' : node.nodeType === 'FIELD' ? 'APPROVER_SINGLE' : node.nodeType,
+          nodeName: node.label,
         })),
       }
     }

@@ -105,7 +105,6 @@ export class NotificationService {
     const where: any = {
       OR: [
         { targetType: 'ALL' },
-        { targetType: 'USER', targetUserIds: { contains: `[${userId}]` } }
       ],
       expiredAt: { not: { lt: new Date() } }
     }
@@ -129,11 +128,22 @@ export class NotificationService {
         creator: { select: { realName: true, avatar: true } }
       },
       orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize
+      // 这里不走 skip/take，而是取稍大一点再后处理过滤 USER 类型，避免 JSON where 兼容性问题
+      take: pageSize * 5,
     })
 
-    const notificationIds = notifications.map(n => n.id)
+    // 后处理：过滤掉 targetType=USER 但当前 userId 不在 targetUserIds 里的记录
+    const filtered = notifications.filter((n: any) => {
+      if (n.targetType !== 'USER') return true
+      try {
+        const ids = Array.isArray(n.targetUserIds) ? n.targetUserIds : []
+        return ids.includes(userId)
+      } catch {
+        return false
+      }
+    }).slice(0, pageSize)
+
+    const notificationIds = filtered.map(n => n.id)
     const readRecords = await prisma.notificationRead.findMany({
       where: { notificationId: { in: notificationIds }, userId },
       select: { notificationId: true, readAt: true, isDeleted: true }
@@ -141,7 +151,7 @@ export class NotificationService {
 
     const readMap = new Map(readRecords.map(r => [r.notificationId, r]))
 
-    return notifications.map(n => ({
+    return filtered.map(n => ({
       ...n,
       isRead: !!readMap.get(n.id)?.readAt,
       isDeleted: !!readMap.get(n.id)?.isDeleted,

@@ -11,7 +11,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import {
   ArrowLeft, Plus, Search, Eye, ChevronRight,
   Paperclip, Image as ImageIcon, FileText, Upload,
-  X, Loader2, QrCode, Copy, Check, Share2
+  X, Loader2, QrCode, Copy, Check, Share2, Send, FileSignature, RefreshCcw,
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { FieldType, RecordStatus } from '@prisma/client'
@@ -22,6 +22,10 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   REVIEWED: { label: '已审核', variant: 'success' },
   REJECTED: { label: '已驳回', variant: 'destructive' },
   ARCHIVED: { label: '已归档', variant: 'outline' },
+  // v1.2.2+ 征收模块状态
+  PENDING_APPROVAL: { label: '待审批', variant: 'warning' },
+  CHANGED: { label: '已变更', variant: 'default' },
+  SYNC_PENDING: { label: '待同步', variant: 'default' },
 }
 
 const statusColorMap: Record<string, string> = {
@@ -326,6 +330,73 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
                         </button>
                         <ChevronRight className="w-4 h-4 text-gray-300" />
                       </div>
+                    </div>
+
+                    {/* 快捷操作栏 */}
+                    <div className="mt-2 -mx-1 flex flex-wrap gap-1.5">
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          if (!confirm('确认发起审批？')) return
+                          try {
+                            const res = await fetch('/api/approval/instances', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ tableId: table.id, recordId: record.id, triggerEvent: 'MANUAL' }),
+                            })
+                            const data = await res.json()
+                            if (res.ok) { alert('已发起审批'); fetchRecords() }
+                            else alert(data.message || '发起失败')
+                          } catch { alert('发起失败') }
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-100"
+                      >
+                        <Send className="w-3 h-3" /> 发起审批
+                      </button>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            const res = await fetch('/api/documents/generate', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ tableId: table.id, recordId: record.id }),
+                            })
+                            const data = await res.json()
+                            if (res.ok && data.downloadUrl) {
+                              window.open(data.downloadUrl, '_blank')
+                            } else if (res.ok && data.jobId) {
+                              alert('文书生成任务已提交，完成后在通知中查看')
+                            } else {
+                              alert(data.message || '生成失败')
+                            }
+                          } catch { alert('生成失败') }
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-100"
+                      >
+                        <FileSignature className="w-3 h-3" /> 生成文书
+                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            if (!confirm('确认触发「调查↔征收」同步？')) return
+                            try {
+                              const res = await fetch('/api/sync-requests', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ tableId: table.id, recordId: record.id }),
+                              })
+                              const data = await res.json()
+                              if (res.ok) { alert('同步请求已提交'); fetchRecords() }
+                              else alert(data.message || '同步失败')
+                            } catch { alert('同步失败') }
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-amber-50 text-amber-600 border border-amber-100"
+                        >
+                          <RefreshCcw className="w-3 h-3" /> 同步
+                        </button>
+                      )}
                     </div>
                   </div>
                 </Card>

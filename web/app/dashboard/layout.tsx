@@ -28,6 +28,7 @@ export default async function DashboardLayout({
         name: true,
         label: true,
         icon: true,
+        category: { select: { id: true, name: true, module: true } },
       },
     })
   } else {
@@ -45,6 +46,7 @@ export default async function DashboardLayout({
             icon: true,
             status: true,
             isDetailTable: true,
+            category: { select: { id: true, name: true, module: true } },
           },
         },
       },

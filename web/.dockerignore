@@ -9,3 +9,9 @@ README.md
 .env.*.local
 public/uploads/*
 !public/uploads/.gitkeep
+backups
+.android-sdk
+.jdk
+android
+tsconfig.tsbuildinfo
+.next-build.log

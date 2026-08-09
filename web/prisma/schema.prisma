@@ -37,11 +37,19 @@ model User {
   initiatedApprovals      ApprovalInstance[]       @relation("InitiatedApprovals")
   assignedApprovals       ApprovalNodeInstance[]   @relation("AssignedApprovals")
   transferredApprovals    ApprovalNodeInstance[]   @relation("TransferredApprovals")
-  approvalNodes           ApprovalNode[]           @relation("UserApprovalNodes")
+  transferredFromApprovals ApprovalNodeInstance[]  @relation("TransferredFromApprovals")
+  publishedWorkflows      ApprovalWorkflow[]       @relation("PublishedWorkflows")
+  createdWorkflows        ApprovalWorkflow[]       @relation("CreatedWorkflows")
   thirdPartyBindings      UserThirdPartyBinding[]
   notificationReadRecords NotificationRead[]
   notificationSendLogs    NotificationSendLog[]
   createdNotifications    Notification[]           @relation("CreatedNotifications")
+  // v1.2.2+ 快照与同步反向关系
+  operatedSnapshots       DataSnapshot[]           @relation("SnapshotOperator")
+  initiatedSyncRequests   DataSyncRequest[]        @relation("SyncRequester")
+  reviewedSyncRequests    DataSyncRequest[]        @relation("SyncReviewer")
+  // v1.2.2+ 审计日志反向关系
+  operationLogs           OperationLog[]           @relation("OperationLogUser")
 
   @@index([username])
   @@index([roleId])
@@ -60,13 +68,15 @@ model Role {
   canManageSettings   Boolean      @default(false)
   canManageApproval   Boolean      @default(false)
   canPublishNotification Boolean    @default(false)
+  // v1.2.2 权限树：按模块→分类→表→操作 层级保存选定位的扁平 id 集合（加上父级自动标记）
+  // 例: ["module:SURVEY","category:12","table:34","tableOp:34:VIEW","tableOp:34:CREATE",...]
+  permissions         Json?
   isSystem            Boolean      @default(false)
   sortOrder           Int          @default(0)
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
   users               User[]
-  approvalNodes       ApprovalNode[]  @relation("RoleApprovalNodes")
 
   @@index([sortOrder])
 }
@@ -137,24 +147,32 @@ model SystemSetting {
   @@index([key])
 }
 
+enum CategoryModule {
+  SURVEY // 调查模块
+  LEVY   // 征收模块
+  BOTH   // 两个模块都显示
+}
+
 // 项目分类（3级分类）
 model TableCategory {
-  id        Int           @id @default(autoincrement())
-  name      String        // 分类名称
-  parentId  Int?          // 父分类ID
-  level     Int           @default(1) // 层级：1,2,3
-  sortOrder Int           @default(0)
+  id        Int              @id @default(autoincrement())
+  name      String           // 分类名称
+  parentId  Int?             // 父分类ID
+  level     Int              @default(1) // 层级：1,2,3
+  sortOrder Int              @default(0)
   icon      String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  module    CategoryModule   @default(BOTH) // 所属功能模块（v1.2.2+）
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
-  parent    TableCategory? @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children  TableCategory[] @relation("CategoryHierarchy")
+  parent    TableCategory?   @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  TableCategory[]  @relation("CategoryHierarchy")
   tables    DataTable[]
 
   @@index([parentId])
   @@index([sortOrder])
   @@index([level])
+  @@index([module])
 }
 
 // 用户仪表盘配置
@@ -179,6 +197,8 @@ model DataTable {
   sortOrder         Int              @default(0)
   isDetailTable     Boolean          @default(false) // 是否为明细子表
   formLayoutConfig  Json?            // 表单布局配置（分组、列宽等）
+  approvalTriggerConfig Json?       // v2 审批触发绑定：{ MANUAL_SUBMIT:{workflowId,workflowVersion}, LEVY_SAVE:{...} }
+  featureFlags      Json?            // 功能开关（如新审批流启用 / 征收模块启用）
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   createdBy         Int?
@@ -194,6 +214,12 @@ model DataTable {
   category           TableCategory?  @relation(fields: [categoryId], references: [id])
   approvalWorkflows  ApprovalWorkflow[]
   approvalInstances  ApprovalInstance[]
+  // v1.2.2+ 数据快照与同步反向关系
+  snapshots              DataSnapshot[]     @relation("SnapshotTable")
+  surveySyncRequests     DataSyncRequest[]  @relation("SyncSurveyTable")
+  levySyncRequests       DataSyncRequest[]  @relation("SyncLevyTable")
+  // v1.2.2+ 审计日志反向关系
+  operationLogs          OperationLog[]     @relation("OperationLogTable")
 
   @@unique([name])
   @@index([status])
@@ -230,6 +256,8 @@ model TableField {
   updatedAt     DateTime         @updatedAt
 
   table         DataTable        @relation(fields: [tableId], references: [id])
+  // v1.2.2+ 同步请求反向关系
+  syncRelationFields DataSyncRequest[] @relation("SyncRelationField")
 
   @@index([tableId])
   @@index([sortOrder])
@@ -258,10 +286,101 @@ enum FieldType {
   RICHTEXT       // 富文本
   RELATION       // 关联其他表
   DETAIL_TABLE   // 明细表单
+  LEVY_RELATION  // 征收关联调查（v1.2.2+，1:1，写入时同步数据快照）
 }
 
 // ==================== 数据记录 ====================
+// 注：DataRecord 的实际定义已移到“数据快照与调查→征收同步”一节末尾（v1.2.2 新增反向关系）
 
+enum RecordStatus {
+  DRAFT            // 草稿
+  SUBMITTED        // 已提交（原“提交审批前”状态；若有审批则流转至 PENDING_APPROVAL）
+  REVIEWED         // 已审核
+  REJECTED         // 已驳回
+  ARCHIVED         // 已归档
+  PENDING_APPROVAL // 审批中（v1.2.2+）
+  CHANGED          // 已修改待复审（v1.2.2+，征收数据修改完成但最终未盖章）
+  SYNC_PENDING     // 调查数据已变更，等待同步到征收（v1.2.2+）
+}
+
+// ==================== 数据快照与调查→征收同步（v1.2.2+） ====================
+
+enum SyncSource {
+  SURVEY // 调查侧修改触发（survey→levy）
+  LEVY   // 征收侧反向修改触发（levy→survey，暂未启用，预留）
+}
+
+enum SyncRequestStatus {
+  PENDING   // 待审核
+  APPROVED  // 审核通过，已应用
+  REJECTED  // 审核拒绝
+  CANCELLED // 撤销
+}
+
+model DataSnapshot {
+  id          Int       @id @default(autoincrement())
+  tableId     Int
+  recordId    Int?
+  beforeData  Json?     // 修改前的完整 data JSON（新建记录时为 null）
+  afterData   Json?     // 修改后的完整 data JSON（删除记录时为 null）
+  changedBy   Int?      // 操作人 User.id
+  changeType  String    // CREATE / UPDATE / DELETE / SYNC_APPLY / SYNC_REJECT
+  diff        Json?     // 字段级差异 { field: {before, after} }
+  metadata    Json?     // 额外信息（如审批链路、浏览器 UA 等）
+  createdAt   DateTime  @default(now())
+
+  table       DataTable @relation("SnapshotTable", fields: [tableId], references: [id], onDelete: Cascade)
+  record      DataRecord? @relation("SnapshotRecord", fields: [recordId], references: [id], onDelete: SetNull)
+  operator    User?     @relation("SnapshotOperator", fields: [changedBy], references: [id], onDelete: SetNull)
+
+  syncRequests  DataSyncRequest[] @relation("SyncRequestSnapshot")
+  operationLogs OperationLog[]    @relation("OperationSnapshot")
+
+  @@index([tableId])
+  @@index([recordId])
+  @@index([changedBy])
+  @@index([createdAt])
+}
+
+model DataSyncRequest {
+  id              Int               @id @default(autoincrement())
+  source          SyncSource        @default(SURVEY)
+  requestedBy     Int?              // 发起同步申请的操作人（审批引擎上线后换成提交人）
+  surveyTableId   Int               // 调查数据表 id
+  surveyRecordId  Int               // 调查记录 id
+  levyTableId     Int               // 征收数据表 id
+  levyRecordId    Int               // 征收记录 id（关联到的征收记录）
+  relationFieldId Int?              // LEVY_RELATION 字段 id
+  snapshotId      Int               // 关联的快照
+  fieldDiffs      Json              // 字段差异清单（与快照 diff 同构，前端审核时直接展示）
+  status          SyncRequestStatus @default(PENDING)
+  approvalInstanceId Int?           // 关联的审批实例（v2）
+  reviewedBy      Int?              // 最终审核人
+  reviewedAt      DateTime?
+  reviewComment   String?           @db.Text
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  snapshot        DataSnapshot      @relation("SyncRequestSnapshot", fields: [snapshotId], references: [id], onDelete: Cascade)
+  requester       User?             @relation("SyncRequester", fields: [requestedBy], references: [id], onDelete: SetNull)
+  surveyTable     DataTable         @relation("SyncSurveyTable", fields: [surveyTableId], references: [id], onDelete: Cascade)
+  surveyRecord    DataRecord        @relation("SyncSurveyRecord", fields: [surveyRecordId], references: [id], onDelete: Cascade)
+  levyTable       DataTable         @relation("SyncLevyTable", fields: [levyTableId], references: [id], onDelete: Cascade)
+  levyRecord      DataRecord        @relation("SyncLevyRecord", fields: [levyRecordId], references: [id], onDelete: Cascade)
+  relationField   TableField?       @relation("SyncRelationField", fields: [relationFieldId], references: [id], onDelete: SetNull)
+  reviewer        User?             @relation("SyncReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  // OperationLog 关联记录（审计中心反查）
+  operationLogs   OperationLog[]    @relation("OperationSyncRequest")
+
+  @@index([surveyTableId, surveyRecordId])
+  @@index([levyTableId, levyRecordId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([requestedBy])
+}
+
+// 反向关系补充
 model DataRecord {
   id            Int              @id @default(autoincrement())
   tableId       Int
@@ -278,22 +397,15 @@ model DataRecord {
   files             UploadedFile[]
   attachments       RecordAttachment[]
   approvalInstances ApprovalInstance[]
+  snapshots         DataSnapshot[]   @relation("SnapshotRecord")
+  surveySyncRequests DataSyncRequest[] @relation("SyncSurveyRecord")
+  levySyncRequests   DataSyncRequest[] @relation("SyncLevyRecord")
 
   @@index([tableId])
   @@index([createdAt])
   @@index([createdBy])
   @@index([status])
 }
-
-enum RecordStatus {
-  DRAFT      // 草稿
-  SUBMITTED  // 已提交
-  REVIEWED   // 已审核
-  REJECTED   // 已驳回
-  ARCHIVED   // 已归档
-}
-
-// ==================== 文件上传 ====================
 
 model RecordAttachment {
   id            Int              @id @default(autoincrement())
@@ -366,15 +478,27 @@ model OperationLog {
   module        String
   tableId       Int?
   recordId      Int?
+  snapshotId    Int?             // v1.2.2+ 关联的数据快照 id
+  syncRequestId Int?             // v1.2.2+ 关联的同步请求 id（审计中心五标签反查）
+  approvalInstanceId Int?        // v1.2.2+ 关联的审批实例 id
   detail        Json?
   ipAddress     String?
   userAgent     String?
   createdAt     DateTime         @default(now())
 
+  user            User?              @relation("OperationLogUser",   fields: [userId], references: [id], onDelete: SetNull)
+  table           DataTable?         @relation("OperationLogTable",  fields: [tableId],  references: [id], onDelete: SetNull)
+  snapshot        DataSnapshot?      @relation("OperationSnapshot",  fields: [snapshotId], references: [id], onDelete: SetNull)
+  syncRequest     DataSyncRequest?   @relation("OperationSyncRequest", fields: [syncRequestId], references: [id], onDelete: SetNull)
+  approvalInstance ApprovalInstance? @relation("OperationLogApproval", fields: [approvalInstanceId], references: [id], onDelete: SetNull)
+
   @@index([userId])
   @@index([action])
   @@index([module])
   @@index([createdAt])
+  @@index([snapshotId])
+  @@index([syncRequestId])
+  @@index([approvalInstanceId])
 }
 
 // ==================== 错误日志 ====================
@@ -408,10 +532,14 @@ model ExportTemplate {
   id           Int              @id @default(autoincrement())
   tableId      Int
   name         String           // 模板名称
-  type         ExportType       // 导出类型
-  category     String           @default("EXPORT") // 模板分类：逗号分隔，如 "EXPORT,PRINT"
+  type         ExportType       // 导出类型 (WORD 代表 Word 文书)
+  category     String           @default("EXPORT") // 模板分类：逗号分隔，如 "EXPORT,PRINT,LEVY_AGREEMENT"
   description  String?
-  config       Json             // 导出配置（字段、样式等）
+  config       Json             // Excel 模板配置（现有：单元格样式、合并、公式等）
+  documentConfig Json?          // v1.2.2 Word 文书 A4 画布配置（blocks/page/header/footer/margins）
+  paperSize    String?          // 纸张：A4 (默认) / A5 / Letter
+  orientation  String?          // portrait (默认) / landscape
+  outputFormat String?          // 首选输出：DOCX / PDF
   isDefault    Boolean          @default(false)
   isSystem     Boolean          @default(false) // 是否系统模板
   isShared     Boolean          @default(false) // 是否共享给其他表使用
@@ -426,6 +554,7 @@ model ExportTemplate {
   @@index([category])
   @@index([createdBy])
   @@index([isShared])
+  @@index([type])
 }
 
 enum ExportType {
@@ -433,6 +562,13 @@ enum ExportType {
   CARD         // 卡片式
   GROUPED      // 分组汇总
   FORM         // 表单式（单条记录详情）
+  WORD         // v1.2.2+: Word 文书模板（A4 画布编辑 → .docx 渲染 → PDF 打印）
+}
+
+enum DocFormat {
+  XLSX
+  DOCX
+  PDF
 }
 
 enum TemplateCategory {
@@ -440,157 +576,211 @@ enum TemplateCategory {
   PRINT   // 打印模板
 }
 
-// ==================== 审批流程系统 ====================
+// ==================== 审批流程系统 (v2 可视化版 · v1.2.2) ====================
 
 enum WorkflowStatus {
-  ACTIVE    // 激活中
-  INACTIVE  // 已停用
-  DRAFT     // 草稿
+  DRAFT      // 草稿（画布编辑中，不能绑定、不能发起）
+  PUBLISHED  // 已发布（可发起实例，版本固定）
+  ACTIVE     // 激活中（兼容旧字段语义：发布后默认 ACTIVE，若管理员临时停用则 INACTIVE）
+  INACTIVE   // 已停用
+  ARCHIVED   // 已归档（历史版本，仅供回溯）
 }
 
 enum NodeType {
-  ROLE       // 按角色指定审批人
-  USER       // 按用户指定审批人
-  FIELD      // 从表单字段读取审批人
-  CONDITION  // 条件判断节点
-  START      // 开始节点
-  END        // 结束节点
+  START                // 开始节点（v2 保留）
+  END                  // 结束节点（v2 保留）
+  APPROVER_SINGLE      // 单批节点（一人即可 APPROVE）
+  APPROVER_COUNTERSIGN // 会签节点（所有人/法定人数通过才过）
+  APPROVER_ORSIGN      // 或签节点（任一人通过即过）
+  CONDITION_BRANCH     // 条件分支节点（按表达式选 TRUE/FALSE 分支）
+  PARALLEL             // 并行节点（所有分支同时进入，全部/任一完成才向下）
+  CC                   // 抄送节点（不阻塞、仅发通知）
+  ROLE                 // (deprecated 旧表兼容 v1) 按角色
+  USER                 // (deprecated 旧表兼容 v1) 按用户
+  FIELD                // (deprecated 旧表兼容 v1) 按字段
+  CONDITION            // (deprecated 旧表兼容 v1) 条件判断
 }
 
-enum TimeoutAction {
-  AUTO_PASS
-  AUTO_REJECT
-  NONE
-}
+// TimeoutAction 枚举已移至 jsonDefinition 中以字符串存储（"AUTO_PASS" / "AUTO_REJECT" / "ESCALATE" / "NONE"）
+// 保留枚举定义供参考，Schema 层不再引用
 
 enum InstanceStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  CANCELLED
+  PENDING       // 排队中（刚创建尚未进入首节点）
+  PROCESSING    // 审批中
+  APPROVED      // 已通过 → 最终落数据
+  REJECTED      // 已驳回
+  CANCELLED     // 发起人撤回 / 管理员取消
+  RESTARTED     // 驳回重提（原实例标记 RESTARTED，产生一个 parentInstanceId=自己的新实例）
 }
 
 enum NodeStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  TRANSFERRED
-  CANCELLED
+  PENDING           // 待处理（等待进入/已进入但操作人未动作）
+  APPROVED          // 已批准
+  PARTIAL_APPROVED  // 会签中（已有人批准，未到 quorum）
+  REJECTED          // 已驳回
+  TRANSFERRED       // 已转交
+  SKIPPED           // 条件分支跳过 / 并行分支未激活
+  TIMEOUT_PASSED    // 超时自动通过
+  TIMEOUT_REJECTED  // 超时自动驳回
+  CANCELLED         // 实例被取消
 }
 
 enum ApprovalAction {
   APPROVE
   REJECT
-  TRANSFER
+  TRANSFER        // 转签
+  COUNTERSIGN     // 加签（附议）
+  RESTART         // 驳回重提（从头再来）
+  WITHDRAW        // 发起人撤回
+  TIMEOUT_PASS
+  TIMEOUT_REJECT
   CANCEL
 }
 
-model ApprovalWorkflow {
-  id          Int            @id @default(autoincrement())
-  name        String         // 流程名称
-  tableId     Int            // 关联的数据表ID
-  description String?        // 流程描述
-  status      WorkflowStatus @default(ACTIVE)
-  version     Int            @default(1)      // 版本号
-  canvasData  Json?          // 流程画布数据（节点位置、连线等）
-  createdBy   Int?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+enum TriggerEvent {
+  MANUAL_SUBMIT     // 用户点"提交审批"按钮（调查表/征收表通用）
+  LEVY_SAVE         // 征收表任何保存（新增/修改）→ 自动发审批
+  LEVY_SYNC_PASS    // 征收同步通过（同步数据也需要再审批）
+  DATA_BATCH_IMPORT // 批量导入后自动审批（预留）
+}
 
-  table       DataTable      @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  nodes       ApprovalNode[]
-  instances   ApprovalInstance[]
+enum ApproverKind {
+  ROLE           // 角色 ID 列表
+  USER           // 用户 ID 列表
+  FIELD          // 记录 data 中某个字段的值（存 user.id / role.id / 部门编码）
+  CREATOR        // 记录创建人（反向：自己不能审批自己的情况，UI 过滤但 engine 提供能力）
+  LAST_APPROVER  // 上一个节点的审批人（串签）
+  DEPARTMENT     // 部门维度（预留：后续接部门表时用，engine 先把 ID 当 userId 过滤）
+}
+
+
+model ApprovalWorkflow {
+  id              Int            @id @default(autoincrement())
+  name            String         // 流程名称
+  tableId         Int            // 关联的数据表ID
+  description     String?        // 流程描述
+  status          WorkflowStatus @default(DRAFT)
+  version         Int            @default(1)      // 版本号：每次 publish +1，历史实例永远绑定这个 version
+  canvasData      Json?          // 流程画布完整 JSON（ReactFlow：nodes + edges + viewport，设计器直接用）
+  jsonDefinition  Json?          // 引擎标准化 DAG 定义（{nodes:[WorkflowNodeDef], globals:{...}}），引擎唯一数据源
+  triggerEvents   Json?          // 触发事件启用开关：{ MANUAL_SUBMIT:true, LEVY_SAVE:false, LEVY_SYNC_PASS:false }
+  triggerCondition Json?          // 启动条件（AND 表达式数组）[{field:"area",op:"GT",value:100}]，为空表示该流程无条件（默认通用类型）
+  timeoutPolicy   Json?          // 全局超时兜底：{ defaultHours:48, defaultAction:"AUTO_PASS" }
+  isDefault       Boolean        @default(false)  // 一张表多个流程时，isDefault=true 的 version 最新者才会被自动触发命中
+  publishedAt     DateTime?      // 发布时间（PUBLISHED 记录）
+  publishedBy     Int?           // 发布人
+  createdBy       Int?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  table           DataTable      @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  publisher       User?          @relation("PublishedWorkflows", fields: [publishedBy], references: [id], onDelete: SetNull)
+  creator         User?          @relation("CreatedWorkflows",   fields: [createdBy],   references: [id], onDelete: SetNull)
+  nodes           ApprovalNode[]
+  instances       ApprovalInstance[]
 
   @@index([tableId])
   @@index([status])
   @@index([version])
+  @@index([isDefault])
+  @@index([publishedBy])
 }
 
+// 审批节点注册表：仅存储节点标识，详细配置统一存于 ApprovalWorkflow.jsonDefinition
+// 主要作用是为 ApprovalNodeInstance 提供外键引用
 model ApprovalNode {
-  id            Int           @id @default(autoincrement())
-  workflowId    Int
-  nodeType      NodeType
-  nodeOrder     Int           // 节点顺序
-  nodeName      String        // 节点名称
+  id          Int      @id @default(autoincrement())
+  workflowId  Int
+  nodeKey     String   // DAG 中的稳定 key（uuid），与 jsonDefinition.nodes[].id 对应
+  nodeType    String   // START / END / APPROVER_SINGLE / APPROVER_COUNTERSIGN / APPROVER_ORSIGN / CONDITION_BRANCH / PARALLEL / CC
+  nodeName    String   // 展示名称
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  roleId        Int?
-  userId        Int?
-  fieldName     String?
-
-  canView       Boolean       @default(true)
-  canEdit       Boolean       @default(false)
-  canApprove    Boolean       @default(true)
-  canTransfer   Boolean       @default(true)
-
-  timeout       Int?
-  timeoutAction TimeoutAction?
-
-  conditionField  String?
-  conditionOp     String?
-  conditionValue  String?
-  nextNodeTrue    Int?
-  nextNodeFalse   Int?
-
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-
-  workflow      ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  role          Role?         @relation("RoleApprovalNodes", fields: [roleId], references: [id])
-  user          User?         @relation("UserApprovalNodes", fields: [userId], references: [id])
+  workflow      ApprovalWorkflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   nodeInstances ApprovalNodeInstance[]
 
+  @@unique([workflowId, nodeKey])
   @@index([workflowId])
-  @@index([nodeOrder])
 }
 
 model ApprovalInstance {
-  id            Int               @id @default(autoincrement())
-  workflowId    Int
-  tableId       Int
-  recordId      Int
-  currentNodeId Int?
-  status        InstanceStatus    @default(PENDING)
-  initiatorId   Int?
-  startedAt     DateTime          @default(now())
-  completedAt   DateTime?
-  cancelledAt   DateTime?
-  cancelReason  String?
+  id                Int               @id @default(autoincrement())
+  workflowId        Int
+  workflowVersion   Int?              // 发起时绑定 workflow.version
+  tableId           Int
+  recordId          Int
+  currentNodeId     Int?
+  status            InstanceStatus    @default(PENDING)
+  triggerEvent      String?           // 见 TriggerEvent 枚举字面量
+  initiatorId       Int?
+  snapshotDataBefore Json?            // 发起审批时的 record.data 快照（乐观锁 + 重放）
+  snapshotDataAfter  Json?            // 审批过程中修改后的暂存 data（M2-T4 自动触发时用）
+  optimisticLock    DateTime          @default(now())  // 发起时的时间戳，通过前必须等于 record.updatedAt
+  parentInstanceId  Int?              // 驳回重提产生的新实例，指向上一个被 RESTARTED 的实例
+  ccList            Json?             // 扁平抄送人 userId[]
+  approvalChain     Json?             // 已审批过的扁平链（[{nodeId,nodeKey,assigneeId,action,at,comment},...]），审计中心直接展示
+  startedAt         DateTime          @default(now())
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  cancelReason      String?
 
-  workflow      ApprovalWorkflow  @relation(fields: [workflowId], references: [id])
-  table         DataTable         @relation(fields: [tableId], references: [id])
-  record        DataRecord        @relation(fields: [recordId], references: [id], onDelete: Cascade)
-  initiator     User?             @relation("InitiatedApprovals", fields: [initiatorId], references: [id])
-  nodeInstances ApprovalNodeInstance[]
+  workflow          ApprovalWorkflow  @relation(fields: [workflowId], references: [id])
+  parentInstance    ApprovalInstance? @relation("ParentChildApproval", fields: [parentInstanceId], references: [id])
+  childrenInstances ApprovalInstance[]@relation("ParentChildApproval")
+  table             DataTable         @relation(fields: [tableId], references: [id])
+  record            DataRecord        @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  initiator         User?             @relation("InitiatedApprovals", fields: [initiatorId], references: [id])
+  nodeInstances     ApprovalNodeInstance[]
+  // v1.2.2+ 审计日志反向关系
+  operationLogs     OperationLog[]    @relation("OperationLogApproval")
 
   @@index([workflowId])
+  @@index([workflowVersion])
   @@index([tableId])
   @@index([recordId])
   @@index([status])
+  @@index([triggerEvent])
   @@index([initiatorId])
+  @@index([parentInstanceId])
 }
 
 model ApprovalNodeInstance {
-  id            Int              @id @default(autoincrement())
-  instanceId    Int
-  nodeId        Int
-  assigneeId    Int?
-  status        NodeStatus       @default(PENDING)
-  action        ApprovalAction?
-  comment       String?          @db.Text
-  transferredTo Int?
-  processedAt   DateTime?
-  createdAt     DateTime         @default(now())
+  id                   Int              @id @default(autoincrement())
+  instanceId           Int
+  nodeId               Int
+  assigneeId           Int?
+  status               NodeStatus       @default(PENDING)
+  action               ApprovalAction?
+  comment              String?          @db.Text
+  transferredTo        Int?             // (deprecated) 旧字段，保留
+  transferredFrom      Int?             // v2：转签的原操作人 userId（精确追溯）
 
-  instance      ApprovalInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  node          ApprovalNode     @relation(fields: [nodeId], references: [id])
-  assignee      User?            @relation("AssignedApprovals", fields: [assigneeId], references: [id])
-  transferredUser User?          @relation("TransferredApprovals", fields: [transferredTo], references: [id])
+  countersignTotal     Int?             // 会签总人数
+  countersignApprovedCount Int?         // 会签当前批准数
+  actionDetail         Json?            // { countersignAddedIds:[], transferredFrom, gotoNodeKey, restartNewInstanceId, ... }
+  prevInstanceIds      Json?            // 前驱 node instance id[]（支持 DAG / 并行合流判定）
+  dueAt                DateTime?        // 超时到期点
+  actualDurationSeconds Int?            // 从进入到处理完成的秒数
+  ipAddress            String?
+  userAgent            String?
+
+  processedAt          DateTime?
+  createdAt            DateTime         @default(now())
+
+  instance             ApprovalInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  node                 ApprovalNode     @relation(fields: [nodeId], references: [id])
+  assignee             User?            @relation("AssignedApprovals", fields: [assigneeId], references: [id])
+  transferredUser      User?            @relation("TransferredApprovals", fields: [transferredTo], references: [id])
+  transferredFromUser  User?            @relation("TransferredFromApprovals", fields: [transferredFrom], references: [id])
 
   @@unique([instanceId, nodeId, assigneeId])
   @@index([instanceId])
   @@index([assigneeId])
   @@index([status])
+  @@index([dueAt])
 }
+
 
 // ==================== 第三方平台集成 ====================
 

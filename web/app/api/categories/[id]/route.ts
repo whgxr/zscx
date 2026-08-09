@@ -8,6 +8,7 @@ const updateCategorySchema = z.object({
   parentId: z.number().nullable().optional(),
   icon: z.string().nullable().optional(),
   sortOrder: z.number().optional(),
+  module: z.enum(['SURVEY', 'LEVY', 'BOTH']).optional(),
 })
 
 export async function GET(

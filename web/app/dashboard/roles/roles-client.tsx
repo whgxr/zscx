@@ -36,6 +36,7 @@ import {
   Palette,
   Activity,
   Settings2,
+  TreePine,
 } from 'lucide-react'
 
 interface Role {
@@ -325,6 +326,14 @@ export function RolesClient({ roles }: RolesClientProps) {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => router.push(`/dashboard/roles/${role.id}/permissions`)}
+                        title="权限树"
+                      >
+                        <TreePine className="w-4 h-4 text-indigo-600" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"

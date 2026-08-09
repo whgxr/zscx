@@ -96,6 +96,8 @@ const fieldTypeIcons: Record<FieldType, string> = {
   MULTISELECT: '☑️', CHECKBOX: '☑️', UPLOAD_FILE: '📎', UPLOAD_IMAGE: '🖼️',
   PHONE: '📞', EMAIL: '📧', IDCARD: '🆔', ADDRESS: '📍', MONEY: '💰',
   SWITCH: '🔄', RICHTEXT: '📝', RELATION: '🔗', DETAIL_TABLE: '📊',
+  // v1.2.2+ 征收关联调查
+  LEVY_RELATION: '🧷',
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 11)
