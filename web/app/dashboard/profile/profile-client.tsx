@@ -53,6 +53,7 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [feishuBinding, setFeishuBinding] = useState<ThirdPartyBinding | null>(null)
   const [weworkBinding, setWeworkBinding] = useState<ThirdPartyBinding | null>(null)
+  const [dingtalkBinding, setDingtalkBinding] = useState<ThirdPartyBinding | null>(null)
   const [bindingLoading, setBindingLoading] = useState(false)
 
   useEffect(() => {
@@ -61,9 +62,10 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
 
   const loadThirdPartyBindings = async () => {
     try {
-      const [feishuRes, weworkRes] = await Promise.all([
+      const [feishuRes, weworkRes, dingtalkRes] = await Promise.all([
         fetch('/api/third-party/feishu'),
         fetch('/api/third-party/wework'),
+        fetch('/api/third-party/dingtalk'),
       ])
       if (feishuRes.ok) {
         const data = await feishuRes.json()
@@ -72,6 +74,10 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
       if (weworkRes.ok) {
         const data = await weworkRes.json()
         setWeworkBinding(data.binding || null)
+      }
+      if (dingtalkRes.ok) {
+        const data = await dingtalkRes.json()
+        setDingtalkBinding(data.binding || null)
       }
     } catch (error) {
       console.error('Failed to load third-party bindings:', error)
@@ -86,6 +92,11 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
   const handleBindWework = () => {
     const redirectUri = `${window.location.origin}/dashboard/profile`
     window.location.href = `/api/third-party/wework/auth?redirectUri=${encodeURIComponent(redirectUri)}`
+  }
+
+  const handleBindDingtalk = () => {
+    const redirectUri = `${window.location.origin}/dashboard/profile`
+    window.location.href = `/api/third-party/dingtalk/auth?redirectUri=${encodeURIComponent(redirectUri)}`
   }
 
   const handleUnbindFeishu = async () => {
@@ -114,6 +125,24 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
       if (res.ok) {
         setWeworkBinding(null)
         setMessage({ type: 'success', text: '企业微信账号解绑成功' })
+      } else {
+        setMessage({ type: 'error', text: '解绑失败' })
+      }
+    } catch {
+      setMessage({ type: 'error', text: '解绑失败' })
+    } finally {
+      setBindingLoading(false)
+    }
+  }
+
+  const handleUnbindDingtalk = async () => {
+    if (!confirm('确定要解绑钉钉账号吗？')) return
+    setBindingLoading(true)
+    try {
+      const res = await fetch('/api/third-party/dingtalk', { method: 'DELETE' })
+      if (res.ok) {
+        setDingtalkBinding(null)
+        setMessage({ type: 'success', text: '钉钉账号解绑成功' })
       } else {
         setMessage({ type: 'error', text: '解绑失败' })
       }
@@ -435,9 +464,55 @@ export function ProfileClient({ initialUser }: { initialUser: UserProfile }) {
                   </CardContent>
                 </Card>
 
+                <Card className="border border-gray-200">
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-cyan-100 rounded-lg flex items-center justify-center">
+                          <MessageCircle className="w-6 h-6 text-cyan-600" />
+                        </div>
+                        <div>
+                          <h4 className="font-medium text-gray-900">钉钉</h4>
+                          <p className="text-sm text-gray-500">绑定后可接收审批通知和消息推送</p>
+                        </div>
+                      </div>
+                      {dingtalkBinding ? (
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-green-100 text-green-600">已绑定</Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleUnbindDingtalk}
+                            disabled={bindingLoading}
+                          >
+                            <X className="w-4 h-4 mr-1" />
+                            解绑
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          onClick={handleBindDingtalk}
+                          disabled={bindingLoading}
+                        >
+                          <Link2 className="w-4 h-4 mr-2" />
+                          绑定钉钉
+                        </Button>
+                      )}
+                    </div>
+                    {dingtalkBinding && (
+                      <div className="mt-4 pt-4 border-t">
+                        <p className="text-sm text-gray-500">
+                          绑定时间: {formatDateTime(dingtalkBinding.createdAt)}
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
                 <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                   <p className="text-sm text-yellow-800">
-                    <strong>提示：</strong>绑定第三方账号后，您将在对应平台上收到审批通知和系统消息。您可以同时绑定飞书和企业微信。
+                    <strong>提示：</strong>绑定第三方账号后，您将在对应平台上收到审批通知和系统消息。您可以同时绑定飞书、企业微信和钉钉。
                   </p>
                 </div>
               </div>

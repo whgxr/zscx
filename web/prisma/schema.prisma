@@ -787,6 +787,7 @@ model ApprovalNodeInstance {
 enum Platform {
   FEISHU
   WEWORK
+  DINGTALK
 }
 
 enum BindingStatus {
@@ -843,6 +844,7 @@ enum SendChannel {
   INTERNAL
   FEISHU
   WEWORK
+  DINGTALK
 }
 
 enum SendStatus {
@@ -905,5 +907,40 @@ model NotificationSendLog {
 
   @@index([notificationId])
   @@index([userId])
+  @@index([status])
+}
+
+// ==================== 集成配置管理 (v1.2.3+) ====================
+
+enum IntegrationPlatform {
+  FEISHU
+  WEWORK
+  DINGTALK
+}
+
+enum IntegrationStatus {
+  DISABLED
+  ENABLED
+  TESTING
+}
+
+model IntegrationConfig {
+  id              Int                @id @default(autoincrement())
+  platform        IntegrationPlatform @unique
+  status          IntegrationStatus  @default(DISABLED)
+  appId           String?            @db.Text
+  appSecret       String?            @db.Text
+  webhookUrl      String?            @db.Text
+  agentId         String?
+  corpId          String?
+  tenantId        String?
+  extraConfig     Json?              // 扩展配置（如审批模板ID、部门映射等）
+  notifyEnabled   Boolean            @default(false)  // 是否启用消息通知
+  approvalEnabled Boolean            @default(false)  // 是否启用审批通知
+  notifyChannels  Json?              // 通知渠道配置 {SYSTEM:[FEISHU], APPROVAL:[WEWORK,DINGTALK], ...}
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([platform])
   @@index([status])
 }

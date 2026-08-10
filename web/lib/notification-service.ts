@@ -1,5 +1,6 @@
 import { prisma } from './prisma'
 import type { Notification, NotificationType, TargetType, NotificationPriority } from '@prisma/client'
+import { integrationService } from './integration-service'
 
 export interface CreateNotificationOptions {
   type: NotificationType
@@ -40,6 +41,9 @@ export class NotificationService {
 
   private async sendNotification(notification: Notification) {
     const users = await this.getTargetUsers(notification)
+    const title = notification.title
+    const content = notification.content
+    const linkUrl = notification.linkUrl || undefined
 
     for (const user of users) {
       await prisma.notificationRead.create({
@@ -58,6 +62,27 @@ export class NotificationService {
           sentAt: new Date()
         }
       })
+    }
+
+    if (users.length > 0) {
+      try {
+        const thirdPartyResults = await integrationService.routeNotification({
+          type: notification.type,
+          targetUserIds: users.map(u => u.id),
+          title,
+          content,
+          linkUrl,
+          priority: notification.priority,
+        })
+
+        for (const result of thirdPartyResults) {
+          if (!result.success && result.errorMessage) {
+            console.warn(`[Notification] ${result.channel} 发送失败: ${result.errorMessage}`)
+          }
+        }
+      } catch (error) {
+        console.error('[Notification] 第三方路由异常:', error)
+      }
     }
   }
 

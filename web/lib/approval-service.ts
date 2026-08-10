@@ -13,6 +13,7 @@ import {
   deepParse,
 } from '@/lib/engine'
 import { createRecordSnapshot } from '@/lib/snapshot-utils'
+import { notificationService } from '@/lib/notification-service'
 
 // ─── 工具 ──────────────────────────────────────────────────────
 
@@ -229,6 +230,25 @@ export async function startInstance(params: {
   })
   if (!res) return { ok: false, error: '创建审批实例失败', status: 500 }
 
+  try {
+    const allAssigneeIds = (res.initialAssignees || []).flatMap(a => a.assigneeIds)
+    if (allAssigneeIds.length > 0) {
+      await notificationService.createApprovalNotification(res.instanceId, allAssigneeIds)
+    }
+
+    if (res.ccUserIds && res.ccUserIds.length > 0) {
+      await notificationService.createNotification({
+        type: 'SYSTEM',
+        title: '审批抄送通知',
+        content: `您被抄送到一条审批流程 (ID: ${res.instanceId})`,
+        targetType: 'USER',
+        targetUserIds: res.ccUserIds,
+        priority: 'LOW',
+        linkUrl: `/dashboard/approval/${res.instanceId}`,
+      })
+    }
+  } catch (_) { /* notification failure should not block primary flow */ }
+
   // 审计日志
   try {
     await prisma.operationLog.create({
@@ -285,6 +305,10 @@ export async function executeNodeAction(params: {
   })
   if (!ni) return { ok: false, error: '待办不存在', status: 404 }
   if (ni.status !== 'PENDING') return { ok: false, error: '待办状态非 PENDING', status: 409 }
+  // 授权校验：当前用户必须是该节点的 assignee（防止任意用户越权处理他人待办）
+  if (ni.assigneeId !== null && ni.assigneeId !== params.assigneeId) {
+    return { ok: false, error: '您不是该待办的审批人，无权操作', status: 403 }
+  }
 
   if (params.action === 'TRANSFER' && !params.transferredTo) {
     return { ok: false, error: '转签需要 transferredTo', status: 400 }
@@ -434,6 +458,24 @@ export async function executeNodeAction(params: {
       },
     })
   } catch (_) { /* audit must not block */ }
+
+  try {
+    const newAssigneeIds = (res.newAssignees || []).flatMap(a => a.assigneeIds)
+    if (newAssigneeIds.length > 0) {
+      await notificationService.createApprovalNotification(ni.instanceId, newAssigneeIds)
+    }
+    if (res.ccTargets && res.ccTargets.length > 0) {
+      await notificationService.createNotification({
+        type: 'SYSTEM',
+        title: '审批抄送通知',
+        content: `您被抄送到审批流程 (ID: ${ni.instanceId})`,
+        targetType: 'USER',
+        targetUserIds: res.ccTargets,
+        priority: 'LOW',
+        linkUrl: `/dashboard/approval/${ni.instanceId}`,
+      })
+    }
+  } catch (_) { /* notification failure should not block */ }
 
   return { ok: true, data: res }
 }
