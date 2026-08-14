@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { DynamicForm } from '@/components/dynamic-form'
-import { ArrowLeft, Edit, Save, X, History, UserCheck, Send, RefreshCw, Printer, FileDown, FileText, FileSpreadsheet } from 'lucide-react'
+import { ArrowLeft, Edit, Save, X, History, UserCheck, Send, RefreshCw, Printer, FileDown, FileText, FileSpreadsheet, ClipboardList, Scale } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
+import { SnapshotHistoryDialog } from '@/components/snapshot-history-dialog'
 import { DataTable, TableField, DataRecord, RecordStatus } from '@prisma/client'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -74,10 +75,13 @@ interface RecordDetailClientProps {
     } | null
   }
   initialEditMode?: boolean
+  module?: string
 }
 
-export function RecordDetailClient({ table, record, initialEditMode = false }: RecordDetailClientProps) {
+export function RecordDetailClient({ table, record, initialEditMode = false, module: moduleProp = '' }: RecordDetailClientProps) {
   const router = useRouter()
+  const currentModule = moduleProp || ''
+  const moduleQuery = currentModule ? `?module=${currentModule}` : ''
   const [isEditing, setIsEditing] = useState(initialEditMode)
   const [formData, setFormData] = useState<Record<string, any>>(record.data as any || {})
   const [loading, setLoading] = useState(false)
@@ -97,6 +101,10 @@ export function RecordDetailClient({ table, record, initialEditMode = false }: R
 
   // 提交审批（手动）
   const [submittingApproval, setSubmittingApproval] = useState(false)
+
+  // 数据快照 / 变更历史
+  const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false)
+
   const submitApproval = async () => {
     if (!confirm('确认提交该记录到审批流程？')) return
     setSubmittingApproval(true)
@@ -187,7 +195,7 @@ export function RecordDetailClient({ table, record, initialEditMode = false }: R
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => router.back()}>
+          <Button variant="ghost" onClick={() => router.push(`/dashboard/data/${table.name}${moduleQuery}`)}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回
           </Button>
@@ -195,6 +203,16 @@ export function RecordDetailClient({ table, record, initialEditMode = false }: R
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">记录详情 #{record.id}</h1>
               <Badge variant={statusInfo?.variant as any}>{statusInfo?.label}</Badge>
+              {currentModule === 'survey' && (
+                <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200">
+                  <ClipboardList className="w-3 h-3 mr-1" /> 调查中
+                </Badge>
+              )}
+              {currentModule === 'levy' && (
+                <Badge variant="secondary" className="bg-orange-100 text-orange-700 border-orange-200">
+                  <Scale className="w-3 h-3 mr-1" /> 征收中
+                </Badge>
+              )}
             </div>
             <p className="text-gray-500 mt-1">
               {table.label} · 创建于 {formatDateTime(record.createdAt)}
@@ -202,6 +220,10 @@ export function RecordDetailClient({ table, record, initialEditMode = false }: R
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" onClick={() => setSnapshotDialogOpen(true)} title="查看该记录的数据快照/变更历史">
+            <History className="w-4 h-4 mr-2" />
+            变更历史
+          </Button>
           <Button variant="outline" onClick={() => setDocDlgOpen(true)} title="生成 Word/Excel 文书并预览、下载、打印">
             <FileText className="w-4 h-4 mr-2" />
             生成文书
@@ -248,6 +270,7 @@ export function RecordDetailClient({ table, record, initialEditMode = false }: R
             onChange={setFormData}
             disabled={!isEditing}
             layoutConfig={table.formLayoutConfig}
+            module={currentModule === 'survey' ? 'survey' : currentModule === 'levy' ? 'levy' : 'both'}
           />
         </CardContent>
       </Card>
@@ -467,6 +490,14 @@ export function RecordDetailClient({ table, record, initialEditMode = false }: R
           </div>
         </DialogContent>
       </Dialog>
+
+      <SnapshotHistoryDialog
+        open={snapshotDialogOpen}
+        onOpenChange={setSnapshotDialogOpen}
+        tableName={table.name}
+        recordId={record.id}
+        tableLabel={table.label}
+      />
     </div>
   )
 }

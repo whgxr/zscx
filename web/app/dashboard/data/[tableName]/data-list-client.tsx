@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -59,9 +59,12 @@ import {
   Printer,
   FileType,
   Paperclip,
-  RefreshCw,
+  ClipboardList,
+  Scale,
+  History,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
+import { SnapshotHistoryDialog } from '@/components/snapshot-history-dialog'
 import { ImportDialog } from '@/components/import/import-dialog'
 import { QrCodeButton } from '@/components/qr-code-button'
 import { formatDateTime } from '@/lib/utils'
@@ -87,6 +90,7 @@ interface DataListClientProps {
     canPrint: boolean
     canImport: boolean
   }
+  module?: string
 }
 
 const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
@@ -120,7 +124,7 @@ function ImageThumbnail({ src, alt = '' }: { src: string; alt?: string }) {
   )
 }
 
-export function DataListClient({ table, user, permission }: DataListClientProps) {
+export function DataListClient({ table, user, permission, module: moduleProp }: DataListClientProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [records, setRecords] = useState<any[]>([])
@@ -129,6 +133,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const [pageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [status, setStatus] = useState('')
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportFormat, setExportFormat] = useState<'EXCEL' | 'PDF'>('EXCEL')
@@ -148,6 +153,15 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false)
   const [refreshKey, setRefreshKey] = useState(Date.now())
   const [selectedRecordIds, setSelectedRecordIds] = useState<number[]>([])
+
+  // 数据快照 / 变更历史
+  const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false)
+  const [snapshotRecord, setSnapshotRecord] = useState<any>(null)
+
+  const currentModule = moduleProp || ''
+  const moduleQuery = currentModule ? `?module=${currentModule}` : ''
+  // 列设置按模块分开存储，避免调查/征收共用同一份列配置
+  const columnStorageKey = `table_columns_${table.name}${currentModule ? `_${currentModule}` : ''}`
 
   // 附件功能
   const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false)
@@ -204,7 +218,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
   const defaultListFields = table.fields.filter((f: any) => f.showInList)
 
   useEffect(() => {
-    const saved = localStorage.getItem(`table_columns_${table.name}`)
+    const saved = localStorage.getItem(columnStorageKey)
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
@@ -218,12 +232,15 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
       } catch {}
     }
     setVisibleFields(defaultListFields.map(f => f.name))
-  }, [table.id, table.name])
+  }, [table.id, table.name, columnStorageKey])
 
-  const listFields = defaultListFields.filter(f => visibleFields.includes(f.name))
+  const listFields = defaultListFields.filter(f =>
+    visibleFields.includes(f.name) ||
+    (currentModule === 'levy' ? f.forceShowInLevyList : f.forceShowInSurveyList)
+  )
 
   const handleSaveColumnSetting = () => {
-    localStorage.setItem(`table_columns_${table.name}`, JSON.stringify(visibleFields))
+    localStorage.setItem(columnStorageKey, JSON.stringify(visibleFields))
     setColumnSettingOpen(false)
   }
 
@@ -235,19 +252,38 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
     )
   }
 
+  // 当前模块下强制显示的字段（列设置中锁定，不可隐藏）
+  const forcedFieldNames = new Set(
+    defaultListFields
+      .filter(f => currentModule === 'levy' ? f.forceShowInLevyList : f.forceShowInSurveyList)
+      .map(f => f.name)
+  )
+
   const resetColumns = () => {
     setVisibleFields(defaultListFields.map(f => f.name))
   }
 
-  const fetchRecords = async () => {
+  const pageRef = useRef(page);
+  const statusRef = useRef(status);
+  const searchQueryRef = useRef(searchQuery);
+  
+  useEffect(() => { pageRef.current = page; }, [page]);
+  useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { searchQueryRef.current = searchQuery; }, [searchQuery]);
+
+  const fetchRecords = async (overridePage?: number, overrideSearch?: string) => {
+    const currentPage = overridePage ?? pageRef.current;
+    const currentSearch = overrideSearch ?? searchQueryRef.current;
+    const currentStatus = statusRef.current;
+    
     setLoading(true)
     try {
       const params = new URLSearchParams({
-        page: page.toString(),
+        page: currentPage.toString(),
         pageSize: pageSize.toString(),
       })
-      if (search) params.set('search', search)
-      if (status) params.set('status', status)
+      if (currentSearch) params.set('search', currentSearch)
+      if (currentStatus) params.set('status', currentStatus)
 
       const res = await fetch(`/api/data/${table.name}?${params}`)
       if (res.ok) {
@@ -268,7 +304,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
 
   useEffect(() => {
     fetchRecords()
-  }, [page, status, refreshKey])
+  }, [page, status, searchQuery, refreshKey])
 
   useEffect(() => {
     setRefreshKey(Date.now())
@@ -276,8 +312,11 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
+    const searchValue = search
+    searchQueryRef.current = searchValue
+    pageRef.current = 1
+    setSearchQuery(searchValue)
     setPage(1)
-    fetchRecords()
   }
 
   const handleDelete = async (id: number) => {
@@ -800,7 +839,19 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
           返回
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-gray-900">{table.label}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900">{table.label}</h1>
+            {currentModule === 'survey' && (
+              <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200">
+                <ClipboardList className="w-3 h-3 mr-1" /> 调查中
+              </Badge>
+            )}
+            {currentModule === 'levy' && (
+              <Badge variant="secondary" className="bg-orange-100 text-orange-700 border-orange-200">
+                <Scale className="w-3 h-3 mr-1" /> 征收中
+              </Badge>
+            )}
+          </div>
           <p className="text-gray-500 mt-1">{table.description || `共 ${total} 条记录`}</p>
         </div>
       </div>
@@ -810,7 +861,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg">数据列表</CardTitle>
             <div className="flex items-center gap-2">
-              <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1) }}>
+              <Select value={status} onValueChange={(v) => { statusRef.current = v; pageRef.current = 1; setStatus(v); setPage(1) }}>
                 <SelectTrigger className="w-32">
                   <SelectValue placeholder="全部状态" />
                 </SelectTrigger>
@@ -857,7 +908,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                 列设置
               </Button>
               {canCreate && (
-                <Button onClick={() => router.push(`/dashboard/data/${table.name}/new`)}>
+                <Button onClick={() => router.push(`/dashboard/data/${table.name}/new${moduleQuery}`)}>
                   <Plus className="w-4 h-4 mr-2" />
                   新增记录
                 </Button>
@@ -986,16 +1037,28 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                             variant="ghost"
                             size="sm"
                             title="查看"
-                            onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}`)}
+                            onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}${moduleQuery}`)}
                           >
                             <Eye className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="快照/变更历史"
+                            className="text-indigo-600 hover:text-indigo-700"
+                            onClick={() => {
+                              setSnapshotRecord(record)
+                              setSnapshotDialogOpen(true)
+                            }}
+                          >
+                            <History className="w-4 h-4" />
                           </Button>
                           <QrCodeButton tableName={table.name} recordId={record.id} />
                           <Button
                             variant="ghost"
                             size="sm"
                             title="编辑"
-                            onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}?mode=edit`)}
+                            onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}?mode=edit${moduleQuery ? `&${moduleQuery.substring(1)}` : ''}`)}
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
@@ -1019,32 +1082,6 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
                               <Printer className="w-4 h-4" />
                             </Button>
                           )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="调查 ↔ 征收 同步"
-                            className="text-orange-600 hover:text-orange-700"
-                            onClick={async () => {
-                              if (!confirm('确认提交「调查→征收」同步请求？将由征收侧管理员审核后生效。')) return
-                              try {
-                                const res = await fetch('/api/sync-requests', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ tableId: table.id, recordId: record.id }),
-                                })
-                                const data = await res.json()
-                                if (res.ok) {
-                                  alert(data.message || `已提交 ${data.count ?? 1} 条同步请求`)
-                                } else {
-                                  alert(data.message || '同步失败')
-                                }
-                              } catch (error) {
-                                alert('网络错误')
-                              }
-                            }}
-                          >
-                            <RefreshCw className="w-4 h-4" />
-                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1101,7 +1138,7 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
         table={table}
-        search={search}
+        search={searchQuery}
         status={status}
         initialFormat={exportFormat}
       />
@@ -1151,25 +1188,30 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
               </div>
             </div>
             <div className="border rounded-lg divide-y max-h-80 overflow-y-auto">
-              {defaultListFields.map((field) => (
+              {defaultListFields.map((field) => {
+                const isForced = forcedFieldNames.has(field.name)
+                const isVisible = visibleFields.includes(field.name)
+                return (
                 <div
                   key={field.id}
-                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer"
-                  onClick={() => toggleField(field.name)}
+                  className={"flex items-center gap-3 px-4 py-2.5 " + (isForced ? "bg-primary/5 cursor-not-allowed" : "hover:bg-gray-50 cursor-pointer")}
+                  onClick={() => !isForced && toggleField(field.name)}
                 >
                   <div className={
-                    'w-5 h-5 border rounded border-gray-300 flex items-center justify-center ' +
-                    (visibleFields.includes(field.name)
-                      ? 'bg-primary border-primary'
-                      : 'bg-white')
+                    'w-5 h-5 border rounded flex items-center justify-center ' +
+                    (isForced ? 'border-primary bg-primary' : (isVisible ? 'bg-primary border-primary' : 'border-gray-300 bg-white'))
                   }>
-                    {visibleFields.includes(field.name) && (
+                    {(isForced || isVisible) && (
                       <Check className="w-3.5 h-3.5 text-white" />
                     )}
                   </div>
                   <span className="text-sm">{field.label}</span>
+                  {isForced && (
+                    <span className="text-xs text-orange-500 ml-auto">{currentModule === 'levy' ? '征收强制' : '调查强制'}</span>
+                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           </div>
           <div className="flex justify-end gap-2 mt-4">
@@ -1499,6 +1541,14 @@ export function DataListClient({ table, user, permission }: DataListClientProps)
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SnapshotHistoryDialog
+        open={snapshotDialogOpen}
+        onOpenChange={setSnapshotDialogOpen}
+        tableName={table.name}
+        recordId={snapshotRecord?.id ?? 0}
+        tableLabel={table.label}
+      />
     </div>
   )
 }

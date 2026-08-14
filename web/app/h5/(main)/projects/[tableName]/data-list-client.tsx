@@ -11,9 +11,10 @@ import { QRCodeSVG } from 'qrcode.react'
 import {
   ArrowLeft, Plus, Search, Eye, ChevronRight,
   Paperclip, Image as ImageIcon, FileText, Upload,
-  X, Loader2, QrCode, Copy, Check, Share2, Send, FileSignature, RefreshCcw,
+  X, Loader2, QrCode, Copy, Check, Share2, Send, FileSignature, History,
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
+import { SnapshotHistoryDialog } from '@/components/snapshot-history-dialog'
 import { FieldType, RecordStatus } from '@prisma/client'
 
 const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
@@ -41,10 +42,13 @@ interface H5DataListClientProps {
   user: any
   isAdmin: boolean
   permission: any | null
+  module?: string
 }
 
-export function H5DataListClient({ table, user, isAdmin, permission }: H5DataListClientProps) {
+export function H5DataListClient({ table, user, isAdmin, permission, module: moduleProp = '' }: H5DataListClientProps) {
   const router = useRouter()
+  const currentModule = moduleProp || ''
+  const moduleQuery = currentModule ? `?module=${currentModule}` : ''
   const [records, setRecords] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
@@ -56,7 +60,11 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
 
   const canCreate = isAdmin || permission?.canCreate
   const canEdit = isAdmin || permission?.canEdit
-  const listFields = table.fields.filter((f: any) => f.showInList)
+  // 当前模块下列表展示字段：showInList 或模块强制显示(forceShowInLevyList/SurveyList)
+  const listFields = table.fields.filter((f: any) =>
+    f.showInList ||
+    (currentModule === 'levy' ? f.forceShowInLevyList : f.forceShowInSurveyList)
+  )
 
   // 快速上传附件弹窗
   const [uploadModal, setUploadModal] = useState<{ open: boolean; recordId: number | null }>({ open: false, recordId: null })
@@ -65,6 +73,9 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
   const [uploadType, setUploadType] = useState<'image' | 'file'>('image')
   const [uploadNameError, setUploadNameError] = useState('')
   const [uploading, setUploading] = useState(false)
+
+  // 数据快照 / 变更历史
+  const [snapshotRecord, setSnapshotRecord] = useState<any>(null)
 
   const openUploadModal = (recordId: number, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -156,11 +167,12 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
     alert('链接已复制，可粘贴分享给微信好友')
   }
 
-  const fetchRecords = async () => {
+  const fetchRecords = async (searchOverride?: string) => {
     setLoading(true)
     try {
+      const currentSearch = searchOverride !== undefined ? searchOverride : search
       const params = new URLSearchParams({ page: page.toString(), pageSize: pageSize.toString() })
-      if (search) params.set('search', search)
+      if (currentSearch) params.set('search', currentSearch)
       if (status) params.set('status', status)
 
       const res = await fetch(`/api/data/${table.name}?${params}`)
@@ -193,8 +205,8 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
+    fetchRecords(search)
     setPage(1)
-    fetchRecords()
   }
 
   const renderCellValue = (record: any, field: any) => {
@@ -278,7 +290,7 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
                 <Card
                   key={record.id}
                   className="border-0 shadow-sm cursor-pointer active:scale-[0.98] transition-transform"
-                  onClick={() => router.push(`/h5/projects/${table.name}/${record.id}`)}
+                  onClick={() => router.push(`/h5/projects/${table.name}/${record.id}${moduleQuery}`)}
                 >
                   <div className="p-4">
                     <div className="flex items-center justify-between mb-2">
@@ -335,6 +347,12 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
                     {/* 快捷操作栏 */}
                     <div className="mt-2 -mx-1 flex flex-wrap gap-1.5">
                       <button
+                        onClick={(e) => { e.stopPropagation(); setSnapshotRecord(record) }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-50 text-slate-600 border border-slate-200"
+                      >
+                        <History className="w-3 h-3" /> 变更历史
+                      </button>
+                      <button
                         onClick={async (e) => {
                           e.stopPropagation()
                           if (!confirm('确认发起审批？')) return
@@ -376,27 +394,6 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
                       >
                         <FileSignature className="w-3 h-3" /> 生成文书
                       </button>
-                      {canEdit && (
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation()
-                            if (!confirm('确认触发「调查↔征收」同步？')) return
-                            try {
-                              const res = await fetch('/api/sync-requests', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ tableId: table.id, recordId: record.id }),
-                              })
-                              const data = await res.json()
-                              if (res.ok) { alert('同步请求已提交'); fetchRecords() }
-                              else alert(data.message || '同步失败')
-                            } catch { alert('同步失败') }
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-amber-50 text-amber-600 border border-amber-100"
-                        >
-                          <RefreshCcw className="w-3 h-3" /> 同步
-                        </button>
-                      )}
                     </div>
                   </div>
                 </Card>
@@ -437,7 +434,7 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
           <Button
             size="lg"
             className="w-14 h-14 rounded-full shadow-lg"
-            onClick={() => router.push(`/h5/projects/${table.name}/new`)}
+            onClick={() => router.push(`/h5/projects/${table.name}/new${moduleQuery}`)}
           >
             <Plus className="w-6 h-6" />
           </Button>
@@ -577,6 +574,14 @@ export function H5DataListClient({ table, user, isAdmin, permission }: H5DataLis
           </div>
         </div>
       )}
+
+      <SnapshotHistoryDialog
+        open={!!snapshotRecord}
+        onOpenChange={(v) => { if (!v) setSnapshotRecord(null) }}
+        tableName={table.name}
+        recordId={snapshotRecord?.id ?? 0}
+        tableLabel={table.label}
+      />
     </div>
   )
 }
