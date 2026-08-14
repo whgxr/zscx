@@ -24,30 +24,53 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: zscx-redis
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   web:
-    image: ghcr.io/whgxr/zscx-web:latest
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    image: zscx-web:local
     container_name: zscx-web
     restart: always
     ports:
       - "${WEB_PORT:-777}:3000"
     environment:
-      - DATABASE_URL=mysql://${MYSQL_USER:-zscx}:${MYSQL_PASSWORD:-zscx123456}@mysql:3306/${MYSQL_DATABASE:-zscx}
+      - DATABASE_URL=mysql://${MYSQL_USER:-zscx}:${MYSQL_PASSWORD:-zscx123456}@mysql:3306/${MYSQL_DATABASE:-zscx}?sslmode=disable
+      - REDIS_URL=redis://redis:6379
       - JWT_SECRET=${JWT_SECRET:-change-this-secret-in-production}
       - JWT_EXPIRES_IN=7d
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - UPLOAD_DIR=./public/uploads
       - MAX_FILE_SIZE=10485760
       - NEXT_PUBLIC_APP_NAME=${APP_NAME:-房屋征收调查系统}
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-https://REDACTED_DOMAIN}
       - NODE_ENV=production
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - uploads:/app/public/uploads
       - backups:/app/backups
-    command: sh -c "node prisma/docker-migrate.js && npm start"
+    command: sh -c "node prisma/docker-migrate.js || true; npx prisma db push --accept-data-loss --skip-generate || true; node node_modules/next/dist/bin/next start -p 3000"
 
 volumes:
   mysql_data:
+  redis_data:
   uploads:
   backups:
