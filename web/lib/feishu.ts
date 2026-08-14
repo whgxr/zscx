@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { prisma } from './prisma'
-import type { UserThirdPartyBinding } from '@prisma/client'
+import type { IntegrationConfig, UserThirdPartyBinding } from '@prisma/client'
 
 interface FeishuUserInfo {
   open_id: string
@@ -8,78 +8,172 @@ interface FeishuUserInfo {
   union_id?: string
   avatar_url?: string
   name?: string
+  email?: string
 }
 
-interface FeishuAccessToken {
-  tenant_access_token: string
+interface FeishuTokenResponse {
+  code: number
+  msg: string
+  data?: {
+    access_token: string
+    refresh_token: string
+    token_type: string
+    expires_in: number
+    refresh_expires_in: number
+    scope: string
+  }
+}
+
+interface FeishuAppAccessToken {
+  code: number
+  msg: string
+  app_access_token: string
   expires_in: number
 }
 
 export class FeishuService {
-  private clientId: string
-  private clientSecret: string
-  private tenantAccessToken: string = ''
-  private tokenExpireTime: number = 0
+  private clientId: string = ''
+  private clientSecret: string = ''
+  private appAccessToken: string = ''
+  private appTokenExpireTime: number = 0
 
   constructor() {
     this.clientId = process.env.FEISHU_CLIENT_ID || ''
     this.clientSecret = process.env.FEISHU_CLIENT_SECRET || ''
   }
 
-  async getTenantAccessToken(): Promise<string> {
-    if (Date.now() < this.tokenExpireTime && this.tenantAccessToken) {
-      return this.tenantAccessToken
+  async loadConfig(config: IntegrationConfig | null): Promise<void> {
+    if (config?.appId) {
+      this.clientId = config.appId
+    }
+    if (config?.appSecret) {
+      this.clientSecret = config.appSecret
+    }
+    this.appAccessToken = ''
+    this.appTokenExpireTime = 0
+  }
+
+  async loadConfigFromDB(): Promise<void> {
+    const config = await prisma.integrationConfig.findUnique({
+      where: { platform: 'FEISHU' }
+    })
+    await this.loadConfig(config)
+  }
+
+  get hasCredentials(): boolean {
+    return !!(this.clientId && this.clientSecret)
+  }
+
+  private async getAppAccessToken(): Promise<string> {
+    if (Date.now() < this.appTokenExpireTime && this.appAccessToken) {
+      return this.appAccessToken
     }
 
-    const response = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-      app_id: this.clientId,
-      app_secret: this.clientSecret
-    })
+    if (!this.hasCredentials) {
+      await this.loadConfigFromDB()
+    }
 
-    const data = response.data as FeishuAccessToken
-    this.tenantAccessToken = data.tenant_access_token
-    this.tokenExpireTime = Date.now() + (data.expires_in - 60) * 1000
+    if (!this.hasCredentials) {
+      throw new Error('飞书 AppID/AppSecret 未配置')
+    }
 
-    return this.tenantAccessToken
+    const response = await axios.post<FeishuAppAccessToken>(
+      'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal',
+      {
+        app_id: this.clientId,
+        app_secret: this.clientSecret
+      }
+    )
+
+    const data = response.data
+    if (data.code !== 0) {
+      throw new Error(`获取 app_access_token 失败: ${data.msg}`)
+    }
+
+    this.appAccessToken = data.app_access_token
+    this.appTokenExpireTime = Date.now() + (data.expires_in - 60) * 1000
+
+    return this.appAccessToken
   }
 
   getOAuthAuthorizeUrl(redirectUri: string, state: string = ''): string {
+    if (!this.clientId) {
+      throw new Error('飞书 AppID 未配置')
+    }
+
     const params = new URLSearchParams({
       app_id: this.clientId,
       redirect_uri: redirectUri,
       state: state,
       response_type: 'code',
-      scope: 'openid,user_info'
+      scope: 'contact:user.base:readonly'
     })
     return `https://open.feishu.cn/open-apis/authen/v1/authorize?${params.toString()}`
   }
 
-  async getAccessToken(code: string): Promise<{ accessToken: string; userId: string; openId: string }> {
-    const response = await axios.post('https://open.feishu.cn/open-apis/authen/v1/access_token', {
-      app_id: this.clientId,
-      app_secret: this.clientSecret,
-      code,
-      grant_type: 'authorization_code'
-    })
+  async getUserAccessToken(code: string): Promise<{ accessToken: string; refreshToken: string; scope: string }> {
+    if (!this.hasCredentials) {
+      await this.loadConfigFromDB()
+    }
+
+    if (!this.hasCredentials) {
+      throw new Error('飞书 AppID/AppSecret 未配置')
+    }
+
+    const appAccessToken = await this.getAppAccessToken()
+
+    const response = await axios.post<FeishuTokenResponse>(
+      'https://open.feishu.cn/open-apis/authen/v1/access_token',
+      {
+        grant_type: 'authorization_code',
+        code
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${appAccessToken}`,
+          'Content-Type': 'application/json; charset=utf-8'
+        }
+      }
+    )
 
     const data = response.data
+    if (data.code !== 0 || !data.data) {
+      throw new Error(`飞书获取 user_access_token 失败: ${data.msg}`)
+    }
+
     return {
-      accessToken: data.access_token,
-      userId: data.user_id,
-      openId: data.open_id
+      accessToken: data.data.access_token,
+      refreshToken: data.data.refresh_token,
+      scope: data.data.scope
     }
   }
 
-  async getUserInfo(accessToken: string): Promise<FeishuUserInfo> {
-    const response = await axios.get('https://open.feishu.cn/open-apis/authen/v1/user_info', {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    })
+  async getUserInfo(userAccessToken: string): Promise<FeishuUserInfo> {
+    const response = await axios.get<{ code: number; msg: string; data: FeishuUserInfo }>(
+      'https://open.feishu.cn/open-apis/authen/v1/user_info',
+      {
+        headers: { Authorization: `Bearer ${userAccessToken}` }
+      }
+    )
+
+    if (response.data.code !== 0) {
+      throw new Error(`获取飞书用户信息失败: ${response.data.msg}`)
+    }
+
     return response.data.data
   }
 
   async bindUser(userId: number, code: string): Promise<UserThirdPartyBinding> {
-    const tokenResult = await this.getAccessToken(code)
-    const userInfo = await this.getUserInfo(tokenResult.accessToken)
+    if (!this.hasCredentials) {
+      await this.loadConfigFromDB()
+    }
+
+    if (!this.hasCredentials) {
+      throw new Error('飞书 AppID/AppSecret 未配置')
+    }
+
+    const { accessToken } = await this.getUserAccessToken(code)
+    const userInfo = await this.getUserInfo(accessToken)
 
     const binding = await prisma.userThirdPartyBinding.upsert({
       where: {
@@ -93,7 +187,8 @@ export class FeishuService {
           openId: userInfo.open_id,
           unionId: userInfo.union_id || null,
           name: userInfo.name,
-          avatarUrl: userInfo.avatar_url
+          avatarUrl: userInfo.avatar_url,
+          email: userInfo.email
         }),
         updatedAt: new Date()
       },
@@ -107,7 +202,8 @@ export class FeishuService {
           openId: userInfo.open_id,
           unionId: userInfo.union_id || null,
           name: userInfo.name,
-          avatarUrl: userInfo.avatar_url
+          avatarUrl: userInfo.avatar_url,
+          email: userInfo.email
         })
       }
     })
@@ -121,6 +217,10 @@ export class FeishuService {
     })
   }
 
+  async getTenantAccessToken(): Promise<string> {
+    return this.getAppAccessToken()
+  }
+
   async sendMessage(userId: number, title: string, content: string): Promise<boolean> {
     const binding = await prisma.userThirdPartyBinding.findUnique({
       where: { userId_platform: { userId, platform: 'FEISHU' } }
@@ -131,20 +231,16 @@ export class FeishuService {
     }
 
     try {
-      const token = await this.getTenantAccessToken()
+      const token = await this.getAppAccessToken()
       const feishuUserId = binding.platformUserId
 
       await axios.post(
         'https://open.feishu.cn/open-apis/message/v4/send/',
         {
-          receive_id_type: 'open_id',
-          receive_id: feishuUserId,
-          content: JSON.stringify({
-            msg_type: 'text',
-            content: JSON.stringify({
-              text: `${title}\n\n${content}`
-            })
-          })
+          // 该旧版接口用 open_id 字段，content 需为对象（非 JSON 字符串）
+          open_id: feishuUserId,
+          msg_type: 'text',
+          content: { text: `${title}\n\n${content}` }
         },
         { headers: { Authorization: `Bearer ${token}` } }
       )
@@ -166,43 +262,24 @@ export class FeishuService {
     }
 
     try {
-      const token = await this.getTenantAccessToken()
+      const token = await this.getAppAccessToken()
       const feishuUserId = binding.platformUserId
 
       await axios.post(
         'https://open.feishu.cn/open-apis/message/v4/send/',
         {
-          receive_id_type: 'open_id',
-          receive_id: feishuUserId,
-          content: JSON.stringify({
-            msg_type: 'interactive',
-            content: JSON.stringify({
-              config: {
-                wide_screen_mode: true,
-                enable_forward: true
-              },
-              elements: [
-                {
-                  tag: 'div',
-                  text: {
-                    content: `${title}\n\n${content}`,
-                    tag: 'lark_md'
-                  }
-                },
-                {
-                  tag: 'action',
-                  actions: [
-                    {
-                      tag: 'button',
-                      text: { content: '查看详情', tag: 'plain_text' },
-                      type: 'primary',
-                      url: linkUrl
-                    }
-                  ]
-                }
-              ]
-            })
-          })
+          // 该旧版接口用 open_id 字段，content 需为对象（非 JSON 字符串）
+          open_id: feishuUserId,
+          msg_type: 'interactive',
+          content: {
+            config: { wide_screen_mode: true, enable_forward: true },
+            elements: [
+              { tag: 'div', text: { content: `${title}\n\n${content}`, tag: 'lark_md' } },
+              { tag: 'action', actions: [
+                { tag: 'button', text: { content: '查看详情', tag: 'plain_text' }, type: 'primary', url: linkUrl }
+              ]}
+            ]
+          }
         },
         { headers: { Authorization: `Bearer ${token}` } }
       )

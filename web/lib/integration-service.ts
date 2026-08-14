@@ -2,6 +2,7 @@ import { prisma } from './prisma'
 import { feishuService } from './feishu'
 import { weworkService } from './wework'
 import { dingtalkService } from './dingtalk'
+import { getOrSetCache, cacheDelete, cacheKey, invalidateByTag } from './cache'
 import type {
   IntegrationConfig,
   IntegrationPlatform,
@@ -53,13 +54,21 @@ class IntegrationService {
   }
 
   async getConfig(platform: IntegrationPlatform): Promise<IntegrationConfig | null> {
-    return prisma.integrationConfig.findUnique({ where: { platform } })
+    return getOrSetCache(
+      cacheKey('integration', platform),
+      () => prisma.integrationConfig.findUnique({ where: { platform } }),
+      120,
+      ['integration']
+    )
   }
 
   async getAllConfigs(): Promise<IntegrationConfig[]> {
-    return prisma.integrationConfig.findMany({
-      orderBy: { createdAt: 'asc' }
-    })
+    return getOrSetCache(
+      cacheKey('integration', 'all'),
+      () => prisma.integrationConfig.findMany({ orderBy: { createdAt: 'asc' } }),
+      120,
+      ['integration']
+    )
   }
 
   async upsertConfig(data: {
@@ -90,11 +99,15 @@ class IntegrationService {
       where: { platform: data.platform },
       update: updateData,
       create: createData,
+    }).then(async (result) => {
+      await invalidateByTag('integration')
+      return result
     })
   }
 
   async deleteConfig(platform: IntegrationPlatform): Promise<void> {
     await prisma.integrationConfig.delete({ where: { platform } })
+    await invalidateByTag('integration')
   }
 
   async testConnection(platform: IntegrationPlatform): Promise<{ success: boolean; message: string }> {

@@ -44,3 +44,21 @@
   padding: 50rpx 40rpx;
   box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.1);
 }
+
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.captcha-input {
+  flex: 1;
+}
+
+.captcha-image {
+  width: 240rpx;
+  height: 88rpx;
+  border-radius: 12rpx;
+  flex-shrink: 0;
+  background: #f3f4f6;
+}

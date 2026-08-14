@@ -29,6 +29,25 @@
       />
     </view>
 
+    <view class="form-item">
+      <text class="form-label">验证码</text>
+      <view class="captcha-row">
+        <input
+          class="form-input captcha-input"
+          placeholder="请输入验证码"
+          value="{{captchaCode}}"
+          bindinput="onCaptchaInput"
+          maxlength="4"
+        />
+        <image
+          class="captcha-image"
+          src="{{captchaImage}}"
+          mode="aspectFill"
+          bindtap="fetchCaptcha"
+        />
+      </view>
+    </view>
+
     <button
       class="btn-primary mt-4"
       bindtap="handleLogin"

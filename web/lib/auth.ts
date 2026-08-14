@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { cookies, headers } from 'next/headers'
 import { prisma } from './prisma'
+import { getOrSetCache, cacheDelete, cacheKey, invalidateByTag } from './cache'
 import { Role } from '@prisma/client'
 
 const JWT_SECRET = process.env.JWT_SECRET
@@ -13,15 +14,21 @@ if (!JWT_SECRET) {
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 
 async function getSessionTimeoutMinutes(): Promise<number> {
-  try {
-    const setting = await prisma.systemSetting.findUnique({
-      where: { key: 'sessionTimeout' },
-    })
-    const timeout = parseInt(setting?.value || '30', 10)
-    return timeout
-  } catch {
-    return 30
-  }
+  const setting = await getOrSetCache(
+    cacheKey('setting', 'sessionTimeout'),
+    async () => {
+      try {
+        const s = await prisma.systemSetting.findUnique({
+          where: { key: 'sessionTimeout' },
+        })
+        return parseInt(s?.value || '30', 10)
+      } catch {
+        return 30
+      }
+    },
+    600
+  )
+  return setting
 }
 
 export interface JwtPayload {
@@ -73,7 +80,6 @@ export async function createUserSession(
     roleId,
   })
 
-  // 截断 userAgent 防止超过 VARCHAR(191) 限制（微信等UA特别长）
   const safeUserAgent = userAgent ? userAgent.slice(0, 191) : undefined
 
   const session = await prisma.userSession.create({
@@ -87,6 +93,8 @@ export async function createUserSession(
     },
   })
 
+  await invalidateByTag(`user:${userId}`)
+
   return { token, sessionId: session.id }
 }
 
@@ -94,27 +102,40 @@ export async function validateSession(token: string): Promise<boolean> {
   const payload = verifyToken(token)
   if (!payload) return false
 
-  const session = await prisma.userSession.findFirst({
-    where: { token },
-  })
+  const cacheKey2 = cacheKey('session', token)
+  const cached = await getOrSetCache(
+    cacheKey2,
+    async () => {
+      const session = await prisma.userSession.findFirst({
+        where: { token },
+      })
 
-  if (!session || !session.isActive) return false
+      if (!session || !session.isActive) return { valid: false }
 
-  if (session.expiresAt && new Date() > session.expiresAt) {
-    return false
+      if (session.expiresAt && new Date() > session.expiresAt) {
+        return { valid: false }
+      }
+
+      const timeoutMinutes = await getSessionTimeoutMinutes()
+      const lastActive = new Date(session.lastActiveAt).getTime()
+      const now = Date.now()
+      if (now - lastActive > timeoutMinutes * 60 * 1000) {
+        return { valid: false }
+      }
+
+      return { valid: true, sessionId: session.id }
+    },
+    300
+  )
+
+  if (!cached || !cached.valid) return false
+
+  if (cached.sessionId) {
+    await prisma.userSession.update({
+      where: { id: cached.sessionId },
+      data: { lastActiveAt: new Date() },
+    })
   }
-
-  const timeoutMinutes = await getSessionTimeoutMinutes()
-  const lastActive = new Date(session.lastActiveAt).getTime()
-  const now = Date.now()
-  if (now - lastActive > timeoutMinutes * 60 * 1000) {
-    return false
-  }
-
-  await prisma.userSession.update({
-    where: { id: session.id },
-    data: { lastActiveAt: new Date() },
-  })
 
   return true
 }
@@ -129,13 +150,13 @@ export async function invalidateUserSessions(userId: number): Promise<void> {
       isActive: false,
     },
   })
+  await invalidateByTag(`user:${userId}`)
 }
 
 export async function getCurrentUser() {
   const cookieStore = cookies()
   let token = cookieStore.get('token')?.value
 
-  // 小程序通过 Authorization header 发送 token
   if (!token) {
     const headerStore = headers()
     const authHeader = headerStore.get('authorization')
@@ -149,19 +170,24 @@ export async function getCurrentUser() {
   const payload = verifyToken(token)
   if (!payload) return null
 
-  const sessionValid = await validateSession(token)
-  if (!sessionValid) {
-    return null
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
-    include: {
-      role: true,
+  const cacheKey3 = cacheKey('user', String(payload.userId))
+  const user = await getOrSetCache(
+    cacheKey3,
+    async () => {
+      const u = await prisma.user.findUnique({
+        where: { id: payload.userId },
+        include: { role: true },
+      })
+      if (!u || u.status !== 'ACTIVE') return null
+      return u
     },
-  })
+    300
+  )
 
-  if (!user || user.status !== 'ACTIVE') return null
+  if (!user) return null
+
+  const sessionValid = await validateSession(token)
+  if (!sessionValid) return null
 
   return user
 }

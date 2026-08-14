@@ -1,12 +1,23 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Building2, Loader2, QrCode, Eye, EyeOff } from 'lucide-react'
+import { Building2, Loader2, Eye, EyeOff, MessageCircle, Smartphone, RefreshCw } from 'lucide-react'
+
+interface LoginPlatform {
+  platform: string
+  enabled: boolean
+}
+
+const PLATFORM_CONFIG: Record<string, { name: string; icon: React.ComponentType<{ className?: string }>; color: string }> = {
+  feishu: { name: '飞书', icon: MessageCircle, color: 'bg-blue-500 hover:bg-blue-600' },
+  wework: { name: '企业微信', icon: Smartphone, color: 'bg-green-500 hover:bg-green-600' },
+  dingtalk: { name: '钉钉', icon: MessageCircle, color: 'bg-cyan-500 hover:bg-cyan-600' }
+}
 
 export default function LoginPage() {
   const router = useRouter()
@@ -17,11 +28,55 @@ export default function LoginPage() {
     password: '',
   })
   const [showPassword, setShowPassword] = useState(false)
-  const [showWeChat, setShowWeChat] = useState(false)
-  const [weChatQrCode, setWeChatQrCode] = useState('')
-  const [weChatLoading, setWeChatLoading] = useState(false)
-  const [weChatPolling, setWeChatPolling] = useState(false)
-  const [weChatStatus, setWeChatStatus] = useState('')
+  const [loginPlatforms, setLoginPlatforms] = useState<LoginPlatform[]>([])
+  const [platformsLoading, setPlatformsLoading] = useState(true)
+  const [captchaId, setCaptchaId] = useState('')
+  const [captchaImage, setCaptchaImage] = useState('')
+  const [captchaCode, setCaptchaCode] = useState('')
+
+  const fetchCaptcha = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/captcha')
+      if (res.ok) {
+        const data = await res.json()
+        setCaptchaId(data.captchaId)
+        setCaptchaImage(data.image)
+        setCaptchaCode('')
+      }
+    } catch (err) {
+      console.error('Failed to load captcha:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchCaptcha()
+  }, [fetchCaptcha])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const errorParam = params.get('error')
+    if (errorParam) {
+      setError(decodeURIComponent(errorParam))
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchPlatforms()
+  }, [])
+
+  const fetchPlatforms = async () => {
+    try {
+      const res = await fetch('/api/auth/third-party/platforms')
+      if (res.ok) {
+        const data = await res.json()
+        setLoginPlatforms(data.platforms || [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch login platforms:', err)
+    } finally {
+      setPlatformsLoading(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -32,7 +87,11 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          captchaId,
+          captchaCode,
+        }),
       })
 
       const data = await res.json()
@@ -42,6 +101,8 @@ export default function LoginPage() {
         router.refresh()
       } else {
         setError(data.message || '登录失败')
+        // 登录失败后刷新验证码
+        fetchCaptcha()
       }
     } catch (err) {
       setError('网络错误，请重试')
@@ -50,62 +111,12 @@ export default function LoginPage() {
     }
   }
 
-  const handleWeChatLogin = async () => {
-    setWeChatLoading(true)
-    try {
-      const res = await fetch('/api/auth/wechat/qrcode', {
-        method: 'GET',
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setWeChatQrCode(data.qrcode)
-        setShowWeChat(true)
-        setWeChatStatus('请使用微信扫码登录')
-        startWeChatPolling(data.state)
-      } else {
-        setError('获取微信二维码失败')
-      }
-    } catch (err) {
-      setError('微信登录暂不可用')
-    } finally {
-      setWeChatLoading(false)
-    }
+  const handleThirdPartyLogin = (platform: string) => {
+    setError('')
+    window.location.href = `/api/auth/third-party/${platform}`
   }
 
-  const startWeChatPolling = async (state: string) => {
-    setWeChatPolling(true)
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/auth/wechat/callback?state=${state}`, {
-          method: 'GET',
-        })
-        const data = await res.json()
-        if (data.success) {
-          clearInterval(interval)
-          setWeChatPolling(false)
-          setWeChatStatus('登录成功，正在跳转...')
-          router.push('/dashboard')
-          router.refresh()
-        } else if (data.status === 'scanned') {
-          setWeChatStatus('已扫码，请在手机上确认')
-        } else if (data.status === 'expired') {
-          clearInterval(interval)
-          setWeChatPolling(false)
-          setWeChatStatus('二维码已过期，请重新获取')
-        }
-      } catch (err) {
-        console.error('WeChat polling error:', err)
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }
-
-  useEffect(() => {
-    return () => {
-      setWeChatPolling(false)
-    }
-  }, [])
+  const availablePlatforms = loginPlatforms.filter(p => p.enabled)
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -120,30 +131,7 @@ export default function LoginPage() {
           <CardDescription>请登录您的账户</CardDescription>
         </CardHeader>
         
-        {showWeChat ? (
-          <CardContent className="space-y-4">
-            <div className="text-center">
-              <p className="text-sm text-gray-600 mb-4">{weChatStatus}</p>
-              {weChatQrCode && (
-                <div className="flex justify-center">
-                  <img src={weChatQrCode} alt="微信登录二维码" className="w-64 h-64" />
-                </div>
-              )}
-              {weChatPolling && (
-                <div className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  等待扫码...
-                </div>
-              )}
-            </div>
-            <div className="flex justify-center">
-              <Button variant="outline" onClick={() => setShowWeChat(false)}>
-                返回密码登录
-              </Button>
-            </div>
-          </CardContent>
-        ) : (
-          <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="username">用户名或手机号</Label>
@@ -180,6 +168,34 @@ export default function LoginPage() {
                   </button>
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="captcha">验证码</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="captcha"
+                    type="text"
+                    placeholder="请输入验证码"
+                    value={captchaCode}
+                    onChange={(e) => setCaptchaCode(e.target.value)}
+                    maxLength={4}
+                    autoComplete="off"
+                    className="uppercase flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={fetchCaptcha}
+                    title="点击刷新验证码"
+                    className="shrink-0 h-10 w-[120px] rounded-md border overflow-hidden flex items-center justify-center bg-muted cursor-pointer hover:opacity-90"
+                  >
+                    {captchaImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={captchaImage} alt="验证码" className="h-full w-full object-cover" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4 text-gray-400 animate-spin" />
+                    )}
+                  </button>
+                </div>
+              </div>
               {error && (
                 <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
                   {error}
@@ -197,18 +213,44 @@ export default function LoginPage() {
                   '登 录'
                 )}
               </Button>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={handleWeChatLogin}
-                disabled={weChatLoading}
-              >
-                <QrCode className="mr-2 h-4 w-4" />
-                {weChatLoading ? '加载中...' : '微信扫码登录'}
-              </Button>
+
+              {platformsLoading ? (
+                <div className="flex justify-center py-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                </div>
+              ) : availablePlatforms.length > 0 ? (
+                <>
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-card px-2 text-muted-foreground">扫码登录</span>
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    {availablePlatforms.map((platform) => {
+                      const config = PLATFORM_CONFIG[platform.platform]
+                      if (!config) return null
+                      const Icon = config.icon
+                      return (
+                        <Button
+                          key={platform.platform}
+                          type="button"
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => handleThirdPartyLogin(platform.platform)}
+                        >
+                          <Icon className="mr-2 h-4 w-4" />
+                          {config.name}扫码登录
+                        </Button>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : null}
             </CardFooter>
           </form>
-        )}
       </Card>
     </div>
   )

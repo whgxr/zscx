@@ -4,7 +4,14 @@ Page({
   data: {
     username: '',
     password: '',
+    captchaId: '',
+    captchaImage: '',
+    captchaCode: '',
     loading: false,
+  },
+
+  onLoad() {
+    this.fetchCaptcha()
   },
 
   onUsernameInput(e) {
@@ -15,10 +22,34 @@ Page({
     this.setData({ password: e.detail.value })
   },
 
+  onCaptchaInput(e) {
+    this.setData({ captchaCode: e.detail.value })
+  },
+
+  async fetchCaptcha() {
+    try {
+      const res = await app.request({
+        url: '/api/auth/captcha',
+        method: 'GET',
+      })
+      this.setData({
+        captchaId: res.captchaId || '',
+        captchaImage: res.image || '',
+        captchaCode: '',
+      })
+    } catch (err) {
+      console.error('Load captcha error:', err)
+    }
+  },
+
   async handleLogin() {
-    const { username, password } = this.data
+    const { username, password, captchaId, captchaCode } = this.data
     if (!username || !password) {
       wx.showToast({ title: '请输入用户名和密码', icon: 'none' })
+      return
+    }
+    if (!captchaCode) {
+      wx.showToast({ title: '请输入验证码', icon: 'none' })
       return
     }
 
@@ -27,7 +58,7 @@ Page({
       const res = await app.request({
         url: '/api/auth/login',
         method: 'POST',
-        data: { username, password },
+        data: { username, password, captchaId, captchaCode },
       })
 
       if (res.success) {
@@ -35,7 +66,7 @@ Page({
         app.globalData.userInfo = res.user
         wx.setStorageSync('token', res.token)
         wx.setStorageSync('userInfo', res.user)
-        
+
         wx.showToast({ title: '登录成功', icon: 'success' })
         setTimeout(() => {
           wx.switchTab({ url: '/pages/index/index' })
@@ -43,6 +74,8 @@ Page({
       }
     } catch (err) {
       console.error('Login error:', err)
+      // 登录失败后刷新验证码
+      this.fetchCaptcha()
     } finally {
       this.setData({ loading: false })
     }
