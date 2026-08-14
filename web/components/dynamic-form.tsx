@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Upload, X, Image as ImageIcon, File, Loader2, Plus, Trash2, Layers } from 'lucide-react'
 import { TableField, FieldType } from '@prisma/client'
 import { cn } from '@/lib/utils'
+import { isFieldEditableInModule } from '@/lib/levy-edit-scope'
 import { FormLayoutConfig, SubGroupLayoutItem, FieldLayoutItem, FormCellData, FormLayoutGroup } from './form-layout-designer'
 import { FormExcelConfig, SubTableConfig } from '@/types/form-excel-config'
 import { CellData, FIELD_PATTERN } from '@/types/cell-data'
@@ -304,10 +305,15 @@ interface DynamicFormProps {
   onChange: (values: Record<string, any>) => void
   disabled?: boolean
   layoutConfig?: FormLayoutConfig | null
+  module?: 'survey' | 'levy' | 'both'
 }
 
-export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }: DynamicFormProps) {
+export function DynamicForm({ fields, values, onChange, disabled, layoutConfig, module = 'both' }: DynamicFormProps) {
   const formFields = fields.filter(f => f.showInForm)
+
+  // v1.2.2+ 可填写阶段：当前模块下该字段是否可编辑（combine 全局 disabled）
+  const fieldDisabled = (field: TableField) =>
+    !!disabled || !isFieldEditableInModule(field.editScope, module)
 
   const handleChange = (name: string, value: any) => {
     onChange({ ...values, [name]: value })
@@ -576,6 +582,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
   const renderField = (field: TableField, layoutDirection?: 'vertical' | 'horizontal') => {
     const value = values[field.name] || ''
     const isRequired = field.required
+    const fd = fieldDisabled(field)
 
     switch (field.type) {
       case FieldType.TEXT:
@@ -588,7 +595,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             placeholder={field.placeholder || `请输入${field.label}`}
             value={value}
             onChange={(e) => handleChange(field.name, e.target.value)}
-            disabled={disabled}
+            disabled={fd}
           />
         )
 
@@ -599,7 +606,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             placeholder={field.placeholder || `请输入${field.label}`}
             value={value}
             onChange={(e) => handleChange(field.name, e.target.value)}
-            disabled={disabled}
+            disabled={fd}
             rows={4}
           />
         )
@@ -615,7 +622,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             placeholder={field.placeholder || `请输入${field.label}`}
             value={value}
             onChange={(e) => handleChange(field.name, e.target.value)}
-            disabled={disabled}
+            disabled={fd}
           />
         )
 
@@ -625,7 +632,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             type="date"
             value={value}
             onChange={(e) => handleChange(field.name, e.target.value)}
-            disabled={disabled}
+            disabled={fd}
           />
         )
 
@@ -635,7 +642,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             type="datetime-local"
             value={value}
             onChange={(e) => handleChange(field.name, e.target.value)}
-            disabled={disabled}
+            disabled={fd}
           />
         )
 
@@ -646,7 +653,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
           <Select
             value={value}
             onValueChange={(v) => handleChange(field.name, v)}
-            disabled={disabled}
+            disabled={fd}
           >
             <SelectTrigger>
               <SelectValue placeholder={`请选择${field.label}`} />
@@ -680,7 +687,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
                       handleChange(field.name, selectedValues.filter(v => v !== opt.value))
                     }
                   }}
-                  disabled={disabled}
+                  disabled={fd}
                   className="w-4 h-4"
                 />
                 <span className="text-sm">{opt.label}</span>
@@ -694,7 +701,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
           <Switch
             checked={value === true || value === 'true' || value === 1}
             onCheckedChange={(v) => handleChange(field.name, v)}
-            disabled={disabled}
+            disabled={fd}
           />
         )
 
@@ -704,7 +711,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
           <ImageUploadField
             urls={imageUrls}
             onChange={(urls) => handleChange(field.name, urls)}
-            disabled={disabled}
+            disabled={fd}
             fieldName={field.name}
           />
         )
@@ -718,7 +725,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
                 <div key={idx} className="flex items-center gap-2 p-2 bg-gray-50 rounded">
                   <File className="w-4 h-4 text-gray-500" />
                   <span className="text-sm flex-1 truncate">{url.split('/').pop()}</span>
-                  {!disabled && (
+                  {!fd && (
                     <button
                       type="button"
                       onClick={() => {
@@ -733,7 +740,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
                 </div>
               ))}
             </div>
-            {!disabled && (
+            {!fd && (
               <label className="inline-flex items-center gap-2 px-4 py-2 border rounded-md cursor-pointer hover:bg-gray-50 transition-colors">
                 <Upload className="w-4 h-4" />
                 <span className="text-sm">上传文件</span>
@@ -763,7 +770,7 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig }
             placeholder={field.placeholder || `请输入${field.label}`}
             value={value}
             onChange={(e) => handleChange(field.name, e.target.value)}
-            disabled={disabled}
+            disabled={fd}
           />
         )
     }

@@ -3,13 +3,22 @@ import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { H5DataListClient } from './data-list-client'
 
-export default async function H5DataListPage({ params }: { params: { tableName: string } }) {
+export default async function H5DataListPage({
+  params,
+  searchParams,
+}: {
+  params: { tableName: string }
+  searchParams: { module?: string }
+}) {
   const user = await getCurrentUser()
   if (!user) { redirect('/h5/login') }
 
   const table = await prisma.dataTable.findUnique({
     where: { name: params.tableName },
-    include: { fields: { orderBy: { sortOrder: 'asc' } } },
+    include: {
+      fields: { orderBy: { sortOrder: 'asc' } },
+      category: { select: { module: true } },
+    },
   })
 
   if (!table) {
@@ -40,12 +49,19 @@ export default async function H5DataListPage({ params }: { params: { tableName: 
     }
   }
 
+  // module：优先取 URL 参数，其次按表的分类模块推导（survey/levy）
+  const module =
+    searchParams?.module ||
+    (table.category?.module === 'SURVEY' ? 'survey' : table.category?.module === 'LEVY' ? 'levy' : '') ||
+    ''
+
   return (
     <H5DataListClient
       table={JSON.parse(JSON.stringify(table))}
       user={JSON.parse(JSON.stringify(user))}
       isAdmin={isAdmin}
       permission={permission ? JSON.parse(JSON.stringify({ ...permission, canView, canCreate, canEdit: permission ? permission.canEdit && permission.canView : isAdmin })) : null}
+      module={module}
     />
   )
 }

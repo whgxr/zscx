@@ -65,7 +65,7 @@ import {
   Layers,
   Link2,
 } from 'lucide-react'
-import { FieldType, DataTable, TableField, Role } from '@prisma/client'
+import { FieldType, DataTable, TableField, Role, EditScope } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
 
 interface FieldDesignerProps {
@@ -137,12 +137,20 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const [selectedFieldIds, setSelectedFieldIds] = useState<number[]>([])
   const [batchDisplayDialogOpen, setBatchDisplayDialogOpen] = useState(false)
   const [batchDisplayForm, setBatchDisplayForm] = useState({
+    required: true,
     showInList: true,
     showInForm: true,
     showInSearch: true,
+    forceShowInSurveyList: false,
+    forceShowInLevyList: false,
+    editScope: 'ALWAYS' as string,
+    updateRequired: false,
     updateList: false,
     updateForm: false,
     updateSearch: false,
+    updateForceSurvey: false,
+    updateForceLevy: false,
+    updateEditScope: false,
   })
   const [batchDisplayLoading, setBatchDisplayLoading] = useState(false)
 
@@ -208,12 +216,16 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
     if (selectedFieldIds.length === 0) return
 
     const updateData: any = { fieldIds: selectedFieldIds }
+    if (batchDisplayForm.updateRequired) updateData.required = batchDisplayForm.required
     if (batchDisplayForm.updateList) updateData.showInList = batchDisplayForm.showInList
     if (batchDisplayForm.updateForm) updateData.showInForm = batchDisplayForm.showInForm
     if (batchDisplayForm.updateSearch) updateData.showInSearch = batchDisplayForm.showInSearch
+    if (batchDisplayForm.updateForceSurvey) updateData.forceShowInSurveyList = batchDisplayForm.forceShowInSurveyList
+    if (batchDisplayForm.updateForceLevy) updateData.forceShowInLevyList = batchDisplayForm.forceShowInLevyList
+    if (batchDisplayForm.updateEditScope) updateData.editScope = batchDisplayForm.editScope
 
-    if (!batchDisplayForm.updateList && !batchDisplayForm.updateForm && !batchDisplayForm.updateSearch) {
-      alert('请至少勾选一项要修改的显示设置')
+    if (!batchDisplayForm.updateRequired && !batchDisplayForm.updateList && !batchDisplayForm.updateForm && !batchDisplayForm.updateSearch && !batchDisplayForm.updateForceSurvey && !batchDisplayForm.updateForceLevy && !batchDisplayForm.updateEditScope) {
+      alert('请至少勾选一项要修改的设置')
       return
     }
 
@@ -232,21 +244,33 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
           if (!selectedFieldIds.includes(f.id)) return f
           return {
             ...f,
+            ...(batchDisplayForm.updateRequired && { required: batchDisplayForm.required }),
             ...(batchDisplayForm.updateList && { showInList: batchDisplayForm.showInList }),
             ...(batchDisplayForm.updateForm && { showInForm: batchDisplayForm.showInForm }),
             ...(batchDisplayForm.updateSearch && { showInSearch: batchDisplayForm.showInSearch }),
+            ...(batchDisplayForm.updateForceSurvey && { forceShowInSurveyList: batchDisplayForm.forceShowInSurveyList }),
+            ...(batchDisplayForm.updateForceLevy && { forceShowInLevyList: batchDisplayForm.forceShowInLevyList }),
+            ...(batchDisplayForm.updateEditScope && { editScope: (batchDisplayForm.editScope as EditScope) }),
           }
         }))
         setBatchDisplayDialogOpen(false)
         setBatchDisplayForm({
+          required: true,
           showInList: true,
           showInForm: true,
           showInSearch: true,
+          forceShowInSurveyList: false,
+          forceShowInLevyList: false,
+          editScope: 'ALWAYS',
+          updateRequired: false,
           updateList: false,
           updateForm: false,
           updateSearch: false,
+          updateForceSurvey: false,
+          updateForceLevy: false,
+          updateEditScope: false,
         })
-        alert(`成功更新 ${data.count} 个字段的显示设置`)
+        alert(`成功更新 ${data.count} 个字段的设置`)
       } else {
         const data = await res.json()
         alert(data.message || '更新失败')
@@ -260,12 +284,20 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
 
   const openBatchDisplayDialog = () => {
     setBatchDisplayForm({
+      required: true,
       showInList: true,
       showInForm: true,
       showInSearch: true,
+      forceShowInSurveyList: false,
+      forceShowInLevyList: false,
+      editScope: 'ALWAYS',
+      updateRequired: false,
       updateList: false,
       updateForm: false,
       updateSearch: false,
+      updateForceSurvey: false,
+      updateForceLevy: false,
+      updateEditScope: false,
     })
     setBatchDisplayDialogOpen(true)
   }
@@ -278,6 +310,9 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
     showInList: true,
     showInForm: true,
     showInSearch: true,
+    forceShowInSurveyList: false,
+    forceShowInLevyList: false,
+    editScope: 'ALWAYS',
     options: [] as { label: string; value: string }[],
   })
   const [showOptions, setShowOptions] = useState(false)
@@ -305,6 +340,9 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       showInList: true,
       showInForm: true,
       showInSearch: true,
+      forceShowInSurveyList: false,
+      forceShowInLevyList: false,
+      editScope: 'ALWAYS',
       options: [],
     })
     setDetailConfig({})
@@ -374,6 +412,9 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       showInList: field.showInList,
       showInForm: field.showInForm,
       showInSearch: field.showInSearch,
+      forceShowInSurveyList: field.forceShowInSurveyList,
+      forceShowInLevyList: field.forceShowInLevyList,
+      editScope: field.editScope || 'ALWAYS',
       options: fieldOptions,
     })
     setShowOptions(hasOptions(field.type) && fieldOptions.length > 0)
@@ -447,6 +488,9 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       if (!hasOptions(formData.type)) {
         submitData.options = []
       }
+      submitData.forceShowInSurveyList = !!formData.forceShowInSurveyList
+      submitData.forceShowInLevyList = !!formData.forceShowInLevyList
+      submitData.editScope = formData.editScope || 'ALWAYS'
       if (formData.type === 'DETAIL_TABLE') {
         submitData.config = {
           detailTableId: detailConfig.detailTableId,
@@ -1375,6 +1419,48 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                                 onCheckedChange={(v) => setFormData({ ...formData, showInSearch: v })}
                               />
                             </div>
+                            <div className="border-t pt-3">
+                              <p className="font-medium text-sm mb-1">征收扩展</p>
+                              <p className="text-xs text-gray-500 mb-2">控制字段在调查/征收列表与填写中的行为</p>
+                              <div className="flex items-center justify-between py-1.5">
+                                <div>
+                                  <p className="font-medium text-sm">调查列表强制显示</p>
+                                  <p className="text-xs text-gray-500">调查数据列表中始终显示，列设置不可隐藏</p>
+                                </div>
+                                <Switch
+                                  checked={formData.forceShowInSurveyList}
+                                  onCheckedChange={(v) => setFormData({ ...formData, forceShowInSurveyList: v })}
+                                />
+                              </div>
+                              <div className="flex items-center justify-between py-1.5">
+                                <div>
+                                  <p className="font-medium text-sm">征收列表强制显示</p>
+                                  <p className="text-xs text-gray-500">征收数据列表中始终显示，列设置不可隐藏</p>
+                                </div>
+                                <Switch
+                                  checked={formData.forceShowInLevyList}
+                                  onCheckedChange={(v) => setFormData({ ...formData, forceShowInLevyList: v })}
+                                />
+                              </div>
+                              <div className="space-y-2 py-1.5">
+                                <Label htmlFor="field-edit-scope">可填写阶段</Label>
+                                <Select
+                                  value={formData.editScope}
+                                  onValueChange={(v) => setFormData({ ...formData, editScope: v })}
+                                >
+                                  <SelectTrigger id="field-edit-scope">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="ALWAYS">始终可编辑</SelectItem>
+                                    <SelectItem value="SURVEY_ONLY">仅调查中可填写</SelectItem>
+                                    <SelectItem value="LEVY_ONLY">仅征收中可填写</SelectItem>
+                                    <SelectItem value="SURVEY_OR_LEVY">调查或征收中均可填写</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <p className="text-xs text-gray-500">不在允许阶段的模块中，该字段只读</p>
+                              </div>
+                            </div>
                           </div>
                         </div>
                         <DialogFooter>
@@ -1435,7 +1521,7 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                       <span className="text-sm text-gray-600">已选择 {selectedFieldIds.length} 个字段</span>
                       <Button variant="outline" size="sm" onClick={openBatchDisplayDialog}>
                         <Settings className="w-4 h-4 mr-2" />
-                        批量修改显示设置
+                        批量编辑
                       </Button>
                       <Button variant="destructive" size="sm" onClick={handleBatchDelete}>
                         <Trash2 className="w-4 h-4 mr-2" />
@@ -1541,6 +1627,13 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                                   {field.showInList && <Badge variant="outline" className="text-xs">列表</Badge>}
                                   {field.showInForm && <Badge variant="outline" className="text-xs">表单</Badge>}
                                   {field.showInSearch && <Badge variant="outline" className="text-xs">搜索</Badge>}
+                                  {field.forceShowInSurveyList && <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700 border-blue-200">调查强制</Badge>}
+                                  {field.forceShowInLevyList && <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-700 border-orange-200">征收强制</Badge>}
+                                  {field.editScope && field.editScope !== 'ALWAYS' && (
+                                    <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">
+                                      {field.editScope === 'SURVEY_ONLY' ? '仅调查可填' : field.editScope === 'LEVY_ONLY' ? '仅征收可填' : '调查/征收可填'}
+                                    </Badge>
+                                  )}
                                 </div>
                               </TableCell>
                               <TableCell className="text-right">
@@ -1635,16 +1728,35 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
         </div>
       )}
 
-      {/* 批量修改显示设置对话框 */}
+      {/* 批量编辑对话框 */}
       <Dialog open={batchDisplayDialogOpen} onOpenChange={setBatchDisplayDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>批量修改显示设置</DialogTitle>
+            <DialogTitle>批量编辑字段</DialogTitle>
             <DialogDescription>
-              对选中的 {selectedFieldIds.length} 个字段批量修改显示设置，勾选要修改的项并设置目标值。
+              对选中的 {selectedFieldIds.length} 个字段批量修改设置，勾选要修改的项并设置目标值。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={batchDisplayForm.updateRequired}
+                  onChange={(e) => setBatchDisplayForm({ ...batchDisplayForm, updateRequired: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div>
+                  <p className="font-medium text-sm">必填字段</p>
+                  <p className="text-xs text-gray-500">表单中是否必须填写</p>
+                </div>
+              </div>
+              <Switch
+                checked={batchDisplayForm.required}
+                onCheckedChange={(v) => setBatchDisplayForm({ ...batchDisplayForm, required: v })}
+                disabled={!batchDisplayForm.updateRequired}
+              />
+            </div>
             <div className="flex items-center justify-between p-3 border rounded-lg">
               <div className="flex items-center gap-3">
                 <input
@@ -1702,9 +1814,81 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                 disabled={!batchDisplayForm.updateSearch}
               />
             </div>
+
+            <div className="border-t pt-3">
+              <p className="font-medium text-sm mb-1">征收扩展</p>
+              <p className="text-xs text-gray-500 mb-2">控制字段在调查/征收列表与填写中的行为</p>
+              <div className="flex items-center justify-between p-3 border rounded-lg mb-2">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={batchDisplayForm.updateForceSurvey}
+                    onChange={(e) => setBatchDisplayForm({ ...batchDisplayForm, updateForceSurvey: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <div>
+                    <p className="font-medium text-sm">调查列表强制显示</p>
+                    <p className="text-xs text-gray-500">调查数据列表中始终显示，列设置不可隐藏</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={batchDisplayForm.forceShowInSurveyList}
+                  onCheckedChange={(v) => setBatchDisplayForm({ ...batchDisplayForm, forceShowInSurveyList: v })}
+                  disabled={!batchDisplayForm.updateForceSurvey}
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 border rounded-lg mb-2">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={batchDisplayForm.updateForceLevy}
+                    onChange={(e) => setBatchDisplayForm({ ...batchDisplayForm, updateForceLevy: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <div>
+                    <p className="font-medium text-sm">征收列表强制显示</p>
+                    <p className="text-xs text-gray-500">征收数据列表中始终显示，列设置不可隐藏</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={batchDisplayForm.forceShowInLevyList}
+                  onCheckedChange={(v) => setBatchDisplayForm({ ...batchDisplayForm, forceShowInLevyList: v })}
+                  disabled={!batchDisplayForm.updateForceLevy}
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={batchDisplayForm.updateEditScope}
+                    onChange={(e) => setBatchDisplayForm({ ...batchDisplayForm, updateEditScope: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <div>
+                    <p className="font-medium text-sm">可填写阶段</p>
+                    <p className="text-xs text-gray-500">不在允许阶段的模块中，该字段只读</p>
+                  </div>
+                </div>
+                <Select
+                  value={batchDisplayForm.editScope}
+                  onValueChange={(v) => setBatchDisplayForm({ ...batchDisplayForm, editScope: v })}
+                  disabled={!batchDisplayForm.updateEditScope}
+                >
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALWAYS">始终可编辑</SelectItem>
+                    <SelectItem value="SURVEY_ONLY">仅调查中可填写</SelectItem>
+                    <SelectItem value="LEVY_ONLY">仅征收中可填写</SelectItem>
+                    <SelectItem value="SURVEY_OR_LEVY">调查或征收中均可填写</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-xs text-blue-700">
-                勾选左侧复选框表示要修改该项设置，右侧开关控制目标值。未勾选的项将保持原值不变。
+                勾选左侧复选框表示要修改该项设置，右侧控件控制目标值。未勾选的项将保持原值不变。
               </p>
             </div>
           </div>

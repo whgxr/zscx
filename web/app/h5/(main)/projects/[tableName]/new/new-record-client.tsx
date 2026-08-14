@@ -12,13 +12,18 @@ import {
   Image as ImageIcon, FileText, Upload, X, Camera
 } from 'lucide-react'
 import { FieldType, RecordStatus } from '@prisma/client'
+import { isFieldEditableInModule } from '@/lib/levy-edit-scope'
 
 interface H5NewRecordClientProps {
   table: any
+  module?: string
 }
 
-export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
+export function H5NewRecordClient({ table, module: moduleProp = '' }: H5NewRecordClientProps) {
   const router = useRouter()
+  const currentModule = moduleProp || ''
+  const moduleType = currentModule === 'survey' ? 'survey' : currentModule === 'levy' ? 'levy' : 'both'
+  const moduleQuery = currentModule ? `?module=${currentModule}` : ''
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(false)
 
@@ -158,7 +163,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
         }
       }
 
-      router.push(`/h5/projects/${table.name}`)
+      router.push(`/h5/projects/${table.name}${moduleQuery}`)
     } catch (err) {
       alert('保存失败')
     } finally {
@@ -168,6 +173,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
 
   const renderField = (field: any) => {
     const value = formData[field.name] || ''
+    const editable = isFieldEditableInModule(field.editScope, moduleType)
 
     switch (field.type) {
       case FieldType.TEXT:
@@ -179,6 +185,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
             type={field.type === 'EMAIL' ? 'email' : field.type === 'PHONE' ? 'tel' : 'text'}
             placeholder={field.placeholder || `请输入${field.label}`}
             value={value}
+            disabled={!editable}
             onChange={(e) => handleChange(field.name, e.target.value)}
             className="h-11 text-sm rounded-xl"
           />
@@ -190,6 +197,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
           <Textarea
             placeholder={field.placeholder || `请输入${field.label}`}
             value={value}
+            disabled={!editable}
             onChange={(e) => handleChange(field.name, e.target.value)}
             rows={3}
             className="text-sm rounded-xl resize-none"
@@ -206,6 +214,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
             step={field.type === 'INTEGER' ? '1' : '0.01'}
             placeholder={field.placeholder || `请输入${field.label}`}
             value={value}
+            disabled={!editable}
             onChange={(e) => handleChange(field.name, e.target.value)}
             className="h-11 text-sm rounded-xl"
           />
@@ -216,6 +225,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
           <Input
             type="date"
             value={value}
+            disabled={!editable}
             onChange={(e) => handleChange(field.name, e.target.value)}
             className="h-11 text-sm rounded-xl"
           />
@@ -226,6 +236,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
           <Input
             type="datetime-local"
             value={value}
+            disabled={!editable}
             onChange={(e) => handleChange(field.name, e.target.value)}
             className="h-11 text-sm rounded-xl"
           />
@@ -237,8 +248,9 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
         return (
           <select
             value={value}
+            disabled={!editable}
             onChange={(e) => handleChange(field.name, e.target.value)}
-            className="w-full h-11 px-3 text-sm border border-gray-200 rounded-xl bg-white"
+            className="w-full h-11 px-3 text-sm border border-gray-200 rounded-xl bg-white disabled:bg-gray-100 disabled:text-gray-500"
           >
             <option value="">请选择{field.label}</option>
             {options.map((opt: any) => (
@@ -258,6 +270,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
                 <input
                   type="checkbox"
                   checked={selectedValues.includes(opt.value)}
+                  disabled={!editable}
                   onChange={(e) => {
                     if (e.target.checked) {
                       handleChange(field.name, [...selectedValues, opt.value])
@@ -279,6 +292,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
             <input
               type="checkbox"
               checked={value === true || value === 'true' || value === 1}
+              disabled={!editable}
               onChange={(e) => handleChange(field.name, e.target.checked)}
               className="sr-only peer"
             />
@@ -383,6 +397,7 @@ export function H5NewRecordClient({ table }: H5NewRecordClientProps) {
             type="text"
             placeholder={field.placeholder || `请输入${field.label}`}
             value={value}
+            disabled={!editable}
             onChange={(e) => handleChange(field.name, e.target.value)}
             className="h-11 text-sm rounded-xl"
           />

@@ -5,9 +5,13 @@ import { z } from 'zod'
 
 const batchUpdateSchema = z.object({
   fieldIds: z.array(z.number()).min(1, '至少选择一个字段'),
+  required: z.boolean().optional(),
   showInList: z.boolean().optional(),
   showInForm: z.boolean().optional(),
   showInSearch: z.boolean().optional(),
+  forceShowInSurveyList: z.boolean().optional(),
+  forceShowInLevyList: z.boolean().optional(),
+  editScope: z.enum(['SURVEY_ONLY', 'LEVY_ONLY', 'SURVEY_OR_LEVY', 'ALWAYS']).optional(),
 })
 
 export async function PUT(
@@ -30,9 +34,13 @@ export async function PUT(
 
     // 构建更新数据，只包含提供的字段
     const updateData: any = {}
+    if (data.required !== undefined) updateData.required = data.required
     if (data.showInList !== undefined) updateData.showInList = data.showInList
     if (data.showInForm !== undefined) updateData.showInForm = data.showInForm
     if (data.showInSearch !== undefined) updateData.showInSearch = data.showInSearch
+    if (data.forceShowInSurveyList !== undefined) updateData.forceShowInSurveyList = data.forceShowInSurveyList
+    if (data.forceShowInLevyList !== undefined) updateData.forceShowInLevyList = data.forceShowInLevyList
+    if (data.editScope !== undefined) updateData.editScope = data.editScope
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ message: '没有需要更新的字段' }, { status: 400 })

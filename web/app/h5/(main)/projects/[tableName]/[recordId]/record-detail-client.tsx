@@ -10,10 +10,11 @@ import { Badge } from '@/components/ui/badge'
 import {
   ArrowLeft, Save, Edit, X, Paperclip, Image as ImageIcon,
   FileText, Upload, Plus, Trash2, Eye, Download, Camera,
-  Send, FileSignature, RefreshCcw, QrCode, Share2, Check, Copy,
+  Send, FileSignature, QrCode, Share2, Check, Copy,
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { FieldType, RecordStatus } from '@prisma/client'
+import { isFieldEditableInModule } from '@/lib/levy-edit-scope'
 
 const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   DRAFT: { label: '草稿', variant: 'secondary' },
@@ -39,10 +40,13 @@ interface H5RecordDetailClientProps {
   table: any
   record: any
   canEdit: boolean
+  module?: string
 }
 
-export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailClientProps) {
+export function H5RecordDetailClient({ table, record, canEdit, module: moduleProp = '' }: H5RecordDetailClientProps) {
   const router = useRouter()
+  const currentModule = moduleProp || ''
+  const moduleType = currentModule === 'survey' ? 'survey' : currentModule === 'levy' ? 'levy' : 'both'
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState<Record<string, any>>(record.data as any || {})
   const [loading, setLoading] = useState(false)
@@ -149,6 +153,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
   const renderFieldValue = (field: any) => {
     const val = isEditing ? formData[field.name] : record.data?.[field.name]
     const isEmpty = val === undefined || val === null || val === ''
+    const editable = isFieldEditableInModule(field.editScope, moduleType)
 
     if (isEditing) {
       switch (field.type) {
@@ -161,6 +166,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
               type={field.type === 'EMAIL' ? 'email' : field.type === 'PHONE' ? 'tel' : 'text'}
               placeholder={field.placeholder || `请输入${field.label}`}
               value={val || ''}
+              disabled={!editable}
               onChange={(e) => setFormData({ ...formData, [field.name]: e.target.value })}
               className="h-10 text-sm rounded-lg"
             />
@@ -171,6 +177,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
             <Textarea
               placeholder={field.placeholder || `请输入${field.label}`}
               value={val || ''}
+              disabled={!editable}
               onChange={(e) => setFormData({ ...formData, [field.name]: e.target.value })}
               rows={3}
               className="text-sm rounded-lg resize-none"
@@ -186,6 +193,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
               step={field.type === 'INTEGER' ? '1' : '0.01'}
               placeholder={field.placeholder || `请输入${field.label}`}
               value={val || ''}
+              disabled={!editable}
               onChange={(e) => setFormData({ ...formData, [field.name]: e.target.value })}
               className="h-10 text-sm rounded-lg"
             />
@@ -195,6 +203,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
             <Input
               type="date"
               value={val || ''}
+              disabled={!editable}
               onChange={(e) => setFormData({ ...formData, [field.name]: e.target.value })}
               className="h-10 text-sm rounded-lg"
             />
@@ -204,6 +213,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
             <Input
               type="datetime-local"
               value={val || ''}
+              disabled={!editable}
               onChange={(e) => setFormData({ ...formData, [field.name]: e.target.value })}
               className="h-10 text-sm rounded-lg"
             />
@@ -214,8 +224,9 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
           return (
             <select
               value={val || ''}
+              disabled={!editable}
               onChange={(e) => setFormData({ ...formData, [field.name]: e.target.value })}
-              className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg bg-white"
+              className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-500"
             >
               <option value="">请选择{field.label}</option>
               {options.map((opt: any) => (
@@ -229,6 +240,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
               <input
                 type="checkbox"
                 checked={val === true || val === 'true' || val === 1}
+                disabled={!editable}
                 onChange={(e) => setFormData({ ...formData, [field.name]: e.target.checked })}
                 className="sr-only peer"
               />
@@ -240,6 +252,7 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
             <Input
               type="text"
               value={val || ''}
+              disabled={!editable}
               onChange={(e) => setFormData({ ...formData, [field.name]: e.target.value })}
               className="h-10 text-sm rounded-lg"
             />
@@ -371,27 +384,6 @@ export function H5RecordDetailClient({ table, record, canEdit }: H5RecordDetailC
                 <FileSignature className="w-4 h-4" />
                 <span className="text-[10px] font-medium">生成文书</span>
               </button>
-              {canEdit && (
-                <button
-                  onClick={async () => {
-                    if (!confirm('确认触发「调查↔征收」同步？')) return
-                    try {
-                      const res = await fetch('/api/sync-requests', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ tableId: table.id, recordId: record.id }),
-                      })
-                      const data = await res.json()
-                      if (res.ok) alert('同步请求已提交')
-                      else alert(data.message || '同步失败')
-                    } catch { alert('同步失败') }
-                  }}
-                  className="flex flex-col items-center gap-1 p-2 rounded-lg bg-amber-50 text-amber-600 border border-amber-100"
-                >
-                  <RefreshCcw className="w-4 h-4" />
-                  <span className="text-[10px] font-medium">同步</span>
-                </button>
-              )}
               <button
                 onClick={() => {
                   const url = `${window.location.origin}/view/${table.name}/${record.id}`

@@ -51,9 +51,9 @@ async function main() {
   ]
   for (const r of roles) {
     await prisma.$executeRawUnsafe(
-      `INSERT INTO \`Role\` (\`name\`, \`label\`, \`description\`, \`canManageTables\`, \`canManageUsers\`, \`canManagePermissions\`, \`canManageTemplates\`, \`canViewLogs\`, \`canManageSettings\`, \`isSystem\`, \`sortOrder\`)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE \`label\`=VALUES(\`label\`)`,
+      `INSERT INTO \`Role\` (\`name\`, \`label\`, \`description\`, \`canManageTables\`, \`canManageUsers\`, \`canManagePermissions\`, \`canManageTemplates\`, \`canViewLogs\`, \`canManageSettings\`, \`isSystem\`, \`sortOrder\`, \`updatedAt\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE \`label\`=VALUES(\`label\`), \`updatedAt\`=NOW()`,
       r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10]
     )
   }
@@ -179,13 +179,27 @@ async function main() {
     }
   }
 
-  // TableField type 枚举添加 DETAIL_TABLE
+  // TableField type 枚举添加 DETAIL_TABLE + LEVY_RELATION
   if (tableNames.includes('tablefield')) {
     const tfCols = await prisma.$queryRaw`DESCRIBE \`TableField\``
     const typeCol = tfCols.find(c => c.Field === 'type')
-    if (typeCol && typeCol.Type && !typeCol.Type.includes('DETAIL_TABLE')) {
-      console.log('   给 TableField.type 添加 DETAIL_TABLE 枚举值')
-      await prisma.$executeRawUnsafe("ALTER TABLE `TableField` MODIFY COLUMN `type` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION','DETAIL_TABLE') NOT NULL")
+    if (typeCol && typeCol.Type && (!typeCol.Type.includes('DETAIL_TABLE') || !typeCol.Type.includes('LEVY_RELATION'))) {
+      console.log('   给 TableField.type 添加 DETAIL_TABLE / LEVY_RELATION 枚举值')
+      await prisma.$executeRawUnsafe("ALTER TABLE `TableField` MODIFY COLUMN `type` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION','DETAIL_TABLE','LEVY_RELATION') NOT NULL")
+    }
+    // v1.2.2+ 征收：强制显示 + 可填写阶段
+    const tfColNames = tfCols.map(c => c.Field)
+    if (!tfColNames.includes('forceShowInSurveyList')) {
+      console.log('   给 TableField 添加 forceShowInSurveyList 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `TableField` ADD COLUMN `forceShowInSurveyList` TINYINT(1) NOT NULL DEFAULT 0')
+    }
+    if (!tfColNames.includes('forceShowInLevyList')) {
+      console.log('   给 TableField 添加 forceShowInLevyList 字段')
+      await prisma.$executeRawUnsafe('ALTER TABLE `TableField` ADD COLUMN `forceShowInLevyList` TINYINT(1) NOT NULL DEFAULT 0')
+    }
+    if (!tfColNames.includes('editScope')) {
+      console.log('   给 TableField 添加 editScope 字段')
+      await prisma.$executeRawUnsafe(`ALTER TABLE \`TableField\` ADD COLUMN \`editScope\` ENUM('SURVEY_ONLY','LEVY_ONLY','SURVEY_OR_LEVY','ALWAYS') NOT NULL DEFAULT 'ALWAYS'`)
     }
   }
 
@@ -211,9 +225,9 @@ async function main() {
   // SystemSetting 添加默认值
   if (tableNames.includes('systemsetting')) {
     await prisma.$executeRawUnsafe(`
-      INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`)
-      VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）')
-      ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`)
+      INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`, \`updatedAt\`)
+      VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）', NOW())
+      ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`), \`updatedAt\`=NOW()
     `)
   }
 
@@ -480,10 +494,10 @@ async function main() {
       console.log('10. 创建默认管理员...')
       const passwordHash = await bcrypt.hash('admin123', 10)
       await prisma.$executeRawUnsafe(`
-        INSERT INTO \`User\` (\`username\`, \`passwordHash\`, \`realName\`, \`roleId\`, \`phone\`)
+        INSERT INTO \`User\` (\`username\`, \`passwordHash\`, \`realName\`, \`roleId\`, \`phone\`, \`updatedAt\`)
         VALUES ('admin', ?, '系统管理员', 
           (SELECT \`id\` FROM \`Role\` WHERE \`name\` = 'ADMIN'),
-          '13800138000')
+          '13800138000', NOW())
       `, passwordHash)
       console.log('   ✅ 默认管理员已创建: admin / admin123')
     } else {
@@ -491,6 +505,93 @@ async function main() {
     }
   } else {
     console.log('10. ⚠️ User 表不存在，无法创建默认管理员')
+  }
+
+  // ==================== 38. ApprovalWorkflow.tableId 可空（表级解耦） ====================
+  console.log('\n38. ApprovalWorkflow.tableId 改为可空（流程与表解耦）...')
+  try {
+    const [fks] = await prisma.$queryRawUnsafe(`
+      SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ApprovalWorkflow'
+        AND COLUMN_NAME = 'tableId' AND REFERENCED_TABLE_NAME IS NOT NULL
+    `)
+    for (const fk of fks || []) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE \`ApprovalWorkflow\` DROP FOREIGN KEY \`${fk.CONSTRAINT_NAME}\``)
+    }
+    const [cols] = await prisma.$queryRawUnsafe(`SHOW COLUMNS FROM \`ApprovalWorkflow\` LIKE 'tableId'`)
+    if (cols && cols.length && String(cols[0].Null) === 'NO') {
+      await prisma.$executeRawUnsafe(`ALTER TABLE \`ApprovalWorkflow\` MODIFY COLUMN \`tableId\` INT NULL`)
+    }
+    await prisma.$executeRawUnsafe(`ALTER TABLE \`ApprovalWorkflow\` ADD CONSTRAINT \`ApprovalWorkflow_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE SET NULL`)
+    console.log('   ✅ ApprovalWorkflow.tableId 可空完成')
+  } catch (e) {
+    console.log('   ⚠️  ApprovalWorkflow.tableId 迁移跳过:', e.message)
+  }
+
+  // ==================== 39. 自动生成 LEVY_RELATION 系统字段（征收↔调查，默认生成且不允许修改） ====================
+  console.log('\n39. 自动生成 LEVY_RELATION 系统字段...')
+  {
+    const tables = await prisma.$queryRawUnsafe(`
+      SELECT d.id, d.name AS tblName, d.label AS tblLabel, c.module
+      FROM \`DataTable\` d
+      LEFT JOIN \`TableCategory\` c ON c.id = d.categoryId
+    `)
+    const surveyTables = (tables || []).filter(t => t.module === 'SURVEY')
+    const levyTables = (tables || []).filter(t => t.module === 'LEVY')
+    if (levyTables.length && surveyTables.length) {
+      for (const levy of levyTables) {
+        const fields = await prisma.$queryRawUnsafe(
+          `SELECT id, name, config, isSystem FROM \`TableField\` WHERE tableId=? AND type='LEVY_RELATION'`,
+          levy.id
+        )
+        for (const survey of surveyTables) {
+          const fieldName = `${survey.tblName}_ref`
+          // 优先按字段名匹配（确定性命名），config 解析在 Prisma 下类型不稳定，仅作兜底
+          const existing = (fields || []).find(f => {
+            if (f.name === fieldName) return true
+            try {
+              const cfg = typeof f.config === 'string' ? JSON.parse(f.config || '{}') : (f.config || {})
+              return Number(cfg?.levy?.targetTableId) === Number(survey.id)
+            } catch { return false }
+          })
+          if (existing) {
+            if (Number(existing.isSystem) === 1) continue
+            await prisma.$executeRawUnsafe('UPDATE `TableField` SET isSystem=1 WHERE id=?', existing.id)
+            console.log(`   ✅ ${levy.tblLabel}.${existing.name} 已升级为系统字段（不可修改/删除）`)
+            continue
+          }
+          try {
+            const maxSort = await prisma.$queryRawUnsafe('SELECT MAX(sortOrder) m FROM `TableField` WHERE tableId=?', levy.id)
+            const sortOrder = (maxSort[0].m ?? 0) + 1
+            const config = JSON.stringify({ levy: { targetTableId: Number(survey.id), cardinality: 'ONE_TO_ONE', syncMode: 'SNAPSHOT_APPROVAL' } })
+            await prisma.$executeRawUnsafe(
+              `INSERT INTO \`TableField\` (tableId, name, label, type, required, sortOrder, description, config, isSystem, showInList, showInForm, showInSearch, updatedAt)
+               VALUES (?, ?, ?, 'LEVY_RELATION', 1, ?, ?, ?, 1, 1, 1, 1, NOW())`,
+              levy.id, fieldName, `关联调查（${survey.tblLabel}）`, sortOrder, `LEVY_RELATION：1:1 自动关联调查表「${survey.tblLabel}」，写入时同步快照`, config
+            )
+            console.log(`   ➕ ${levy.tblLabel} 自动创建系统字段 ${fieldName} → ${survey.tblLabel}`)
+          } catch (e) {
+            console.log(`   ⚠️  ${levy.tblLabel}.${fieldName} 创建失败:`, e.message)
+          }
+        }
+      }
+    } else {
+      console.log('   （无需处理：未同时存在 调查表 与 征收表）')
+    }
+  }
+
+  // ==================== 40. ApprovalWorkflow.specialAction 专项动作审批 ====================
+  console.log('\n40. ApprovalWorkflow 增加 specialAction 列（专项动作审批）...')
+  try {
+    const [acols] = await prisma.$queryRawUnsafe(`SHOW COLUMNS FROM \`ApprovalWorkflow\` LIKE 'specialAction'`)
+    if (!acols || !acols.length) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE \`ApprovalWorkflow\` ADD COLUMN \`specialAction\` LONGTEXT NULL`)
+      console.log('   ✅ ApprovalWorkflow.specialAction 添加完成')
+    } else {
+      console.log('   ⚠️  ApprovalWorkflow.specialAction 已存在，跳过')
+    }
+  } catch (e) {
+    console.log('   ⚠️  ApprovalWorkflow.specialAction 迁移跳过:', e.message)
   }
 
   console.log('\n✅ 数据库迁移完成！')
@@ -566,7 +667,7 @@ async function createTableField(prisma) {
       \`tableId\` INT NOT NULL,
       \`name\` VARCHAR(191) NOT NULL,
       \`label\` VARCHAR(191) NOT NULL,
-      \`type\` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION','DETAIL_TABLE') NOT NULL,
+      \`type\` ENUM('TEXT','TEXTAREA','NUMBER','INTEGER','FLOAT','DATE','DATETIME','SELECT','RADIO','MULTISELECT','CHECKBOX','UPLOAD_IMAGE','UPLOAD_FILE','PHONE','EMAIL','IDCARD','ADDRESS','MONEY','SWITCH','RICHTEXT','RELATION','DETAIL_TABLE','LEVY_RELATION') NOT NULL,
       \`required\` TINYINT(1) NOT NULL DEFAULT 0,
       \`unique\` TINYINT(1) NOT NULL DEFAULT 0,
       \`sortOrder\` INT NOT NULL DEFAULT 0,
@@ -769,9 +870,9 @@ async function createSystemSetting(prisma) {
   `)
   
   await prisma.$executeRawUnsafe(`
-    INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`)
-    VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）')
-    ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`)
+    INSERT INTO \`SystemSetting\` (\`key\`, \`value\`, \`description\`, \`updatedAt\`)
+    VALUES ('sessionTimeout', '30', '用户不操作自动退出时间（分钟）', NOW())
+    ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`), \`updatedAt\`=NOW()
   `)
 }
 
@@ -828,8 +929,8 @@ async function createSharedTemplates(prisma) {
 
 main()
   .catch((e) => {
-    console.error('❌ 迁移失败:', e.message)
-    process.exit(1)
+    console.error('⚠️ 迁移警告（非致命）:', e.message)
+    console.error('   继续启动应用...')
   })
   .finally(async () => {
     await prisma.$disconnect()

@@ -791,13 +791,13 @@ export function TablesClient({ initialTables, initialCategories, userRole }: Tab
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <Settings className="w-4 h-4 text-gray-400" />
-                          {table._count.fields}
+                          {table._count?.fields ?? 0}
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <FileText className="w-4 h-4 text-gray-400" />
-                          {table._count.records}
+                          {table._count?.records ?? 0}
                         </div>
                       </TableCell>
                       <TableCell>

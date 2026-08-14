@@ -1,162 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { exec } from 'child_process'
-import { promisify } from 'util'
 import fs from 'fs/promises'
 import path from 'path'
-import { createReadStream, createWriteStream } from 'fs'
-import { createGunzip } from 'zlib'
-import { pipeline } from 'stream/promises'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 
-const execAsync = promisify(exec)
-
+const execFileAsync = promisify(execFile)
 const BACKUP_DIR = path.join(process.cwd(), 'backups')
 
-// 解析 DATABASE_URL 获取连接信息
 function parseDbUrl() {
   const url = new URL(process.env.DATABASE_URL || '')
-  const protocol = url.protocol.replace(':', '')
-  const isPostgres = protocol === 'postgres' || protocol === 'postgresql'
   return {
     host: url.hostname,
-    port: url.port || (isPostgres ? '5432' : '3306'),
+    port: url.port || '3306',
     user: url.username,
     password: url.password,
     database: url.pathname.slice(1),
-    type: isPostgres ? 'postgres' : 'mysql' as const,
   }
 }
 
-// 安全转义 shell 参数，防止命令注入
-// 注意：双引号内不转义反斜杠。在 POSIX /bin/sh 双引号中，\ 后跟非特殊字符（$, `, ", \, 换行）以外的字符时，反斜杠会原样保留；
-// 在 Windows cmd.exe 双引号内，反斜杠完全无特殊含义。若对 \ 二次转义，会破坏 Windows 路径（如 D:\backups\test.sql → D:\\backups\\test.sql），导致 mysql/psql 找不到文件。
-function escapeShellArg(arg: string): string {
-  if (/^[a-zA-Z0-9_\-\.\/\\]+$/.test(arg)) {
-    return arg
-  }
-  return `"${arg.replace(/(["$`!])/g, '\\$1')}"`
-}
-
-// 安全检查：防止路径穿越，允许系统备份和上传的备份文件名
 function isValidFileName(fileName: string): boolean {
-  // 允许字母、数字、下划线、连字符，必须以 .sql.gz 或 .sql 结尾
   return /^[a-zA-Z0-9_\-\.]+\.sql(\.gz)?$/.test(fileName) && !fileName.includes('..')
 }
 
-// 通用 SQL 语法转换：处理高版本 MySQL（5.6+）/PostgreSQL 向低版本 MySQL 5.5 兼容
-function convertSqlForLegacyMysql(sql: string): { sql: string; warnings: string[] } {
-  let result = sql
-  const warnings: string[] = []
-
-  // ========== PostgreSQL 特定语法 ==========
-  result = result.replace(/\bSERIAL\b/g, 'INT AUTO_INCREMENT')
-  result = result.replace(/\bBIGSERIAL\b/g, 'BIGINT AUTO_INCREMENT')
-  result = result.replace(/\bSMALLSERIAL\b/g, 'SMALLINT AUTO_INCREMENT')
-
-  // 关键警告：ON CONFLICT 会导致 upsert 操作丢失，需要用户手动处理
-  const onConflictMatches = result.match(/\bON CONFLICT[^;]*;/g)
-  if (onConflictMatches && onConflictMatches.length > 0) {
-    warnings.push(`发现 ${onConflictMatches.length} 处 ON CONFLICT 子句将被删除，这些 upsert 操作会降级为普通 INSERT，可能导致数据重复或丢失`)
-  }
-  result = result.replace(/\bON CONFLICT[^;]*;/g, ';')
-
-  result = result.replace(/\bCREATE EXTENSION[^;]*;/g, '')
-  result = result.replace(/\bALTER TABLE[^;]*OWNER TO[^;]*;/g, '')
-  result = result.replace(/\bSET search_path[^;]*;/g, '')
-  result = result.replace(/\bGEN_RANDOM_UUID\(\)/g, 'UUID()')
-  result = result.replace(/\buuid_generate_v4\(\)/g, 'UUID()')
-  result = result.replace(/\bUSING btree\b/g, '')
-  // 只删除 PostgreSQL DROP TABLE 中的 CASCADE，不删除 MySQL 外键的 ON DELETE CASCADE
-  result = result.replace(/\bDROP TABLE IF EXISTS[^;]*CASCADE;/gi, (match) => match.replace(/\bCASCADE\b/gi, ''))
-  result = result.replace(/\bDEFERRABLE INITIALLY DEFERRED\b/g, '')
-  result = result.replace(/\b::text\b/g, '').replace(/\b::integer\b/g, '').replace(/\b::bigint\b/g, '').replace(/\b::jsonb?\b/g, '')
-
-  // ========== MySQL 高版本→低版本兼容性转换（针对 MySQL 5.5） ==========
-
-  // 关键修复：datetime(N) 和 timestamp(N) 精度在 MySQL 5.5 不支持
-  // 改为 datetime 和 timestamp
-  result = result.replace(/`datetime`\(\d+\)/gi, '`datetime`')
-  result = result.replace(/`timestamp`\(\d+\)/gi, '`timestamp`')
-  result = result.replace(/(\s)datetime\(\d+\)/gi, '$1datetime')
-  result = result.replace(/(\s)timestamp\(\d+\)/gi, '$1timestamp')
-
-  // 关键修复：去掉 CURRENT_TIMESTAMP(N) 中的精度参数
-  // 必须先处理带精度的，再处理不带精度的（避免重复匹配）
-  result = result.replace(/CURRENT_TIMESTAMP\(\d+\)/g, 'CURRENT_TIMESTAMP')
-
-  // MySQL 5.5 不支持 DATETIME 列使用 CURRENT_TIMESTAMP 作为默认值（仅支持 TIMESTAMP）
-  // 将 `xxx` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP 改为 TIMESTAMP 类型
-  // 匹配：字段名 datetime [NOT NULL] DEFAULT CURRENT_TIMESTAMP
-  result = result.replace(
-    /(`[^`]+`\s+)datetime(\s+(?:NOT\s+)?NULL\s+DEFAULT\s+CURRENT_TIMESTAMP)/gi,
-    '$1timestamp$2'
-  )
-  result = result.replace(
-    /(`[^`]+`\s+)datetime(\s+DEFAULT\s+CURRENT_TIMESTAMP)/gi,
-    '$1timestamp$2'
-  )
-
-  // 移除 utf8mb4_0900_ai_ci 这种 MySQL 8 才支持的排序规则
-  result = result.replace(/COLLATE\s+utf8mb4_0900_ai_ci/gi, 'COLLATE utf8mb4_unicode_ci')
-
-  // 移除 MySQL 8 才支持的 CHARACTER SET utf8mb4 之外的高级字符集
-  // 保留 utf8mb4
-
-  // 移除 CHECK 约束（MySQL 5.5 不支持，但 8.0+ 支持）
-  // 注意：要小心处理，避免误删
-  // 这里只处理行尾的 CHECK 约束
-  // result = result.replace(/,\s*CHECK\s*\([^)]+\)\s*,/gi, ',')
-  // 暂不处理 CHECK，避免误删数据
-
-  // 移除 DEFAULT (expression) 语法（MySQL 5.5 不支持表达式默认值，8.0+ 才支持）
-  // 这里我们的备份都是 CURRENT_TIMESTAMP 形式，应该已经被处理了
-
-  // 移除 MySQL 8 的 COMMENT 在列上的语法（保留为列注释）
-  // 暂不处理
-
-  // utf8mb4_0900_ai_ci 是 MySQL 8 排序规则，需要降级
-  result = result.replace(/utf8mb4_0900_ai_ci/g, 'utf8mb4_unicode_ci')
-
-  // ========== 关键修复：MySQL 5.5 不支持 JSON 类型（5.7+ 才支持） ==========
-  // 将 json 类型改为 LONGTEXT（MySQL 5.5 兼容）
-  result = result.replace(/(\s)json(\s+(?:NOT\s+)?NULL(?:\s+DEFAULT\s+NULL)?)/gi, '$1longtext$2')
-  result = result.replace(/(\s)json(\s+DEFAULT\s+NULL)/gi, '$1longtext$2')
-  result = result.replace(/(\s)json(\s*,)/gi, '$1longtext$2')
-  result = result.replace(/(\s)json(\s*$)/gi, '$1longtext$2')
-  result = result.replace(/(\s)json(\s*DEFAULT\s+[^,)]+)/gi, '$1longtext$2')
-
-  // ========== 关键修复：MySQL 5.5 每张表只能有一个 TIMESTAMP DEFAULT CURRENT_TIMESTAMP ==========
-  // 逐行处理，在每张 CREATE TABLE 中只保留第一个 DEFAULT CURRENT_TIMESTAMP
-  const lines = result.split('\n')
-  let inCreateTable = false
-  let hasTimestampDefault = false
-  const processedLines = lines.map(line => {
-    if (/CREATE TABLE\s+`/i.test(line)) {
-      inCreateTable = true
-      hasTimestampDefault = false
-      return line
-    }
-    if (inCreateTable && /^\s*\)\s*/.test(line)) {
-      inCreateTable = false
-      return line
-    }
-    if (inCreateTable && /DEFAULT\s+CURRENT_TIMESTAMP/i.test(line)) {
-      if (hasTimestampDefault) {
-        // 移除第二个及以后的 DEFAULT CURRENT_TIMESTAMP 和 ON UPDATE CURRENT_TIMESTAMP
-        return line
-          .replace(/\s*DEFAULT\s+CURRENT_TIMESTAMP(?:\(\d+\))?/gi, '')
-          .replace(/\s*ON\s+UPDATE\s+CURRENT_TIMESTAMP(?:\(\d+\))?/gi, '')
-      }
-      hasTimestampDefault = true
-    }
-    return line
-  })
-
-  return { sql: processedLines.join('\n'), warnings }
-}
-
-// 从服务器备份文件恢复
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -164,7 +31,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: '未登录' }, { status: 401 })
     }
 
-    // 只有超级系统管理员(ADMIN)可以操作
     if (user.role?.name !== 'ADMIN') {
       return NextResponse.json({ message: '只有超级系统管理员可以执行数据库恢复' }, { status: 403 })
     }
@@ -189,157 +55,81 @@ export async function POST(req: NextRequest) {
     }
 
     const dbInfo = parseDbUrl()
-
-    // 如果是 .sql.gz，先用 Node.js zlib 解压为临时 .sql 文件（跨平台，不依赖 gunzip）
-    let sqlFilePath = filePath
     const isGzip = fileName.endsWith('.gz')
-    const tempFilesToClean: string[] = []
-
+    
+    let sqlFilePath = filePath
+    let tempFile: string | null = null
+    
     if (isGzip) {
-      sqlFilePath = filePath.replace(/\.gz$/, '')
-      tempFilesToClean.push(sqlFilePath)
-      try {
-        await pipeline(
-          createReadStream(filePath),
-          createGunzip(),
-          createWriteStream(sqlFilePath)
-        )
-      } catch (gzipError: any) {
-        console.error('gunzip error:', gzipError)
-        return NextResponse.json(
-          { message: '解压备份文件失败：' + (gzipError.message || '未知错误') },
-          { status: 500 }
-        )
-      }
+      const zlib = require('zlib')
+      const compressed = await fs.readFile(filePath)
+      const decompressed = zlib.gunzipSync(compressed)
+      tempFile = path.join(BACKUP_DIR, '_restore_' + Date.now() + '.sql')
+      await fs.writeFile(tempFile, decompressed)
+      sqlFilePath = tempFile
     }
 
-    // 根据数据库类型选择恢复命令（密码通过环境变量传递，避免命令行注入）
-    const isWin = process.platform === 'win32'
-    let restoreCmd: string
-    let restoreEnv: Record<string, string> = {}
-
-    if (dbInfo.type === 'postgres') {
-      // 安全验证：读取并检查 SQL 文件内容（与 MySQL 保持一致）
-      const sqlContent = await fs.readFile(sqlFilePath, 'utf8')
-
-      // 关键验证：防止空文件静默恢复
-      if (!sqlContent || sqlContent.trim().length === 0) {
-        console.error('restore file is empty')
+    const fileContent = await fs.readFile(sqlFilePath, 'utf8')
+    const dangerousPatterns = [
+      { pattern: /\bDROP\s+DATABASE\b/gi, name: 'DROP DATABASE' },
+    ]
+    for (const { pattern, name } of dangerousPatterns) {
+      const matches = fileContent.match(pattern)
+      if (matches && matches.length > 0) {
+        if (tempFile) await fs.unlink(tempFile).catch(() => {})
         return NextResponse.json(
-          { message: '数据库恢复失败：恢复文件为空' },
+          { message: '数据库恢复失败：检测到危险SQL语句 - ' + name },
           { status: 400 }
         )
       }
-
-      // 安全警告检测：检查极其危险的 SQL 语句
-      const dangerousPatterns = [
-        { pattern: /\bDROP\s+DATABASE\b/gi, name: 'DROP DATABASE' },
-        { pattern: /\bDROP\s+SCHEMA\b/gi, name: 'DROP SCHEMA' },
-      ]
-      const detectedDangers: string[] = []
-
-      for (const { pattern, name } of dangerousPatterns) {
-        const matches = sqlContent.match(pattern)
-        if (matches && matches.length > 0) {
-          detectedDangers.push(`${name} (${matches.length} 处)`)
-        }
-      }
-
-      if (detectedDangers.length > 0) {
-        console.error('Dangerous SQL patterns detected:', detectedDangers)
-        return NextResponse.json(
-          { message: `数据库恢复失败：检测到危险SQL语句 - ${detectedDangers.join(', ')}。请手动审核备份文件内容后再执行恢复。` },
-          { status: 400 }
-        )
-      }
-
-      restoreCmd = `psql -h ${escapeShellArg(dbInfo.host)} -p ${escapeShellArg(dbInfo.port)} -U ${escapeShellArg(dbInfo.user)} -d ${escapeShellArg(dbInfo.database)} -f "${escapeShellArg(sqlFilePath)}"`
-      restoreEnv = { PGPASSWORD: dbInfo.password }
-    } else {
-      // MySQL：高版本→低版本兼容性转换（MySQL 5.7+ → 5.5）
-      const sqlContent = await fs.readFile(sqlFilePath, 'utf8')
-
-      // 关键验证：防止空文件静默恢复
-      if (!sqlContent || sqlContent.trim().length === 0) {
-        console.error('restore file is empty')
-        return NextResponse.json(
-          { message: '数据库恢复失败：恢复文件为空' },
-          { status: 400 }
-        )
-      }
-
-      const { sql: convertedSql, warnings } = convertSqlForLegacyMysql(sqlContent)
-
-      // 安全警告检测：检查极其危险的 SQL 语句
-      const dangerousPatterns = [
-        { pattern: /\bDROP\s+DATABASE\b/gi, name: 'DROP DATABASE' },
-      ]
-      const detectedDangers: string[] = []
-
-      for (const { pattern, name } of dangerousPatterns) {
-        const matches = convertedSql.match(pattern)
-        if (matches && matches.length > 0) {
-          detectedDangers.push(`${name} (${matches.length} 处)`)
-        }
-      }
-
-      if (detectedDangers.length > 0) {
-        console.error('Dangerous SQL patterns detected:', detectedDangers)
-        return NextResponse.json(
-          { message: `数据库恢复失败：检测到危险SQL语句 - ${detectedDangers.join(', ')}。请手动审核备份文件内容后再执行恢复。` },
-          { status: 400 }
-        )
-      }
-
-      // 记录转换警告到操作日志
-      if (warnings.length > 0) {
-        console.warn('SQL conversion warnings:', warnings)
-      }
-
-      const convertedFilePath = sqlFilePath + '.converted'
-      tempFilesToClean.push(convertedFilePath)
-      await fs.writeFile(convertedFilePath, convertedSql, 'utf8')
-      sqlFilePath = convertedFilePath
-
-      restoreCmd = `mysql -h ${escapeShellArg(dbInfo.host)} -P ${escapeShellArg(dbInfo.port)} -u ${escapeShellArg(dbInfo.user)} --skip-ssl ${escapeShellArg(dbInfo.database)} < "${escapeShellArg(sqlFilePath)}"`
-      restoreEnv = { MYSQL_PWD: dbInfo.password }
     }
 
     try {
-      await execAsync(restoreCmd, {
-        timeout: 600000,
-        maxBuffer: 1024 * 1024 * 100,
-        env: { ...process.env, ...restoreEnv } // 安全传递密码环境变量
+      const mysqlCmd = 'mysql -h ' + dbInfo.host + ' -P ' + dbInfo.port + ' -u ' + dbInfo.user + ' -p' + dbInfo.password + ' ' + dbInfo.database + ' --default-character-set=utf8mb4 --skip-ssl'
+
+      console.log('[Restore] 开始恢复: ' + fileName)
+      console.log('[Restore] 执行: ' + mysqlCmd + ' < ' + sqlFilePath)
+
+      await execFileAsync('sh', [
+        '-c',
+        mysqlCmd + ' < "' + sqlFilePath + '"'
+      ], {
+        timeout: 300000,
+        maxBuffer: 50 * 1024 * 1024,
       })
-    } catch (restoreError: any) {
-      console.error('restore error:', restoreError)
-      // 清理临时文件
-      for (const tempFile of tempFilesToClean) {
-        try { await fs.unlink(tempFile) } catch {}
+
+      console.log('[Restore] 数据库恢复成功')
+
+      // 还原可能重置了数据库，审计日志写入失败不应导致恢复被误报为失败
+      try {
+        await prisma.operationLog.create({
+          data: {
+            userId: user.id,
+            action: 'DATABASE_RESTORE',
+            module: 'SYSTEM',
+            detail: { fileName },
+          },
+        })
+      } catch (logError: any) {
+        console.warn('[Restore] 审计日志写入失败（可忽略）:', logError.message || logError)
       }
+
+      return NextResponse.json({ success: true })
+    } catch (execError: any) {
+      const stderr = (execError.stderr || '').toString()
+      console.error('[Restore] mysql 执行失败:', execError.message || execError)
+      console.error('stderr:', stderr.substring(0, 500))
       return NextResponse.json(
-        { message: '数据库恢复失败：' + (restoreError.message || '执行恢复命令失败') },
+        { message: '数据库恢复失败：' + (stderr || execError.message || '未知错误') },
         { status: 500 }
       )
+    } finally {
+      if (tempFile) {
+        await fs.unlink(tempFile).catch(() => {})
+      }
     }
-
-    // 清理临时文件
-    for (const tempFile of tempFilesToClean) {
-      try { await fs.unlink(tempFile) } catch {}
-    }
-
-    await prisma.operationLog.create({
-      data: {
-        userId: user.id,
-        action: 'DATABASE_RESTORE',
-        module: 'SYSTEM',
-        detail: { fileName } as any,
-      },
-    })
-
-    return NextResponse.json({ success: true })
   } catch (error: any) {
-    console.error('Database restore error:', error)
+    console.error('Database restore error:', error.message || error)
     return NextResponse.json(
       { message: '数据库恢复失败：' + (error.message || '未知错误') },
       { status: 500 }

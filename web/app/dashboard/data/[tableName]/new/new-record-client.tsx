@@ -4,8 +4,9 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { DynamicForm } from '@/components/dynamic-form'
-import { ArrowLeft, Save, Send } from 'lucide-react'
+import { ArrowLeft, Save, Send, ClipboardList, Scale } from 'lucide-react'
 import { DataTable, TableField, RecordStatus } from '@prisma/client'
 
 interface NewRecordClientProps {
@@ -13,10 +14,13 @@ interface NewRecordClientProps {
     fields: TableField[]
     formLayoutConfig?: any
   }
+  module?: string
 }
 
-export function NewRecordClient({ table }: NewRecordClientProps) {
+export function NewRecordClient({ table, module: moduleProp = '' }: NewRecordClientProps) {
   const router = useRouter()
+  const currentModule = moduleProp || ''
+  const moduleQuery = currentModule ? `?module=${currentModule}` : ''
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(false)
 
@@ -49,7 +53,7 @@ export function NewRecordClient({ table }: NewRecordClientProps) {
       })
 
       if (res.ok) {
-        router.push(`/dashboard/data/${table.name}`)
+        router.push(`/dashboard/data/${table.name}${moduleQuery}`)
       } else {
         const data = await res.json()
         alert(data.message || '保存失败')
@@ -64,12 +68,24 @@ export function NewRecordClient({ table }: NewRecordClientProps) {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" onClick={() => router.back()}>
+        <Button variant="ghost" onClick={() => router.push(`/dashboard/data/${table.name}${moduleQuery}`)}>
           <ArrowLeft className="w-4 h-4 mr-2" />
           返回
         </Button>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">新增{table.label}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900">新增{table.label}</h1>
+            {currentModule === 'survey' && (
+              <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200">
+                <ClipboardList className="w-3 h-3 mr-1" /> 调查中
+              </Badge>
+            )}
+            {currentModule === 'levy' && (
+              <Badge variant="secondary" className="bg-orange-100 text-orange-700 border-orange-200">
+                <Scale className="w-3 h-3 mr-1" /> 征收中
+              </Badge>
+            )}
+          </div>
           <p className="text-gray-500 mt-1">填写以下信息</p>
         </div>
       </div>
@@ -84,10 +100,11 @@ export function NewRecordClient({ table }: NewRecordClientProps) {
             values={formData}
             onChange={setFormData}
             layoutConfig={table.formLayoutConfig}
+            module={currentModule === 'survey' ? 'survey' : currentModule === 'levy' ? 'levy' : 'both'}
           />
         </CardContent>
         <CardFooter className="flex justify-end gap-3 border-t pt-6">
-          <Button variant="outline" onClick={() => router.back()}>
+          <Button variant="outline" onClick={() => router.push(`/dashboard/data/${table.name}${moduleQuery}`)}>
             取消
           </Button>
           <Button

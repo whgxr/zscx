@@ -22,6 +22,10 @@ const updateFieldSchema = z.object({
   showInList: z.boolean().optional(),
   showInForm: z.boolean().optional(),
   showInSearch: z.boolean().optional(),
+  // v1.2.2+ 征收：强制显示 + 可填写阶段
+  forceShowInSurveyList: z.boolean().optional(),
+  forceShowInLevyList: z.boolean().optional(),
+  editScope: z.enum(['SURVEY_ONLY', 'LEVY_ONLY', 'SURVEY_OR_LEVY', 'ALWAYS']).optional(),
 })
 
 export async function PUT(

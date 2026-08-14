@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { RecordStatus, FieldType } from '@prisma/client'
-import { triggerSyncForSurveyRecordIfNeeded } from '@/lib/levy-sync-detector'
+import { moduleOfTable, stripNonEditableFields } from '@/lib/levy-sync-detector'
 import { tryLevySaveAutoTrigger } from '@/lib/approval-service'
 
 export async function GET(
@@ -64,7 +64,10 @@ export async function PUT(
 
     const table = await prisma.dataTable.findUnique({
       where: { name: params.tableName },
-      include: { fields: true },
+      include: {
+        fields: true,
+        category: { select: { module: true } },
+      },
     })
 
     if (!table) {
@@ -94,7 +97,13 @@ export async function PUT(
     }
 
     const body = await req.json()
-    const { data, status } = body
+    let { data, status } = body
+
+    // v1.2.2+ 可填写阶段：忽略当前模块不允许填写的字段提交值
+    const module = moduleOfTable((table.category as any)?.module)
+    if (data && typeof data === 'object') {
+      data = stripNonEditableFields(table.fields, data, module)
+    }
 
     if (status !== undefined && status !== null) {
       if (!Object.values(RecordStatus).includes(status)) {
@@ -132,19 +141,9 @@ export async function PUT(
       data: updateData,
     })
 
-    // v1.2.2+ 同步检测
+    // v1.2.2+：同步改为完全手动触发（不点同步按钮不同步），此处仅记录操作日志
     const ipAddress = (req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '').split(',')[0].trim() || null
     const userAgent = req.headers.get('user-agent') || null
-    const { snapshotId, syncRequestIds } = await triggerSyncForSurveyRecordIfNeeded({
-      surveyTableId: table.id,
-      surveyRecordId: record.id,
-      newSurveyData: record.data as Record<string, any>,
-      oldSurveyData: (existingRecord.data as Record<string, any>) || null,
-      changedBy: user.id,
-      changeType: 'UPDATE',
-      ipAddress,
-      userAgent,
-    })
 
     await prisma.operationLog.create({
       data: {
@@ -153,8 +152,7 @@ export async function PUT(
         module: 'DATA',
         tableId: table.id,
         recordId: record.id,
-        snapshotId: snapshotId ?? undefined,
-        detail: { before: existingRecord.data, after: record.data, syncRequestIds } as any,
+        detail: { before: existingRecord.data, after: record.data } as any,
         ipAddress: ipAddress ?? undefined,
         userAgent: userAgent ?? undefined,
       },
@@ -211,18 +209,6 @@ export async function DELETE(
 
     const ipAddress = (req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '').split(',')[0].trim() || null
     const userAgent = req.headers.get('user-agent') || null
-
-    // v1.2.2+ 同步检测（删除前先写快照）
-    await triggerSyncForSurveyRecordIfNeeded({
-      surveyTableId: table.id,
-      surveyRecordId: record.id,
-      newSurveyData: {},
-      oldSurveyData: (record.data as Record<string, any>) || null,
-      changedBy: user.id,
-      changeType: 'DELETE',
-      ipAddress,
-      userAgent,
-    })
 
     await prisma.uploadedFile.deleteMany({ where: { recordId, tableId: table.id } })
 

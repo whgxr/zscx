@@ -472,7 +472,8 @@ async function main() {
             type: FieldType.LEVY_RELATION,
             required: true,
             sortOrder: 0,
-            description: 'LEVY_RELATION：1:1 指向住户信息表，写入时同步快照',
+            isSystem: true,
+            description: 'LEVY_RELATION：1:1 指向住户信息表，写入时同步快照（系统字段，不可修改/删除）',
             config: {
               levy: {
                 targetTableId: -1, // placeholder，seed 完成后下面会回填真正的 household.id

@@ -5,8 +5,10 @@ import { DataListClient } from './data-list-client'
 
 export default async function DataListPage({
   params,
+  searchParams,
 }: {
   params: { tableName: string }
+  searchParams: { module?: string }
 }) {
   const user = await getCurrentUser()
   
@@ -20,6 +22,7 @@ export default async function DataListPage({
       fields: {
         orderBy: { sortOrder: 'asc' },
       },
+      category: { select: { module: true } },
     },
   })
 
@@ -37,5 +40,11 @@ export default async function DataListPage({
     }
   }
 
-  return <DataListClient table={table} user={user} permission={permission} />
+  // module：优先取 URL 参数，其次按表的分类模块推导（survey/levy）
+  const module =
+    searchParams?.module ||
+    (table.category?.module === 'SURVEY' ? 'survey' : table.category?.module === 'LEVY' ? 'levy' : '') ||
+    ''
+
+  return <DataListClient table={table} user={user} permission={permission} module={module} />
 }

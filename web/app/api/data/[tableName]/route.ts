@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
-import { Prisma } from '@prisma/client'
-import { triggerSyncForSurveyRecordIfNeeded } from '@/lib/levy-sync-detector'
+import { moduleOfTable, stripNonEditableFields } from '@/lib/levy-sync-detector'
 import { tryLevySaveAutoTrigger } from '@/lib/approval-service'
+import mysql from 'mysql2/promise'
+
+const dbPool = mysql.createPool({
+  host: process.env.DB_HOST || 'zscx-mysql',
+  port: parseInt(process.env.DB_PORT || '3306'),
+  user: process.env.DB_USER || 'zscx',
+  password: process.env.DB_PASSWORD || 'zscx123456',
+  database: process.env.DB_NAME || 'zscx',
+  waitForConnections: true,
+  connectionLimit: 5,
+})
 
 export async function GET(
   req: NextRequest,
@@ -47,39 +57,46 @@ export async function GET(
       const escapedSearch = search.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
       const searchPattern = `%${escapedSearch}%`
 
-      const statusCondition = status
-        ? Prisma.sql`AND r.status = ${status}`
-        : Prisma.empty
+      const statusClause = status ? 'AND r.status = ?' : ''
+      const queryParams: any[] = [table.id]
+      if (status) queryParams.push(status)
+      queryParams.push(searchPattern)
+
+      const countParams: any[] = [table.id]
+      if (status) countParams.push(status)
+      countParams.push(searchPattern)
 
       const [recordsRaw, totalRaw] = await Promise.all([
-        prisma.$queryRaw<any[]>(Prisma.sql`
-          SELECT 
+        dbPool.query(
+          `SELECT 
             r.id, r.tableId, r.data, r.status, r.createdAt, r.updatedAt, r.createdBy, r.updatedBy,
-            u.real_name AS creator_realName, u.username AS creator_username
+            u.realName AS creator_realName, u.username AS creator_username
           FROM DataRecord r
-          LEFT JOIN User u ON r.createdBy = u.id
-          WHERE r.tableId = ${table.id}
-          ${statusCondition}
-          AND CAST(r.data AS CHAR) LIKE ${searchPattern}
+          LEFT JOIN \`User\` u ON r.createdBy = u.id
+          WHERE r.tableId = ?
+          ${statusClause}
+          AND CAST(r.data AS CHAR) LIKE ?
           ORDER BY r.createdAt DESC
-          LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
-        `),
-        prisma.$queryRaw<{ total: number }[]>(Prisma.sql`
-          SELECT COUNT(*) AS total
+          LIMIT ? OFFSET ?`,
+          [...queryParams, pageSize, (page - 1) * pageSize]
+        ),
+        dbPool.query(
+          `SELECT COUNT(*) AS total
           FROM DataRecord r
-          WHERE r.tableId = ${table.id}
-          ${statusCondition}
-          AND CAST(r.data AS CHAR) LIKE ${searchPattern}
-        `),
+          WHERE r.tableId = ?
+          ${statusClause}
+          AND CAST(r.data AS CHAR) LIKE ?`,
+          countParams
+        ),
       ])
 
-      const records = recordsRaw.map((row: any) => ({
+      const records = (recordsRaw[0] as any[]).map((row: any) => ({
         id: row.id,
         tableId: row.tableId,
-        data: typeof row.data === 'string' ? JSON.parse(row.data) : row.data,
+        data: typeof row.data === 'string' ? JSON.parse(row.data) : Buffer.isBuffer(row.data) ? JSON.parse(row.data.toString()) : row.data,
         status: row.status,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
+        createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+        updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
         createdBy: row.createdBy,
         updatedBy: row.updatedBy,
         creator: row.creator_realName || row.creator_username
@@ -87,7 +104,7 @@ export async function GET(
           : null,
       }))
 
-      const total = Number(totalRaw[0]?.total) || 0
+      const total = Number((totalRaw[0] as any[])[0]?.total) || 0
 
       return NextResponse.json({
         records,
@@ -154,7 +171,10 @@ export async function POST(
 
     const table = await prisma.dataTable.findUnique({
       where: { name: params.tableName },
-      include: { fields: true },
+      include: {
+        fields: true,
+        category: { select: { module: true } },
+      },
     })
 
     if (!table) {
@@ -175,7 +195,13 @@ export async function POST(
     }
 
     const body = await req.json()
-    const { data, status = 'DRAFT' } = body
+    let { data, status = 'DRAFT' } = body
+
+    // v1.2.2+ 可填写阶段：忽略当前模块不允许填写的字段提交值
+    const module = moduleOfTable((table.category as any)?.module)
+    if (data && typeof data === 'object') {
+      data = stripNonEditableFields(table.fields, data, module)
+    }
 
     const record = await prisma.dataRecord.create({
       data: {
@@ -187,19 +213,9 @@ export async function POST(
       } as any,
     })
 
-    // v1.2.2+ 同步检测（调查表新建也可能触发：如初始就填了关键差异字段或默认值不同）
+    // v1.2.2+：同步改为完全手动触发（不点同步按钮不同步），此处仅记录操作日志
     const ipAddress = (req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '').split(',')[0].trim() || null
     const userAgent = req.headers.get('user-agent') || null
-    const { snapshotId, syncRequestIds } = await triggerSyncForSurveyRecordIfNeeded({
-      surveyTableId: table.id,
-      surveyRecordId: record.id,
-      newSurveyData: record.data as Record<string, any>,
-      oldSurveyData: null,
-      changedBy: user.id,
-      changeType: 'CREATE',
-      ipAddress,
-      userAgent,
-    })
 
     await prisma.operationLog.create({
       data: {
@@ -208,8 +224,6 @@ export async function POST(
         module: 'DATA',
         tableId: table.id,
         recordId: record.id,
-        snapshotId: snapshotId ?? undefined,
-        detail: { syncRequestIds } as any,
         ipAddress: ipAddress ?? undefined,
         userAgent: userAgent ?? undefined,
       },
@@ -264,24 +278,6 @@ export async function DELETE(
 
     const ipAddress = (req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '').split(',')[0].trim() || null
     const userAgent = req.headers.get('user-agent') || null
-
-    // v1.2.2+ 删除前先抓要删的记录 data 用于快照和同步
-    const toDelete = await prisma.dataRecord.findMany({
-      where: { id: { in: ids }, tableId: table.id },
-      select: { id: true, data: true },
-    })
-    for (const r of toDelete) {
-      await triggerSyncForSurveyRecordIfNeeded({
-        surveyTableId: table.id,
-        surveyRecordId: r.id,
-        newSurveyData: {}, // DELETE：after = null/空
-        oldSurveyData: (r.data as Record<string, any>) || null,
-        changedBy: user.id,
-        changeType: 'DELETE',
-        ipAddress,
-        userAgent,
-      })
-    }
 
     await prisma.dataRecord.deleteMany({
       where: {

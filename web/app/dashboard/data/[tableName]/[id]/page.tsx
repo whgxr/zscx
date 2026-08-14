@@ -8,7 +8,7 @@ export default async function RecordDetailPage({
   searchParams,
 }: {
   params: { tableName: string; id: string }
-  searchParams: { mode?: string }
+  searchParams: { mode?: string; module?: string }
 }) {
   const user = await getCurrentUser()
   
@@ -22,6 +22,7 @@ export default async function RecordDetailPage({
       fields: {
         orderBy: { sortOrder: 'asc' },
       },
+      category: { select: { module: true } },
     },
   })
 
@@ -46,5 +47,11 @@ export default async function RecordDetailPage({
     redirect(`/dashboard/data/${tableWithLayout.name}`)
   }
 
-  return <RecordDetailClient table={tableWithLayout} record={record} initialEditMode={searchParams.mode === 'edit'} />
+  // module：优先取 URL 参数，其次按表的分类模块推导（survey/levy），保证详情/编辑页只读逻辑生效
+  const module =
+    searchParams?.module ||
+    (tableWithLayout.category?.module === 'SURVEY' ? 'survey' : tableWithLayout.category?.module === 'LEVY' ? 'levy' : '') ||
+    ''
+
+  return <RecordDetailClient table={tableWithLayout} record={record} initialEditMode={searchParams.mode === 'edit'} module={module} />
 }

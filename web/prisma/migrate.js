@@ -1054,6 +1054,117 @@ async function main() {
     console.log('   ✅ TableField 列校验完成')
   }
 
+  // ==================== 37. TableField 扩展：强制显示 + 可填写阶段（v1.2.2 征收） ====================
+  console.log('\n37. 扩展 TableField - forceShowInSurveyList / forceShowInLevyList / editScope ...')
+  {
+    const [cols] = await conn.execute('DESCRIBE `TableField`')
+    const colNames = cols.map(c => c.Field)
+    if (!colNames.includes('forceShowInSurveyList')) {
+      await conn.execute('ALTER TABLE `TableField` ADD COLUMN `forceShowInSurveyList` TINYINT(1) NOT NULL DEFAULT 0')
+      console.log('     ✅ forceShowInSurveyList 添加完成')
+    }
+    if (!colNames.includes('forceShowInLevyList')) {
+      await conn.execute('ALTER TABLE `TableField` ADD COLUMN `forceShowInLevyList` TINYINT(1) NOT NULL DEFAULT 0')
+      console.log('     ✅ forceShowInLevyList 添加完成')
+    }
+    if (!colNames.includes('editScope')) {
+      await conn.execute(`ALTER TABLE \`TableField\` ADD COLUMN \`editScope\` ENUM('SURVEY_ONLY','LEVY_ONLY','SURVEY_OR_LEVY','ALWAYS') NOT NULL DEFAULT 'ALWAYS'`)
+      console.log('     ✅ editScope 添加完成')
+    } else {
+      try {
+        await conn.execute(`ALTER TABLE \`TableField\` MODIFY COLUMN \`editScope\` ENUM('SURVEY_ONLY','LEVY_ONLY','SURVEY_OR_LEVY','ALWAYS') NOT NULL DEFAULT 'ALWAYS'`)
+      } catch (e) { console.log('   ⚠️ editScope 枚举跳过:', e.message) }
+    }
+    console.log('   ✅ TableField 征收扩展完成')
+  }
+
+  // ==================== 38. ApprovalWorkflow.tableId 可空（表级解耦） ====================
+  console.log('\n38. ApprovalWorkflow.tableId 改为可空（流程与表解耦）...')
+  try {
+    const [fks] = await conn.execute(`
+      SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ApprovalWorkflow'
+        AND COLUMN_NAME = 'tableId' AND REFERENCED_TABLE_NAME IS NOT NULL
+    `)
+    for (const fk of fks || []) {
+      await conn.execute(`ALTER TABLE \`ApprovalWorkflow\` DROP FOREIGN KEY \`${fk.CONSTRAINT_NAME}\``)
+    }
+    const [cols] = await conn.execute(`SHOW COLUMNS FROM \`ApprovalWorkflow\` LIKE 'tableId'`)
+    if (cols && cols.length && String(cols[0].Null) === 'NO') {
+      await conn.execute(`ALTER TABLE \`ApprovalWorkflow\` MODIFY COLUMN \`tableId\` INT NULL`)
+    }
+    await conn.execute(`ALTER TABLE \`ApprovalWorkflow\` ADD CONSTRAINT \`ApprovalWorkflow_tableId_fkey\` FOREIGN KEY (\`tableId\`) REFERENCES \`DataTable\`(\`id\`) ON DELETE SET NULL`)
+    console.log('   ✅ ApprovalWorkflow.tableId 可空完成')
+  } catch (e) {
+    console.log('   ⚠️  ApprovalWorkflow.tableId 迁移跳过:', e.message)
+  }
+
+  // ==================== 39. 自动生成 LEVY_RELATION 系统字段（征收↔调查，默认生成且不允许修改） ====================
+  console.log('\n39. 自动生成 LEVY_RELATION 系统字段...')
+  {
+    const [tables] = await conn.query(`
+      SELECT d.id, d.name AS tblName, d.label AS tblLabel, c.module
+      FROM \`DataTable\` d
+      LEFT JOIN \`TableCategory\` c ON c.id = d.categoryId
+    `)
+    const surveyTables = (tables || []).filter(t => t.module === 'SURVEY')
+    const levyTables = (tables || []).filter(t => t.module === 'LEVY')
+    if (levyTables.length && surveyTables.length) {
+      for (const levy of levyTables) {
+        const [fields] = await conn.query(
+          `SELECT id, name, config, isSystem FROM \`TableField\` WHERE tableId=? AND type='LEVY_RELATION'`,
+          [levy.id]
+        )
+        for (const survey of surveyTables) {
+          const fieldName = `${survey.tblName}_ref`
+          // 优先按字段名匹配（确定性命名），config 解析作兜底
+          const existing = (fields || []).find(f => {
+            if (f.name === fieldName) return true
+            try {
+              const cfg = JSON.parse(f.config || '{}')
+              return Number(cfg?.levy?.targetTableId) === survey.id
+            } catch { return false }
+          })
+          if (existing) {
+            if (existing.isSystem) continue
+            await conn.execute('UPDATE `TableField` SET isSystem=1 WHERE id=?', [existing.id])
+            console.log(`   ✅ ${levy.tblLabel}.${existing.name} 已升级为系统字段（不可修改/删除）`)
+            continue
+          }
+          try {
+            const [maxSort] = await conn.query('SELECT MAX(sortOrder) m FROM `TableField` WHERE tableId=?', [levy.id])
+            const sortOrder = (maxSort[0].m ?? 0) + 1
+            const config = JSON.stringify({ levy: { targetTableId: survey.id, cardinality: 'ONE_TO_ONE', syncMode: 'SNAPSHOT_APPROVAL' } })
+            await conn.execute(
+              `INSERT INTO \`TableField\` (tableId, name, label, type, required, sortOrder, description, config, isSystem, showInList, showInForm, showInSearch, updatedAt)
+               VALUES (?, ?, ?, 'LEVY_RELATION', 1, ?, ?, ?, 1, 1, 1, 1, NOW())`,
+              [levy.id, fieldName, `关联调查（${survey.tblLabel}）`, sortOrder, `LEVY_RELATION：1:1 自动关联调查表「${survey.tblLabel}」，写入时同步快照`, config]
+            )
+            console.log(`   ➕ ${levy.tblLabel} 自动创建系统字段 ${fieldName} → ${survey.tblLabel}`)
+          } catch (e) {
+            console.log(`   ⚠️  ${levy.tblLabel}.${fieldName} 创建失败:`, e.message)
+          }
+        }
+      }
+    } else {
+      console.log('   （无需处理：未同时存在 调查表 与 征收表）')
+    }
+  }
+
+  // ==================== 40. ApprovalWorkflow.specialAction 专项动作审批 ====================
+  console.log('\n40. ApprovalWorkflow 增加 specialAction 列（专项动作审批）...')
+  try {
+    const [acols] = await conn.execute(`SHOW COLUMNS FROM \`ApprovalWorkflow\` LIKE 'specialAction'`)
+    if (!acols || !acols.length) {
+      await conn.execute('ALTER TABLE `ApprovalWorkflow` ADD COLUMN `specialAction` LONGTEXT NULL')
+      console.log('   ✅ ApprovalWorkflow.specialAction 添加完成')
+    } else {
+      console.log('   ⚠️  ApprovalWorkflow.specialAction 已存在，跳过')
+    }
+  } catch (e) {
+    console.log('   ⚠️  ApprovalWorkflow.specialAction 迁移跳过:', e.message)
+  }
+
   // ==================== 验证 ====================
   console.log('\n✅ 迁移完成！')
   const [finalTables] = await conn.execute('SHOW TABLES')

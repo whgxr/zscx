@@ -3,7 +3,7 @@
 
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl"]
+  binaryTargets = ["native", "linux-musl", "debian-openssl-1.1.x"]
 }
 
 datasource db {
@@ -252,6 +252,11 @@ model TableField {
   showInList    Boolean          @default(true)  // 是否在列表显示
   showInForm    Boolean          @default(true)  // 是否在表单显示
   showInSearch  Boolean          @default(true)  // 是否可搜索
+  // v1.2.2+ 征收模块：强制在数据列表显示（调查/征收各自独立，列设置不可隐藏）
+  forceShowInSurveyList Boolean   @default(false)
+  forceShowInLevyList   Boolean   @default(false)
+  // v1.2.2+ 征收模块：可填写阶段（仅允许在指定模块中填写，否则只读）
+  editScope     EditScope        @default(ALWAYS)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
@@ -287,6 +292,14 @@ enum FieldType {
   RELATION       // 关联其他表
   DETAIL_TABLE   // 明细表单
   LEVY_RELATION  // 征收关联调查（v1.2.2+，1:1，写入时同步数据快照）
+}
+
+// v1.2.2+ 字段可填写阶段（仅允许在指定模块中填写，否则只读）
+enum EditScope {
+  SURVEY_ONLY     // 仅调查中可填写
+  LEVY_ONLY       // 仅征收中可填写
+  SURVEY_OR_LEVY  // 调查或征收中均可填写
+  ALWAYS          // 始终可编辑（默认）
 }
 
 // ==================== 数据记录 ====================
@@ -657,7 +670,7 @@ enum ApproverKind {
 model ApprovalWorkflow {
   id              Int            @id @default(autoincrement())
   name            String         // 流程名称
-  tableId         Int            // 关联的数据表ID
+  tableId         Int?           // 关联的数据表ID（可空：流程与表解耦，通过表级触发绑定关联）
   description     String?        // 流程描述
   status          WorkflowStatus @default(DRAFT)
   version         Int            @default(1)      // 版本号：每次 publish +1，历史实例永远绑定这个 version
@@ -665,6 +678,8 @@ model ApprovalWorkflow {
   jsonDefinition  Json?          // 引擎标准化 DAG 定义（{nodes:[WorkflowNodeDef], globals:{...}}），引擎唯一数据源
   triggerEvents   Json?          // 触发事件启用开关：{ MANUAL_SUBMIT:true, LEVY_SAVE:false, LEVY_SYNC_PASS:false }
   triggerCondition Json?          // 启动条件（AND 表达式数组）[{field:"area",op:"GT",value:100}]，为空表示该流程无条件（默认通用类型）
+  // v1.2.3+ 专项动作审批：{ actionType, targetTableId, targetTableLabel, editableFields[], dataScope[], visibleRoleIds[] }
+  specialAction   Json?
   timeoutPolicy   Json?          // 全局超时兜底：{ defaultHours:48, defaultAction:"AUTO_PASS" }
   isDefault       Boolean        @default(false)  // 一张表多个流程时，isDefault=true 的 version 最新者才会被自动触发命中
   publishedAt     DateTime?      // 发布时间（PUBLISHED 记录）
@@ -673,7 +688,7 @@ model ApprovalWorkflow {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  table           DataTable      @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  table           DataTable?     @relation(fields: [tableId], references: [id], onDelete: SetNull)
   publisher       User?          @relation("PublishedWorkflows", fields: [publishedBy], references: [id], onDelete: SetNull)
   creator         User?          @relation("CreatedWorkflows",   fields: [createdBy],   references: [id], onDelete: SetNull)
   nodes           ApprovalNode[]

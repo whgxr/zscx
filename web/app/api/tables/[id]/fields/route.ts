@@ -27,6 +27,10 @@ const createFieldSchema = z.object({
   showInList: z.boolean().optional().default(true),
   showInForm: z.boolean().optional().default(true),
   showInSearch: z.boolean().optional().default(true),
+  // v1.2.2+ 征收：强制显示 + 可填写阶段
+  forceShowInSurveyList: z.boolean().optional().default(false),
+  forceShowInLevyList: z.boolean().optional().default(false),
+  editScope: z.enum(['SURVEY_ONLY', 'LEVY_ONLY', 'SURVEY_OR_LEVY', 'ALWAYS']).optional().default('ALWAYS'),
 })
 
 export async function GET(

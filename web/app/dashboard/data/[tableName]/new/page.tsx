@@ -5,8 +5,10 @@ import { NewRecordClient } from './new-record-client'
 
 export default async function NewRecordPage({
   params,
+  searchParams,
 }: {
   params: { tableName: string }
+  searchParams: { module?: string }
 }) {
   const user = await getCurrentUser()
   
@@ -32,5 +34,5 @@ export default async function NewRecordPage({
     redirect('/dashboard')
   }
 
-  return <NewRecordClient table={tableWithLayout} />
+  return <NewRecordClient table={tableWithLayout} module={searchParams?.module || ''} />
 }
