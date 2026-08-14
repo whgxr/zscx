@@ -24,6 +24,7 @@ export default function DesignerPage() {
     jsonDefinition: any
     canvasData: any
     triggerCondition: any
+    specialAction: any
   } | null>(null)
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export default function DesignerPage() {
           jsonDefinition: json.data.jsonDefinition ?? null,
           canvasData: json.data.canvasData ?? null,
           triggerCondition: json.data.workflow?.triggerCondition ?? null,
+          specialAction: json.data.workflow?.specialAction ?? null,
         })
       } catch (e) {
         setError((e as Error).message)
@@ -72,6 +74,7 @@ export default function DesignerPage() {
       initialJsonDefinition={data.jsonDefinition}
       initialCanvasData={data.canvasData}
       initialTriggerCondition={data.triggerCondition}
+      initialSpecialAction={data.specialAction}
     />
   )
 }

@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const newName = body.name ?? `${src.name} (副本 ${new Date().toLocaleTimeString()})`
     const newTableId = body.tableId != null ? Number(body.tableId) : src.tableId
 
-    const copy = await prisma.$transaction(async tx => {
+    const copy = await prisma.$transaction(async (tx: any) => {
       const wf = await tx.approvalWorkflow.create({
         data: {
           name: newName,

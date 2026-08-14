@@ -18,6 +18,7 @@ import {
   Eye,
   ChevronRight,
   RefreshCw,
+  Settings,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -34,6 +35,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { TableBindingPanel } from '@/components/approval/TableBindingPanel'
+import type { TriggerTable } from '@/components/approval/TableBindingPanel'
 import type { User } from '@prisma/client'
 
 interface WorkflowTable {
@@ -113,13 +116,14 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
   const router = useRouter()
   const [workflows, setWorkflows] = useState<ApprovalWorkflowWithTable[]>([])
   const [instances, setInstances] = useState<ApprovalInstanceWithRelations[]>([])
-  const [tables, setTables] = useState<WorkflowTable[]>([])
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newWorkflowName, setNewWorkflowName] = useState('新审批流程')
-  const [newWorkflowTableId, setNewWorkflowTableId] = useState<number | ''>('')
   const [creating, setCreating] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [activeTab, setActiveTab] = useState('workflows')
+  const [bindingOpen, setBindingOpen] = useState(false)
+  const [bindingTableId, setBindingTableId] = useState<number | null>(null)
+  const [bindingTables, setBindingTables] = useState<TriggerTable[]>([])
 
   useEffect(() => {
     loadWorkflows()
@@ -133,10 +137,7 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
       if (res.ok) {
         const data = await res.json()
         const list = (data.tables || data.data || []) as any[]
-        setTables(list.map(t => ({ label: t.label || t.name, name: t.name })))
-        if (list.length && !newWorkflowTableId) {
-          setNewWorkflowTableId(list[0].id ?? list[0].tableId ?? '')
-        }
+        setBindingTables(list)
       }
     } catch {
       // ignore
@@ -168,7 +169,6 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
   }
 
   const handleCreateWorkflow = async () => {
-    if (!newWorkflowTableId) { alert('请先选择关联数据表'); return }
     try {
       setCreating(true)
       const res = await fetch('/api/approval/v2/workflows/blank', {
@@ -176,7 +176,6 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newWorkflowName.trim() || '新审批流程',
-          tableId: Number(newWorkflowTableId),
         }),
       })
       const json = await res.json()
@@ -276,10 +275,16 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
               onChange={(e) => setSearchKeyword(e.target.value)}
               className="w-64"
             />
-            <Button onClick={() => setShowCreateDialog(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              创建流程
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => { setBindingTableId(null); setBindingOpen(true) }}>
+                <Settings className="w-4 h-4 mr-2" />
+                表级触发绑定
+              </Button>
+              <Button onClick={() => setShowCreateDialog(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                创建流程
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -461,43 +466,35 @@ export function ApprovalClient({ user }: ApprovalClientProps) {
                 placeholder="例如：住户调查审批流程"
               />
             </div>
-            <div className="space-y-2">
-              <Label className="text-sm">绑定数据表</Label>
-              {tables.length > 0 ? (
-                <Select
-                  value={String(newWorkflowTableId)}
-                  onValueChange={v => setNewWorkflowTableId(Number(v))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="请选择数据表" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {tables.map((t, idx) => (
-                      <SelectItem
-                        key={t.name + '_' + idx}
-                        // tables list 里没有 id，这里通过 name 去反查不太准；优先用 tableId（若在 tables 返回有）否则用 index+1
-                        value={String((t as any).id ?? (t as any).tableId ?? (idx + 1))}
-                      >
-                        {t.label ?? t.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input disabled placeholder="正在加载数据表..." />
-              )}
-              <p className="text-[11px] text-gray-500">
-                流程绑定后，该表的数据审批会自动根据「流程启动条件」命中本流程或其他同表流程。
-              </p>
-            </div>
+            <p className="text-[11px] text-gray-500">
+              流程创建后可进入设计器设计，再在「表级触发绑定」中为各表的触发事件选择本流程。
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)} disabled={creating}>
               取消
             </Button>
-            <Button onClick={handleCreateWorkflow} disabled={creating || !newWorkflowTableId}>
+            <Button onClick={handleCreateWorkflow} disabled={creating || !newWorkflowName.trim()}>
               {creating ? '创建中...' : '创建并进入设计器'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bindingOpen} onOpenChange={setBindingOpen}>
+        <DialogContent className="max-w-6xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>表级审批触发绑定</DialogTitle>
+            <DialogDescription>为每张数据表配置不同触发事件（手动提交/征收保存/同步通过/批量导入）对应哪个审批流程。</DialogDescription>
+          </DialogHeader>
+          <TableBindingPanel
+            tables={bindingTables}
+            workflows={workflows as any}
+            initialTableId={bindingTableId}
+            onClose={() => { setBindingOpen(false); loadWorkflows(); loadTables() }}
+          />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setBindingOpen(false)}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

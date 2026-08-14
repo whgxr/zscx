@@ -71,7 +71,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ message: '审批流程不存在' }, { status: 404 })
     }
 
-    if (data.status === 'ACTIVE') {
+    if (data.status === 'ACTIVE' && workflow.tableId != null) {
       const existing = await prisma.approvalWorkflow.findFirst({
         where: { tableId: workflow.tableId, status: 'ACTIVE', id: { not: workflow.id } },
       })

@@ -15,8 +15,8 @@ import { Badge } from '@/components/ui/badge'
 import { NodePalette } from './NodePalette'
 import { CanvasView } from './CanvasView'
 import { PropertyPanel } from './PropertyPanel'
-import { createDefaultNode, stateToDefinition, definitionToState, validateState } from './designer-utils'
-import type { DesignerState, DesignerNodeDef, NodeType } from './designer-types'
+import { createDefaultNode, stateToDefinition, definitionToState, validateState, stateToCanvas } from './designer-utils'
+import type { DesignerState, DesignerNodeDef, NodeType, DesignerGlobals } from './designer-types'
 
 type Props = {
   workflowId: number
@@ -25,6 +25,7 @@ type Props = {
   initialJsonDefinition: any
   initialCanvasData: any
   initialTriggerCondition?: any
+  initialSpecialAction?: any
 }
 
 export function WorkflowDesigner({
@@ -34,16 +35,22 @@ export function WorkflowDesigner({
   initialJsonDefinition,
   initialCanvasData,
   initialTriggerCondition = null,
+  initialSpecialAction = null,
 }: Props) {
   const router = useRouter()
   const [state, setState] = useState<DesignerState>(() => {
     const init = definitionToState(initialJsonDefinition, initialCanvasData)
+    let globals: DesignerGlobals = { ...init.globals, name: workflowName }
     if (initialTriggerCondition !== null && initialTriggerCondition !== undefined) {
-      return { ...init, globals: { ...init.globals, triggerCondition: initialTriggerCondition, name: workflowName } }
+      globals = { ...globals, triggerCondition: initialTriggerCondition }
     }
-    return { ...init, globals: { ...init.globals, name: workflowName } }
+    if (initialSpecialAction !== null && initialSpecialAction !== undefined) {
+      globals = { ...globals, specialAction: initialSpecialAction }
+    }
+    return { ...init, globals }
   })
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
 
@@ -67,7 +74,6 @@ export function WorkflowDesigner({
   const handleDeleteNode = useCallback((id: string) => {
     const nodes = state.nodes
       .filter(n => n.id !== id)
-      // 清理所有指向被删节点的连线
       .map(n => ({
         ...n,
         next: n.next?.filter(t => t !== id),
@@ -78,19 +84,35 @@ export function WorkflowDesigner({
     if (selectedNodeId === id) setSelectedNodeId(null)
   }, [state, selectedNodeId])
 
+  // ── 删除连线 ──
+  const handleDeleteEdge = useCallback((edgeId: string) => {
+    const parts = edgeId.split('_')
+    if (parts.length < 4 || parts[0] !== 'e') return
+    const target = parts[parts.length - 1]
+    const handle = parts[parts.length - 2]
+    const source = parts.slice(1, -2).join('_')
+    if (!source || !target) return
+
+    const nodes = state.nodes.map(n => {
+      if (n.id !== source) return n
+      if (handle === 'true') {
+        return { ...n, nextTrue: (n.nextTrue ?? []).filter(t => t !== target) }
+      } else if (handle === 'false') {
+        return { ...n, nextFalse: (n.nextFalse ?? []).filter(t => t !== target) }
+      } else {
+        return { ...n, next: (n.next ?? []).filter(t => t !== target) }
+      }
+    })
+    setState({ ...state, nodes })
+    if (selectedEdgeId === edgeId) setSelectedEdgeId(null)
+  }, [state, selectedEdgeId])
+
   // ── 保存草稿 ──
   const handleSaveDraft = useCallback(async () => {
     setSaving(true)
     try {
       const jsonDef = stateToDefinition(state)
-      const canvasData = {
-        nodes: state.nodes.map(n => ({
-          id: n.id, type: 'approval', position: n.position,
-          data: { label: n.name, nodeType: n.type },
-        })),
-        edges: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
-      }
+      const canvasData = stateToCanvas(state)
       const res = await fetch(`/api/approval/workflows/${workflowId}/designer`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -101,6 +123,7 @@ export function WorkflowDesigner({
             name: state.globals.name,
             description: state.globals.description,
             triggerCondition: state.globals.triggerCondition ?? null,
+            specialAction: state.globals.specialAction ?? null,
           },
         }),
       })
@@ -123,14 +146,7 @@ export function WorkflowDesigner({
     setPublishing(true)
     try {
       const jsonDef = stateToDefinition(state)
-      const canvasData = {
-        nodes: state.nodes.map(n => ({
-          id: n.id, type: 'approval', position: n.position,
-          data: { label: n.name, nodeType: n.type },
-        })),
-        edges: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
-      }
+      const canvasData = stateToCanvas(state)
       const res = await fetch(`/api/approval/workflows/${workflowId}/designer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -141,6 +157,7 @@ export function WorkflowDesigner({
             name: state.globals.name,
             description: state.globals.description,
             triggerCondition: state.globals.triggerCondition ?? null,
+            specialAction: state.globals.specialAction ?? null,
           },
         }),
       })
@@ -194,7 +211,7 @@ export function WorkflowDesigner({
       {/* 顶部工具栏 */}
       <header className="flex items-center justify-between px-4 py-2 border-b bg-white shrink-0">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => router.push('/approval/workflows')}>
+          <Button variant="ghost" size="sm" onClick={() => router.back()}>
             <ChevronLeft size={16} className="mr-1" />
             返回
           </Button>
@@ -231,14 +248,19 @@ export function WorkflowDesigner({
             onStateChange={setState}
             selectedNodeId={selectedNodeId}
             onSelectNode={setSelectedNodeId}
+            selectedEdgeId={selectedEdgeId}
+            onSelectEdge={setSelectedEdgeId}
+            onDeleteEdge={handleDeleteEdge}
             onAddNodeAt={handleAddNodeAt}
           />
         </div>
         <PropertyPanel
           state={state}
           selectedNodeId={selectedNodeId}
+          selectedEdgeId={selectedEdgeId}
           onStateChange={setState}
           onDeleteNode={handleDeleteNode}
+          onDeleteEdge={handleDeleteEdge}
         />
       </div>
     </div>

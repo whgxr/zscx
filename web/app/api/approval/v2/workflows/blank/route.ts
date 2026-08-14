@@ -11,15 +11,16 @@ export async function POST(req: NextRequest) {
     if (!user || !user.role?.canManageApproval) return NextResponse.json({ ok: false, error: '无权限' }, { status: 403 })
     const body = await req.json()
     const name = String(body.name || '').trim()
-    const tableId = Number(body.tableId)
-    if (!name || !tableId) return NextResponse.json({ ok: false, error: '缺少 name 或 tableId' }, { status: 400 })
-    const existingActive = await prisma.approvalWorkflow.findFirst({ where: { tableId, status: 'ACTIVE' } })
+    // 流程与表解耦：tableId 可选，后续在“表级触发绑定”中为各表触发事件选择本流程
+    const tableId = body.tableId != null && body.tableId !== '' ? Number(body.tableId) : null
+    if (!name) return NextResponse.json({ ok: false, error: '缺少 name' }, { status: 400 })
     const wf = await prisma.approvalWorkflow.create({
       data: {
-        name, tableId,
+        name,
+        tableId: Number.isFinite(tableId as number) ? (tableId as number) : null,
         description: body.description || null,
-        status: existingActive ? 'DRAFT' : 'DRAFT',
-        isDefault: existingActive ? false : true,
+        status: 'DRAFT',
+        isDefault: false,
         createdBy: user.id,
         canvasData: {
           nodes: [

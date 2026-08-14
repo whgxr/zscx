@@ -12,6 +12,7 @@
 // 审批通过后的应用：见 applyApprovedSyncRequest()
 
 import { prisma } from './prisma'
+import { notificationService } from './notification-service'
 import {
   createRecordSnapshot,
   deepDiff,
@@ -318,6 +319,24 @@ export async function applyApprovedSyncRequest(params: {
       },
     })
 
+    // 若该调查记录没有其它待审核同步请求，则恢复其状态（提交同步时被置为 SYNC_PENDING）
+    await restoreSurveyRecordStatus(req, params.reviewedBy)
+
+    // 通知原提交人：同步请求已通过
+    if (req.requestedBy) {
+      try {
+        await notificationService.createNotification({
+          type: 'SYSTEM',
+          title: '同步请求已通过审核',
+          content: `您的调查→征收同步请求 #${req.id} 已通过审核并生效。`,
+          targetType: 'USER',
+          targetUserIds: [req.requestedBy],
+          priority: 'NORMAL',
+          linkUrl: '/dashboard/audit',
+        })
+      } catch {}
+    }
+
     return { ok: true, syncRequest: updated }
   } catch (e: any) {
     console.error('[applyApprovedSyncRequest] failed:', e)
@@ -387,9 +406,57 @@ export async function rejectSyncRequest(params: {
       },
     })
 
+    // 若该调查记录没有其它待审核同步请求，则恢复其状态（提交同步时被置为 SYNC_PENDING）
+    await restoreSurveyRecordStatus(req, params.reviewedBy)
+
+    // 通知原提交人：同步请求已被拒绝
+    if (req.requestedBy) {
+      try {
+        await notificationService.createNotification({
+          type: 'SYSTEM',
+          title: '同步请求已被拒绝',
+          content: `您的调查→征收同步请求 #${req.id} 已被拒绝${params.reviewComment ? `，原因：${params.reviewComment}` : '。'}`,
+          targetType: 'USER',
+          targetUserIds: [req.requestedBy],
+          priority: 'HIGH',
+          linkUrl: '/dashboard/audit',
+        })
+      } catch {}
+    }
+
     return { ok: true, syncRequest: updated }
   } catch (e: any) {
     console.error('[rejectSyncRequest] failed:', e)
     return { ok: false, error: e?.message || '拒绝失败' }
   }
 }
+
+/**
+ * 恢复调查记录状态：提交同步请求时被置为 SYNC_PENDING，当该记录没有其它待审核同步请求时改回 REVIEWED
+ */
+async function restoreSurveyRecordStatus(req: DataSyncRequest, reviewedBy: number) {
+  if (!req.surveyRecordId) return
+  const otherPending = await prisma.dataSyncRequest.count({
+    where: {
+      surveyRecordId: req.surveyRecordId,
+      status: 'PENDING',
+      id: { not: req.id },
+    },
+  })
+  if (otherPending === 0) {
+    const cur = await prisma.dataRecord
+      .findUnique({ where: { id: req.surveyRecordId }, select: { status: true } })
+      .catch(() => null)
+    if (cur?.status === 'SYNC_PENDING') {
+      await prisma.dataRecord.update({
+        where: { id: req.surveyRecordId },
+        data: { status: 'REVIEWED', updatedBy: reviewedBy },
+      })
+    }
+  }
+}
+
+// ==================== 可填写阶段（editScope）辅助（v1.2.2+） ====================
+// 纯函数已拆到 levy-edit-scope.ts（无服务端依赖，供客户端组件安全导入）。
+// 为兼容服务端路由的既有 import，这里统一 re-export。
+export { moduleOfTable, isFieldEditableInModule, stripNonEditableFields } from './levy-edit-scope'

@@ -7,6 +7,7 @@ import React from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { EntityMultiSelect } from '../EntityMultiSelect'
 import type { DesignerNodeDef } from '../designer-types'
 
 type Props = {
@@ -49,28 +50,24 @@ export function ApproverNodeConfig({ node, onChange }: Props) {
 
       {ap.kind === 'ROLE' && (
         <div>
-          <Label className="text-xs text-gray-500">角色 ID（逗号分隔）</Label>
-          <Input
-            value={(ap.candidates ?? []).join(',')}
-            onChange={e => {
-              const ids = e.target.value.split(',').map(Number).filter(Number.isFinite)
-              onChange({ approver: { ...ap, candidates: ids } })
-            }}
-            placeholder="1,2,3"
+          <Label className="text-xs text-gray-500">角色</Label>
+          <EntityMultiSelect
+            kind="role"
+            selected={ap.candidates ?? []}
+            onChange={ids => onChange({ approver: { ...ap, candidates: ids } })}
+            placeholder="选择角色"
           />
         </div>
       )}
 
       {ap.kind === 'USER' && (
         <div>
-          <Label className="text-xs text-gray-500">用户 ID（逗号分隔）</Label>
-          <Input
-            value={(ap.candidates ?? []).join(',')}
-            onChange={e => {
-              const ids = e.target.value.split(',').map(Number).filter(Number.isFinite)
-              onChange({ approver: { ...ap, candidates: ids } })
-            }}
-            placeholder="1,2,3"
+          <Label className="text-xs text-gray-500">用户</Label>
+          <EntityMultiSelect
+            kind="user"
+            selected={ap.candidates ?? []}
+            onChange={ids => onChange({ approver: { ...ap, candidates: ids } })}
+            placeholder="选择用户"
           />
         </div>
       )}

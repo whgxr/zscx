@@ -7,6 +7,7 @@ import React from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { EntityMultiSelect } from '../EntityMultiSelect'
 import type { DesignerNodeDef } from '../designer-types'
 
 type Props = {
@@ -46,14 +47,12 @@ export function CCNodeConfig({ node, onChange }: Props) {
 
       {(cc?.kind === 'USER' || cc?.kind === 'ROLE' || !cc) && (
         <div>
-          <Label className="text-xs text-gray-500">ID 列表（逗号分隔）</Label>
-          <Input
-            value={(cc?.ids ?? []).join(',')}
-            onChange={e => {
-              const ids = e.target.value.split(',').map(Number).filter(Number.isFinite)
-              onChange({ ccTargets: { kind: cc?.kind ?? 'USER', ids } })
-            }}
-            placeholder="1,2,3"
+          <Label className="text-xs text-gray-500">{cc?.kind === 'ROLE' ? '抄送角色' : '抄送用户'}</Label>
+          <EntityMultiSelect
+            kind={cc?.kind === 'ROLE' ? 'role' : 'user'}
+            selected={cc?.ids ?? []}
+            onChange={ids => onChange({ ccTargets: { kind: cc?.kind ?? 'USER', ids } })}
+            placeholder={cc?.kind === 'ROLE' ? '选择角色' : '选择用户'}
           />
         </div>
       )}

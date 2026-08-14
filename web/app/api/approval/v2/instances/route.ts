@@ -44,10 +44,12 @@ export async function POST(req: NextRequest) {
 /**
  * GET /api/approval/v2/instances?scope=&page=&pageSize=&status=&tableId=&recordId=
  *   scope:
- *     pending  我的待办（某节点实例分配给我，且 PENDING / APPROVING / COUNTERSIGNING）
- *     mine     我发起的
- *     cc       抄送给我
- *     all      我能看（我发起 + 待我办 + 抄我）（管理员能看全部）
+ *     pending    我的待办（某节点实例分配给我，且 PENDING）
+ *     approved   我审批通过的流程（我处理的通过类节点）
+ *     transferred我转签给他人的流程
+ *     mine       我发起的
+ *     cc         抄送给我
+ *     all        我能看（我发起 + 待我办 + 抄我）（管理员能看全部）
  */
 export async function GET(req: NextRequest) {
   try {
@@ -76,18 +78,33 @@ export async function GET(req: NextRequest) {
       where.nodeInstances = {
         some: {
           assigneeId: user.id,
-          status: { in: ['PENDING', 'APPROVING', 'COUNTERSIGNING'] }
+          status: { in: ['PENDING'] }
+        }
+      }
+    } else if (scope === 'approved') {
+      // 我审批通过过的流程：存在我处理的、动作为通过类的节点
+      where.nodeInstances = {
+        some: {
+          assigneeId: user.id,
+          action: { in: ['APPROVE', 'TIMEOUT_PASS'] }
+        }
+      }
+    } else if (scope === 'transferred') {
+      // 我转签给他人的流程：存在转签原操作人为我的节点
+      where.nodeInstances = {
+        some: {
+          transferredFrom: user.id
         }
       }
     } else if (scope === 'mine') {
       where.initiatorId = user.id
     } else if (scope === 'cc') {
-      where.ccList = { has: user.id }
+      where.ccList = { array_contains: user.id }
     } else if (scope === 'all' && !isAdmin) {
       where.OR = [
         { initiatorId: user.id },
         { nodeInstances: { some: { assigneeId: user.id } } },
-        { ccList: { has: user.id } },
+        { ccList: { array_contains: user.id } },
       ]
     }
 
@@ -95,7 +112,7 @@ export async function GET(req: NextRequest) {
       prisma.approvalInstance.findMany({
         where,
         include: {
-          workflow: { select: { id: true, name: true, version: true } },
+          workflow: { select: { id: true, name: true, version: true, specialAction: true } },
           table: { select: { id: true, label: true, name: true } },
           record: { select: { id: true, status: true, updatedAt: true } },
           initiator: { select: { id: true, realName: true, username: true, avatar: true } },

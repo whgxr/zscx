@@ -55,10 +55,9 @@ export async function matchWorkflowForTrigger(
   const cfg = deepParse<any>(table.approvalTriggerConfig) ?? {}
   const binding = cfg[triggerEvent]
 
-  // 1) 拉取该表所有 ACTIVE/PUBLISHED 且有 jsonDefinition 的流程，按条件评分选最优
+  // 1) 拉取所有 ACTIVE/PUBLISHED 且有 jsonDefinition 的流程（流程与表解耦，不做按表过滤），按条件评分选最优
   const allCandidates = await tx.approvalWorkflow.findMany({
     where: {
-      tableId,
       status: { in: ['ACTIVE', 'PUBLISHED'] },
       AND: [{ NOT: { jsonDefinition: null } }],
     },
@@ -124,10 +123,9 @@ export async function matchWorkflowForTrigger(
 
   if (opts?.strict) return null
 
-  // 3) fallback: 同表 isDefault=true + status=ACTIVE/PUBLISHED + jsonDefinition!=null 的最高 version
+  // 3) fallback: 全局 isDefault=true + status=ACTIVE/PUBLISHED + jsonDefinition!=null 的最高 version
   const candidates = await tx.approvalWorkflow.findMany({
     where: {
-      tableId,
       status: { in: ['ACTIVE', 'PUBLISHED'] },
       isDefault: true,
       AND: [{ NOT: { jsonDefinition: null } }],
@@ -334,7 +332,7 @@ export async function executeNodeAction(params: {
   // 加签
   if (params.action === 'ADD_COUNTERSIGN') {
     let addResult: any
-    await prisma.$transaction(async tx => {
+    await prisma.$transaction(async (tx: any) => {
       addResult = await applyAction({
         nodeInstanceId: params.nodeInstanceId,
         assigneeId: params.assigneeId,
@@ -405,7 +403,7 @@ export async function executeNodeAction(params: {
 
   // 审批通过 → 回写 record.data
   if (res.instanceStatus === 'APPROVED') {
-    await prisma.$transaction(async tx => {
+    await prisma.$transaction(async (tx: any) => {
       const inst = await tx.approvalInstance.findUnique({ where: { id: ni.instanceId } })
       if (!inst) return
       if (inst.optimisticLock) {
@@ -417,6 +415,18 @@ export async function executeNodeAction(params: {
           throw new Error('OPTIMISTIC_LOCK_FAIL: 审批通过落库时发现记录已被外部修改（请重新发起）')
         }
       }
+      // 专项动作「删除记录」审批通过 → 删除目标记录
+      const wf = await tx.approvalWorkflow.findUnique({
+        where: { id: inst.workflowId },
+        select: { specialAction: true },
+      })
+      try {
+        const sa = typeof wf?.specialAction === 'string' ? JSON.parse(wf.specialAction) : (wf?.specialAction ?? null)
+        if (sa?.actionType === 'DELETE') {
+          await tx.dataRecord.delete({ where: { id: inst.recordId } })
+          return
+        }
+      } catch (_) {}
       const after = deepParse<any>(inst.snapshotDataAfter)
       if (after) {
         await tx.dataRecord.update({

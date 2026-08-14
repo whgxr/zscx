@@ -14,20 +14,9 @@ import {
   CheckCircle2, XCircle, Clock, AlertCircle, Loader2,
 } from 'lucide-react'
 import { formatDateTime, cn } from '@/lib/utils'
+import { STATUS_COLOR, STATUS_LABEL, buildDiff, parseSpecialActionOf } from '@/lib/approval-display'
 
 type AnyRow = any
-
-const STATUS_COLOR: Record<string, string> = {
-  PENDING: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  PROCESSING: 'bg-sky-100 text-sky-800 border-sky-200',
-  APPROVED: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  REJECTED: 'bg-rose-100 text-rose-800 border-rose-200',
-  REVOKED: 'bg-slate-100 text-slate-700 border-slate-200',
-  CANCELLED: 'bg-slate-100 text-slate-700 border-slate-200',
-  AUTO_PASSED: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  AUTO_REJECTED: 'bg-rose-100 text-rose-800 border-rose-200',
-  RESTARTED: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-}
 
 const NODE_STATUS_ICON: Record<string, { icon: any; cls: string }> = {
   APPROVED:          { icon: CheckCircle2, cls: 'text-emerald-500' },
@@ -140,6 +129,7 @@ export default function MinePage() {
               <TableHead>编号</TableHead>
               <TableHead>表 · 记录</TableHead>
               <TableHead>流程</TableHead>
+              <TableHead>申请内容</TableHead>
               <TableHead>进度</TableHead>
               <TableHead>状态</TableHead>
               <TableHead>发起时间</TableHead>
@@ -148,8 +138,8 @@ export default function MinePage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && <TableRow><TableCell colSpan={8} className="text-center text-slate-400 py-10">加载中…</TableCell></TableRow>}
-            {!loading && rows.length === 0 && <TableRow><TableCell colSpan={8} className="text-center text-slate-400 py-10">暂无记录</TableCell></TableRow>}
+            {loading && <TableRow><TableCell colSpan={9} className="text-center text-slate-400 py-10">加载中…</TableCell></TableRow>}
+            {!loading && rows.length === 0 && <TableRow><TableCell colSpan={9} className="text-center text-slate-400 py-10">暂无记录</TableCell></TableRow>}
             {rows.map((r: AnyRow) => (
               <TableRow key={r.id}>
                 <TableCell className="font-mono text-xs text-slate-600">#{r.id}</TableCell>
@@ -160,6 +150,39 @@ export default function MinePage() {
                 <TableCell>
                   <div className="text-sm">{r.workflow.name}</div>
                   <div className="text-xs text-slate-500">v{r.workflow.version ?? 1}{r.triggerEvent ? ' · ' + r.triggerEvent : ''}</div>
+                </TableCell>
+                <TableCell className="max-w-xs">
+                  {(() => {
+                    const diffs = buildDiff(r)
+                    const sa = parseSpecialActionOf(r)
+                    const actionType = sa?.actionType ?? 'UPDATE'
+                    if (actionType === 'DELETE') {
+                      return <span className="text-xs text-rose-600 font-medium">删除记录</span>
+                    }
+                    if (actionType === 'REVIEW') {
+                      return <span className="text-xs text-sky-600 font-medium">审查复核</span>
+                    }
+                    if (actionType === 'CREATE') {
+                      return <div className="text-xs text-slate-600 line-clamp-2 space-y-0.5">
+                        {diffs.length === 0 ? <span className="text-slate-400">新增记录</span> :
+                          diffs.slice(0, 3).map((d, i) => (
+                            <div key={i} className="truncate"><b className="text-slate-800">{d.label}</b>：<span className="text-emerald-700">{d.newVal || '—'}</span></div>
+                          ))}
+                      </div>
+                    }
+                    return <div className="text-xs text-slate-600 line-clamp-2 space-y-0.5">
+                      {diffs.length === 0 ? <span className="text-slate-400">（无字段变更）</span> :
+                        diffs.slice(0, 3).map((d, i) => (
+                          <div key={i} className="truncate">
+                            <b className="text-slate-800">{d.label}</b>：
+                            <span className="text-slate-400 line-through">{d.oldVal}</span>
+                            <span className="text-slate-400"> → </span>
+                            <span className="text-emerald-700">{d.newVal || '（清空）'}</span>
+                          </div>
+                        ))}
+                      {diffs.length > 3 && <div className="text-slate-400">…共 {diffs.length} 项变更</div>}
+                    </div>
+                  })()}
                 </TableCell>
                 <TableCell className="w-52">
                   <button
@@ -190,7 +213,7 @@ export default function MinePage() {
                     <div className="text-xs text-slate-500 mt-0.5 group-hover:text-indigo-600 transition-colors">{progress(r)}% · 点击查看详情</div>
                   </button>
                 </TableCell>
-                <TableCell><Badge variant="outline" className={STATUS_COLOR[r.status] ?? ''}>{r.status}</Badge></TableCell>
+                <TableCell><Badge variant="outline" className={STATUS_COLOR[r.status] ?? ''}>{STATUS_LABEL[r.status] ?? r.status}</Badge></TableCell>
                 <TableCell className="text-xs text-slate-500">{formatDateTime(r.startedAt)}</TableCell>
                 <TableCell className="text-xs text-slate-500">{r.completedAt ? formatDateTime(r.completedAt) : '—'}</TableCell>
                 <TableCell className="text-right">
@@ -284,7 +307,7 @@ export default function MinePage() {
             <div className="space-y-0 max-h-96 overflow-y-auto">
               {(progressRow.nodeInstances ?? []).map((ni: any, i: number, arr: any[]) => {
                 const isDone = !!ni.processedAt || ['APPROVED','REJECTED','AUTO_PASSED','AUTO_REJECTED','TRANSFERRED','TIMEOUT_PASS','TIMEOUT_REJECT'].includes(ni.action ?? '')
-                const isCurrent = ['PENDING','APPROVING','COUNTERSIGNING'].includes(ni.status) && !isDone
+                const isCurrent = ['PENDING'].includes(ni.status) && !isDone
                 const info = NODE_STATUS_ICON[ni.action ?? ni.status] ?? { icon: Clock, cls: 'text-slate-300' }
                 const Icon = info.icon
                 return (

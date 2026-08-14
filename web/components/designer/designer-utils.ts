@@ -70,6 +70,76 @@ export function stateToDefinition(state: DesignerState): { nodes: WorkflowNodeDe
 }
 
 /**
+ * 设计器节点 → 画布节点 data（ReactFlow data 格式）
+ * 与后端 engineToCanvas 的 data 结构保持一致（approver/condition/ccConfig/parallelJoin）
+ */
+export function designerNodeToCanvasData(n: DesignerNodeDef): any {
+  const type = n.type
+  const data: any = { label: n.name ?? type, nodeType: type }
+  if (type.startsWith('APPROVER_')) {
+    const ap = n.approver
+    const kinds: string[] = []
+    if (ap?.kind === 'FIELD') kinds.push('FIELD')
+    else if (ap?.kind === 'USER') kinds.push('USER')
+    else kinds.push('ROLE')
+    data.approver = {
+      approverKind: kinds,
+      approverIds: ap?.kind === 'USER' ? (ap?.candidates ?? []) : [],
+      approverRoleIds: ap?.kind === 'ROLE' ? (ap?.candidates ?? []) : [],
+      fieldPicker: ap?.field ? { fieldName: ap.field, expects: 'USER_ID' } : null,
+      minQuorum: ap?.quorum ?? null,
+    }
+  }
+  if (type === 'CONDITION_BRANCH') {
+    const expr0 = (n.condition?.expressions as any)?.[0]
+    if (expr0 && expr0.field === '__expr__') data.condition = { expression: expr0.value }
+    else if (expr0) {
+      const reverseOp: Record<string, string> = { eq: '==', ne: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=', in: 'in', contains: 'contains' }
+      data.condition = {
+        simpleField: expr0.field,
+        simpleOp: reverseOp[expr0.op] ?? '==',
+        simpleValue: typeof expr0.value === 'string' || typeof expr0.value === 'number' ? String(expr0.value) : JSON.stringify(expr0.value),
+      }
+    }
+  }
+  if (type === 'CC') {
+    const c = n.ccTargets
+    if (c?.kind === 'USER') data.ccConfig = { ccUserIds: c.ids ?? [], ccRoleIds: [], ccField: null }
+    else if (c?.kind === 'ROLE') data.ccConfig = { ccUserIds: [], ccRoleIds: c.ids ?? [], ccField: null }
+    else if (c?.kind === 'FIELD') data.ccConfig = { ccUserIds: [], ccRoleIds: [], ccField: c.field ?? null }
+  }
+  if (type === 'PARALLEL') data.parallelJoin = n.parallelWaitMode === 'ANY' ? 'ANY' : 'ALL'
+  return data
+}
+
+/**
+ * 设计器状态 → 完整画布（CanvasData）
+ * 含节点配置（approver/condition/ccConfig/parallelJoin）+ 由节点连接派生的 edges，
+ * 与后端 engineToCanvas / canvasToEngine 往返一致。
+ */
+export function stateToCanvas(state: DesignerState): any {
+  const nodes = state.nodes.map(n => ({
+    id: n.id, type: 'approval', position: n.position,
+    data: designerNodeToCanvasData(n),
+  }))
+  const edges: any[] = []
+  const addEdge = (source: string, tgt: string, hTrue: boolean | null) => {
+    edges.push({
+      id: `e_${source}__${tgt}__${hTrue === null ? 'any' : hTrue ? 'T' : 'F'}`,
+      source, target: tgt,
+      sourceHandle: hTrue === null ? null : hTrue ? 'true' : 'false',
+      targetHandle: null,
+    })
+  }
+  for (const n of state.nodes) {
+    if (n.next) for (const t of n.next) addEdge(n.id, t, null)
+    if (n.nextTrue) for (const t of n.nextTrue) addEdge(n.id, t, true)
+    if (n.nextFalse) for (const t of n.nextFalse) addEdge(n.id, t, false)
+  }
+  return { nodes, edges, viewport: { x: 0, y: 0, zoom: 1 } }
+}
+
+/**
  * jsonDefinition + canvasData → 设计器状态
  */
 export function definitionToState(

@@ -2,10 +2,11 @@
  * ReactFlow 画布组件
  *
  * 包装 @xyflow/react，管理节点/边状态，提供画布交互。
+ * 支持：节点拖拽、连线创建、连线点击选择、连线删除。
  */
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useRef } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import {
   ReactFlow, Background, Controls, MiniMap,
   useNodesState, useEdgesState, addEdge, MarkerType,
@@ -13,6 +14,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { CustomNodes } from './CustomNodes'
+import { CustomEdge } from './CustomEdge'
 import { NODE_COLORS, type DesignerNodeDef, type DesignerState, type NodeType } from './designer-types'
 
 type Props = {
@@ -20,10 +22,14 @@ type Props = {
   onStateChange: (state: DesignerState) => void
   selectedNodeId: string | null
   onSelectNode: (id: string | null) => void
+  selectedEdgeId: string | null
+  onSelectEdge: (id: string | null) => void
+  onDeleteEdge: (edgeId: string) => void
   onAddNodeAt?: (type: NodeType, position: { x: number; y: number }) => void
 }
 
 const nodeTypes = { workflowNode: CustomNodes.workflowNode }
+const edgeTypes = { customEdge: CustomEdge }
 
 /** 从 DesignerState 转换为 ReactFlow Node[] */
 function toRfNodes(state: DesignerState): Node[] {
@@ -36,15 +42,17 @@ function toRfNodes(state: DesignerState): Node[] {
 }
 
 /** 从 DesignerState 的 next/nextTrue/nextFalse 生成 ReactFlow Edge[] */
-function toRfEdges(nodes: DesignerNodeDef[]): Edge[] {
+function toRfEdges(nodes: DesignerNodeDef[], selectedEdgeId?: string | null): Edge[] {
   const edges: Edge[] = []
   const add = (source: string, target: string, handle?: string) => {
+    const id = `e_${source}_${handle ?? 'any'}_${target}`
     edges.push({
-      id: `e_${source}_${handle ?? 'any'}_${target}`,
+      id,
+      type: 'customEdge',
       source, target,
       sourceHandle: handle ?? null,
       markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
-      style: { strokeWidth: 1.5 },
+      selected: id === selectedEdgeId,
     })
   }
   for (const n of nodes) {
@@ -55,29 +63,51 @@ function toRfEdges(nodes: DesignerNodeDef[]): Edge[] {
   return edges
 }
 
-export function CanvasView({ state, onStateChange, selectedNodeId, onSelectNode, onAddNodeAt }: Props) {
+/** 从 edge ID 解析 source、handle、target */
+function parseEdgeId(edgeId: string): { source: string; handle: string; target: string } | null {
+  // 格式: e_{source}_{handle}_{target}
+  // handle 可以是 'any', 'true', 'false'
+  const parts = edgeId.split('_')
+  if (parts.length < 4 || parts[0] !== 'e') return null
+  // 找到 handle 位置
+  // e_{source}_{handle}_{target} 其中 handle 可能是 any/true/false
+  // source 可能包含下划线吗？不太可能。我们按以下方式解析：
+  // parts[0] = 'e'
+  // parts[1] = source
+  // parts[2] = handle (any | true | false)
+  // parts[3..] = target (如果 source 不含下划线的话)
+  // 但实际上 source 和 target 可能包含下划线...
+  // 更安全的做法：从后往前找，target 是最后一段，handle 是倒数第二段，source 是第一段
+  const target = parts[parts.length - 1]
+  const handle = parts[parts.length - 2]
+  const source = parts.slice(1, -2).join('_')
+  if (!source || !target) return null
+  return { source, handle, target }
+}
+
+export function CanvasView({
+  state, onStateChange, selectedNodeId, onSelectNode,
+  selectedEdgeId, onSelectEdge, onDeleteEdge, onAddNodeAt,
+}: Props) {
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(toRfNodes(state))
-  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(toRfEdges(state.nodes))
-  // 使用 onInit(instance) 方式保存 reactflow 实例，避免在 <ReactFlow> 渲染前就调用 useReactFlow() 导致
-  // "ReactFlowProvider as an ancestor" 错误（error 001）
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(toRfEdges(state.nodes, selectedEdgeId))
   const rfRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
 
-  // ⚠️ useNodesState / useEdgesState 只在挂载时读取 initial 值。
-  // 必须在外部 state（DesignerState.nodes / 连线信息）变化时手动同步给 ReactFlow 内部 nodes/edges，
-  // 否则左侧「点击新增节点」或 DnD 拖入节点虽然更新了父级 state，画布上却看不到。
+  // 同步节点
   useEffect(() => {
     setRfNodes(toRfNodes(state))
   }, [state, setRfNodes])
 
+  // 同步边（选中状态变化时重新渲染以更新高亮）
   useEffect(() => {
-    setRfEdges(toRfEdges(state.nodes))
-  }, [state.nodes, setRfEdges])
+    setRfEdges(toRfEdges(state.nodes, selectedEdgeId))
+  }, [state.nodes, selectedEdgeId, setRfEdges])
 
   const onInit = useCallback((instance: ReactFlowInstance<Node, Edge>) => {
     rfRef.current = instance
   }, [])
 
-  // 画布 DnD：接收左侧节点类型拖入
+  // DnD
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
@@ -89,38 +119,50 @@ export function CanvasView({ state, onStateChange, selectedNodeId, onSelectNode,
     if (!type || !onAddNodeAt) return
     const instance = rfRef.current as any
     if (!instance) return
-    // 兼容 v11(v12) 两个可能的 API 名称
     const toFlow = instance.screenToFlowCoordinate ?? instance.project
     if (typeof toFlow !== 'function') return
     const pos = toFlow.call(instance, { x: e.clientX, y: e.clientY })
     onAddNodeAt(type, { x: Math.max(0, (pos?.x ?? 0) - 80), y: Math.max(0, (pos?.y ?? 0) - 30) })
   }, [onAddNodeAt])
 
-  // 节点位置变化 → 同步回 state
+  // 节点位置/删除变化 → 同步回 state
   const handleNodesChange = useCallback((changes: any) => {
     onNodesChange(changes)
-    // 仅处理 position 变化
+    let updated = state.nodes
+    let needSync = false
     for (const change of changes) {
       if (change.type === 'position' && change.position) {
-        const idx = state.nodes.findIndex(n => n.id === change.id)
+        const idx = updated.findIndex(n => n.id === change.id)
         if (idx >= 0) {
-          const updated = [...state.nodes]
-          updated[idx] = { ...updated[idx], position: change.position }
-          onStateChange({ ...state, nodes: updated })
+          updated = updated.map(n => n.id === change.id ? { ...n, position: change.position } : n)
+          needSync = true
         }
+      } else if (change.type === 'remove') {
+        // 键盘/画布删除节点：同步删除 DesignerState 中的节点，并清理相关连线
+        const removedId = change.id
+        updated = updated
+          .filter(n => n.id !== removedId)
+          .map(n => ({
+            ...n,
+            next: n.next?.filter(t => t !== removedId),
+            nextTrue: n.nextTrue?.filter(t => t !== removedId),
+            nextFalse: n.nextFalse?.filter(t => t !== removedId),
+          }))
+        needSync = true
+        if (selectedNodeId === removedId) onSelectNode(null)
       }
     }
-  }, [state, onStateChange, onNodesChange])
+    if (needSync) onStateChange({ ...state, nodes: updated })
+  }, [state, onStateChange, onNodesChange, selectedNodeId, onSelectNode])
 
-  // 连线
+  // 连线创建
   const onConnect = useCallback((conn: Connection) => {
     setRfEdges(eds => addEdge({
       ...conn,
+      type: 'customEdge',
       markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
-      style: { strokeWidth: 1.5 },
     }, eds))
 
-    // 同步到 state：更新 source 节点的 next
     if (conn.source && conn.target) {
       const sourceNode = state.nodes.find(n => n.id === conn.source)
       if (!sourceNode) return
@@ -139,15 +181,33 @@ export function CanvasView({ state, onStateChange, selectedNodeId, onSelectNode,
     }
   }, [state, onStateChange, setRfEdges])
 
-  // 点击节点
+  // 点击节点 → 选中节点，取消选中边
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     onSelectNode(node.id)
-  }, [onSelectNode])
+    onSelectEdge(null)
+  }, [onSelectNode, onSelectEdge])
 
-  // 点击画布空白处
+  // 点击连线 → 选中连线，取消选中节点
+  const onEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+    onSelectEdge(edge.id)
+    onSelectNode(null)
+  }, [onSelectEdge, onSelectNode])
+
+  // 连线被键盘 Delete/Backspace 删除时触发
+  const onEdgesDelete = useCallback((edgesToDelete: Edge[]) => {
+    for (const edge of edgesToDelete) {
+      onDeleteEdge(edge.id)
+    }
+    if (selectedEdgeId && edgesToDelete.some(e => e.id === selectedEdgeId)) {
+      onSelectEdge(null)
+    }
+  }, [onDeleteEdge, onSelectEdge, selectedEdgeId])
+
+  // 点击画布空白处 → 取消所有选中
   const onPaneClick = useCallback(() => {
     onSelectNode(null)
-  }, [onSelectNode])
+    onSelectEdge(null)
+  }, [onSelectNode, onSelectEdge])
 
   return (
     <ReactFlow
@@ -157,12 +217,17 @@ export function CanvasView({ state, onStateChange, selectedNodeId, onSelectNode,
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onNodeClick={onNodeClick}
+      onEdgeClick={onEdgeClick}
+      onEdgesDelete={onEdgesDelete}
       onPaneClick={onPaneClick}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onInit={onInit}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       fitView
+      elementsSelectable
+      deleteKeyCode={['Backspace', 'Delete']}
       proOptions={{ hideAttribution: true }}
     >
       <Background gap={16} />

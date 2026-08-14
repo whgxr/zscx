@@ -9,51 +9,26 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
 import {
-  ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, Search, RefreshCw,
-  Eye, Send, Loader2, ArrowRightLeft, UserPlus, History,
+  ChevronLeft, ChevronRight, Search, RefreshCw, Eye, Send, History, CheckCircle2, XCircle, Clock,
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { STATUS_COLOR, STATUS_LABEL, buildDiff, parseSpecialActionOf } from '@/lib/approval-display'
 
-type NodeInstance = {
-  id: number
-  nodeId: number
-  assigneeId?: number | null
-  status: string
-  action?: string | null
-  comment?: string | null
-  processedAt?: string | null
-  countersignTotal?: number | null
-  countersignApprovedCount?: number | null
-  node: { id: number; nodeKey?: string | null; nodeName: string; nodeType: string }
-  assignee?: { id: number; realName?: string | null; username: string; avatar?: string | null } | null
-}
-
-type AnyRow = {
-  id: number
-  status: string
-  startedAt: string
-  completedAt?: string | null
-  triggerEvent?: string | null
-  approvalChain?: any
-  snapshotDataBefore?: any
-  snapshotDataAfter?: any
-  workflow: { id: number; name: string; version?: number | null; specialAction?: any }
-  table: { id: number; label: string; name: string }
-  record: { id: number; status?: string; updatedAt?: string }
-  initiator: { id: number; realName?: string | null; username: string; avatar?: string | null }
-  nodeInstances: NodeInstance[]
-}
+type AnyRow = any
 
 const ACTION_LABEL: Record<string, string> = {
   APPROVE: '通过', REJECT: '驳回', TRANSFER: '转签',
   ADD_COUNTERSIGN: '加签', TIMEOUT_PASS: '超时通过', TIMEOUT_REJECT: '超时驳回',
 }
 
-export default function TodoPage() {
+interface InstancesViewProps {
+  scope: string
+  title: string
+  subtitle: string
+}
+
+export function InstancesView({ scope, title, subtitle }: InstancesViewProps) {
   const [rows, setRows] = useState<AnyRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -61,83 +36,38 @@ export default function TodoPage() {
   const [loading, setLoading] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState<string>('ALL')
-  const [recordId, setRecordId] = useState('')
-
-  // ── 审批弹窗 ──
-  const [actionRow, setActionRow] = useState<AnyRow | null>(null)
-  const [actionType, setActionType] = useState<'APPROVE' | 'REJECT' | 'TRANSFER'>('APPROVE')
-  const [actionComment, setActionComment] = useState('')
-  const [actionLoading, setActionLoading] = useState(false)
-  // ── 时间线弹窗 ──
   const [timelineRow, setTimelineRow] = useState<AnyRow | null>(null)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
-      const q = new URLSearchParams({ scope: 'pending', page: String(page), pageSize: String(pageSize) })
+      const q = new URLSearchParams({ scope, page: String(page), pageSize: String(pageSize) })
       if (keyword) q.set('keyword', keyword)
       if (status && status !== 'ALL') q.set('status', status)
-      if (recordId) q.set('recordId', recordId)
       const res = await fetch(`/api/approval/v2/instances?${q.toString()}`)
       const json = await res.json()
       if (json.ok) { setRows(json.data ?? []); setTotal(json.total ?? 0) }
       else alert(json.error)
     } finally { setLoading(false) }
-  }
+  }, [scope, page, keyword, status, pageSize])
 
-  useEffect(() => { load() }, [page, status])
+  useEffect(() => { load() }, [load])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const currentNodeSummary = (row: AnyRow) => {
-    const open = row.nodeInstances.filter(n => ['PENDING'].includes(n.status))
+    const open = row.nodeInstances.filter((n: any) => ['PENDING'].includes(n.status))
     if (!open.length) return '—'
-    return open.map(n => `${n.node.nodeName}${n.assignee ? ' · ' + (n.assignee.realName || n.assignee.username) : ''}`).join('，')
+    return open.map((n: any) => `${n.node.nodeName}${n.assignee ? ' · ' + (n.assignee.realName || n.assignee.username) : ''}`).join('，')
   }
 
-  const myPendingNodes = (row: AnyRow) =>
-    row.nodeInstances.filter(n => ['PENDING'].includes(n.status))
-
-  const openAction = (row: AnyRow, type: 'APPROVE' | 'REJECT' | 'TRANSFER') => {
-    setActionRow(row)
-    setActionType(type)
-    setActionComment('')
-  }
-
-  const doAction = async () => {
-    if (!actionRow) return
-    const pending = myPendingNodes(actionRow)
-    if (!pending.length) return alert('没有可处理的节点')
-    setActionLoading(true)
-    try {
-      const r = await fetch('/api/approval/v2/node-actions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instanceId: actionRow.id,
-          nodeInstanceId: pending[0].id,
-          action: actionType,
-          comment: actionComment || undefined,
-        }),
-      })
-      const j = await r.json()
-      if (!j.ok) throw new Error(j.error ?? '操作失败')
-      setActionRow(null)
-      load()
-    } catch (e) {
-      alert((e as Error).message)
-    } finally { setActionLoading(false) }
-  }
-
-  // ── 解析 approvalChain 用于时间线 ──
   const getTimeline = (row: AnyRow) => {
     const chain = typeof row.approvalChain === 'string' ? JSON.parse(row.approvalChain) : row.approvalChain
     if (Array.isArray(chain)) return chain
-    // fallback: 用 nodeInstances 构建
     return row.nodeInstances
-      .filter(n => n.processedAt)
-      .sort((a, b) => new Date(a.processedAt!).getTime() - new Date(b.processedAt!).getTime())
-      .map(n => ({
+      .filter((n: any) => n.processedAt)
+      .sort((a: any, b: any) => new Date(a.processedAt!).getTime() - new Date(b.processedAt!).getTime())
+      .map((n: any) => ({
         nodeName: n.node.nodeName,
         action: n.action ?? n.status,
         comment: n.comment,
@@ -147,11 +77,11 @@ export default function TodoPage() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">我的待办审批</h1>
-          <p className="text-sm text-slate-500 mt-1">需要你处理的审批节点。共 {total} 条。</p>
+          <h2 className="text-lg font-bold text-slate-900">{title}</h2>
+          <p className="text-sm text-slate-500 mt-0.5">{subtitle}。共 {total} 条。</p>
         </div>
         <Button variant="outline" onClick={load}><RefreshCw className="w-4 h-4 mr-2" />刷新</Button>
       </div>
@@ -174,10 +104,6 @@ export default function TodoPage() {
             </SelectContent>
           </Select>
         </div>
-        <div className="w-40 space-y-1.5">
-          <label className="text-xs font-medium text-slate-600">记录编号</label>
-          <Input type="number" placeholder="record id" value={recordId} onChange={e => setRecordId(e.target.value)} />
-        </div>
         <Button onClick={load}><Search className="w-4 h-4 mr-2" />查询</Button>
       </CardContent></Card>
 
@@ -198,8 +124,8 @@ export default function TodoPage() {
           </TableHeader>
           <TableBody>
             {loading && <TableRow><TableCell colSpan={9} className="text-center text-slate-400 py-10">加载中…</TableCell></TableRow>}
-            {!loading && rows.length === 0 && <TableRow><TableCell colSpan={9} className="text-center text-slate-400 py-10">暂无待办，辛苦啦 🎉</TableCell></TableRow>}
-            {rows.map(r => (
+            {!loading && rows.length === 0 && <TableRow><TableCell colSpan={9} className="text-center text-slate-400 py-10">暂无记录</TableCell></TableRow>}
+            {rows.map((r: AnyRow) => (
               <TableRow key={r.id}>
                 <TableCell className="font-mono text-xs text-slate-600">#{r.id}</TableCell>
                 <TableCell>
@@ -231,7 +157,6 @@ export default function TodoPage() {
                           ))}
                       </div>
                     }
-                    // UPDATE
                     return <div className="text-xs text-slate-600 line-clamp-2 space-y-0.5">
                       {diffs.length === 0 ? <span className="text-slate-400">（无字段变更）</span> :
                         diffs.slice(0, 3).map((d, i) => (
@@ -249,7 +174,7 @@ export default function TodoPage() {
                 <TableCell><Badge variant="outline" className={STATUS_COLOR[r.status] ?? ''}>{STATUS_LABEL[r.status] ?? r.status}</Badge></TableCell>
                 <TableCell className="text-xs text-slate-500">{formatDateTime(r.startedAt)}</TableCell>
                 <TableCell className="text-right">
-                  <div className="inline-flex gap-1.5 justify-end flex-wrap">
+                  <div className="inline-flex gap-1.5 justify-end">
                     <Button size="sm" variant="ghost" onClick={() => setTimelineRow(r)} title="审批时间线">
                       <History className="w-4 h-4" />
                     </Button>
@@ -258,16 +183,6 @@ export default function TodoPage() {
                         <Eye className="w-4 h-4 mr-1" />记录
                       </Link>
                     </Button>
-                    {myPendingNodes(r).length > 0 && (
-                      <>
-                        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => openAction(r, 'APPROVE')}>
-                          <CheckCircle2 className="w-4 h-4 mr-1" />通过
-                        </Button>
-                        <Button size="sm" variant="outline" className="text-rose-600 border-rose-200 hover:bg-rose-50" onClick={() => openAction(r, 'REJECT')}>
-                          <XCircle className="w-4 h-4 mr-1" />驳回
-                        </Button>
-                      </>
-                    )}
                   </div>
                 </TableCell>
               </TableRow>
@@ -285,92 +200,6 @@ export default function TodoPage() {
         )}
       </Card>
 
-      {/* ── 内联审批弹窗 ── */}
-      <Dialog open={!!actionRow} onOpenChange={(v) => { if (!v) setActionRow(null) }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              {actionType === 'APPROVE' ? '✅ 审批通过' : actionType === 'REJECT' ? '❌ 驳回审批' : '🔄 转签'}
-              {actionRow && <span className="text-sm font-normal text-slate-500 ml-2">#{actionRow.id}</span>}
-            </DialogTitle>
-            <DialogDescription>
-              {actionRow && `${actionRow.workflow.name} · ${actionRow.initiator.realName || actionRow.initiator.username} 发起`}
-            </DialogDescription>
-          </DialogHeader>
-          {actionRow && (
-            <>
-              <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">表</span>
-                  <span>{actionRow.table.label} · record #{actionRow.record.id}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">当前节点</span>
-                  <span>{currentNodeSummary(actionRow)}</span>
-                </div>
-              </div>
-              {(() => {
-                const diffs = buildDiff(actionRow)
-                const sa = parseSpecialActionOf(actionRow)
-                const actionType = sa?.actionType ?? 'UPDATE'
-                return (
-                  <div className="rounded-lg border border-slate-200 p-3">
-                    <div className="text-sm font-medium text-slate-800 mb-2">
-                      {actionType === 'DELETE' ? '🗑️ 申请删除该记录' :
-                       actionType === 'REVIEW' ? '🔍 申请审查复核该记录' :
-                       actionType === 'CREATE' ? '➕ 申请新增记录' :
-                       '✏️ 申请修改内容'}
-                    </div>
-                    {actionType === 'DELETE' || actionType === 'REVIEW' ? (
-                      <div className="text-xs text-slate-500">该操作不修改字段数据。</div>
-                    ) : diffs.length === 0 ? (
-                      <div className="text-xs text-slate-400">（无字段变更）</div>
-                    ) : (
-                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                        {diffs.map((d, i) => (
-                          <div key={i} className="text-xs bg-white rounded px-2 py-1.5 border border-slate-100">
-                            <div className="text-slate-500">{d.label}</div>
-                            {actionType === 'CREATE' ? (
-                              <div className="text-emerald-700 mt-0.5">{d.newVal || '—'}</div>
-                            ) : (
-                              <div className="mt-0.5">
-                                <span className="text-slate-400 line-through">{d.oldVal || '（空）'}</span>
-                                <span className="text-slate-400 mx-1">→</span>
-                                <span className="text-emerald-700 font-medium">{d.newVal || '（清空）'}</span>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              <div className="space-y-2">
-                <Label>审批意见（可选）</Label>
-                <Textarea
-                  rows={3}
-                  placeholder={actionType === 'APPROVE' ? '如：同意，请继续推进。' : '请填写驳回原因…'}
-                  value={actionComment}
-                  onChange={e => setActionComment(e.target.value)}
-                />
-              </div>
-            </>
-          )}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setActionRow(null)}>取消</Button>
-            <Button
-              onClick={doAction}
-              disabled={actionLoading}
-              className={actionType === 'APPROVE' ? 'bg-emerald-600 hover:bg-emerald-700' : actionType === 'REJECT' ? 'bg-rose-600 hover:bg-rose-700' : ''}
-            >
-              {actionLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
-              确认{actionType === 'APPROVE' ? '通过' : actionType === 'REJECT' ? '驳回' : '转签'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* ── 审批时间线弹窗 ── */}
       <Dialog open={!!timelineRow} onOpenChange={(v) => { if (!v) setTimelineRow(null) }}>
         <DialogContent className="sm:max-w-lg">
@@ -382,7 +211,6 @@ export default function TodoPage() {
           </DialogHeader>
           {timelineRow && (
             <div className="space-y-0 max-h-96 overflow-y-auto">
-              {/* 发起节点 */}
               <div className="flex gap-3">
                 <div className="flex flex-col items-center">
                   <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 grid place-items-center">
@@ -395,7 +223,6 @@ export default function TodoPage() {
                   <div className="text-xs text-slate-500">{formatDateTime(timelineRow.startedAt)}</div>
                 </div>
               </div>
-              {/* 各审批节点 */}
               {getTimeline(timelineRow).map((step: any, i: number) => {
                 const isApprove = ['APPROVE', 'AUTO_PASSED', 'TIMEOUT_PASS'].includes(step.action)
                 const isReject = ['REJECT', 'AUTO_REJECTED', 'TIMEOUT_REJECT'].includes(step.action)
@@ -430,7 +257,6 @@ export default function TodoPage() {
                   </div>
                 )
               })}
-              {/* 当前状态 */}
               {['APPROVED'].includes(timelineRow.status) && (
                 <div className="flex gap-3">
                   <div className="w-8 h-8 rounded-full bg-emerald-500 text-white grid place-items-center shrink-0">

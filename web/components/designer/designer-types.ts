@@ -27,6 +27,8 @@ export type DesignerGlobals = {
   description?: string
   /** 流程启动条件（按条件选审批类型，数组=AND 表达式；或完整 {expressions,orExpressions}），不存引擎 jsonDefinition 而存 ApprovalWorkflow.triggerCondition */
   triggerCondition?: any
+  /** v1.2.3+ 专项动作审批配置：{ actionType, targetTableId, targetTableLabel, editableFields[], dataScope[], visibleRoleIds[] } */
+  specialAction?: any
 }
 
 // ─── 设计器完整状态 ───────────────────────────────────────────

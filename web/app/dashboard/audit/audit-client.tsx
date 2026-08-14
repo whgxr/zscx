@@ -102,6 +102,105 @@ const MODULE_OPTIONS = [
   'AUTH', 'PERMISSIONS', 'SETTINGS', 'TABLES', 'ROLES', 'USERS',
 ]
 
+// 模块英文码 → 中文名
+const MODULE_LABELS: Record<string, string> = {
+  DATA: '数据管理',
+  SURVEY: '调查',
+  LEVY: '征收',
+  RECORD: '记录',
+  APPROVAL: '审批',
+  APPROVAL_V2: '审批流程',
+  SYNC: '数据同步',
+  EXPORT: '数据导出',
+  EXPORT_DOC: '文档导出',
+  DOCUMENT: '文书',
+  PRINT: '打印',
+  DOCX: 'Word 文书',
+  AUTH: '登录认证',
+  PERMISSIONS: '权限管理',
+  PERMISSION: '权限',
+  SETTINGS: '系统设置',
+  TABLES: '数据表管理',
+  TABLE: '数据表',
+  ROLES: '角色管理',
+  USERS: '用户管理',
+  USER: '用户',
+  CATEGORY: '分类',
+  IMPORT: '数据导入',
+  SYSTEM: '系统',
+}
+function moduleLabel(m?: string | null) {
+  if (!m) return m
+  return MODULE_LABELS[m] ?? m
+}
+
+// 动作英文码 → 中文名
+const ACTION_LABELS: Record<string, string> = {
+  CREATE_RECORD: '新增记录',
+  UPDATE_RECORD: '修改记录',
+  DELETE_RECORD: '删除记录',
+  BATCH_DELETE_RECORDS: '批量删除记录',
+  DATA_BATCH_IMPORT: '批量导入',
+  'APPROVAL_V2.START': '发起审批',
+  'APPROVAL_V2.APPROVE': '审批通过',
+  'APPROVAL_V2.REJECT': '审批驳回',
+  'APPROVAL_V2.TRANSFER': '转签',
+  'APPROVAL_V2.COUNTERSIGN_ADD': '加签',
+  'APPROVAL_V2.CANCEL': '撤回',
+  'APPROVAL_V2.LEVY_SAVE_AUTO_TRIGGER': '征收保存自动触发审批',
+  'SYNC_REQUEST.SUBMIT': '提交同步',
+  'SYNC_REQUEST.APPROVE': '同步通过',
+  'SYNC_REQUEST.REJECT': '同步驳回',
+  'SYNC_REQUEST.APPLY': '同步生效',
+  SYNC_APPLY_DIRECT: '直接同步生效',
+  SYNC_REQUEST_CREATED: '同步请求已创建',
+  SYNC_APPLY_APPROVED: '同步已审批通过',
+  SYNC_APPLY_REJECTED: '同步被驳回',
+  DOC_PREVIEW: '预览文书',
+  DOC_DOWNLOAD: '下载文书',
+  DOC_PRINT: '打印文书',
+  EXPORT_EXCEL: '导出 Excel',
+  EXPORT_PDF: '导出 PDF',
+  LOGIN: '登录',
+  LOGOUT: '登出',
+  LOGIN_FAIL: '登录失败',
+  CHANGE_PASSWORD: '修改密码',
+  TOKEN_REFRESH: '刷新 Token',
+  UPDATE_PROFILE: '修改个人资料',
+  IMPORT_EXCEL: '导入 Excel',
+  UPDATE_PERMISSIONS: '更新权限',
+  CREATE_USER: '新增用户',
+  UPDATE_USER: '修改用户',
+  DELETE_USER: '删除用户',
+  CREATE_EXPORT_TEMPLATE: '新增导出模板',
+  UPDATE_EXPORT_TEMPLATE: '修改导出模板',
+  DELETE_EXPORT_TEMPLATE: '删除导出模板',
+  CREATE_TABLE: '新增数据表',
+  UPDATE_TABLE: '修改数据表',
+  DELETE_TABLE: '删除数据表',
+  CLONE_TABLE: '克隆数据表',
+  CREATE_FIELD: '新增字段',
+  UPDATE_FIELD: '修改字段',
+  DELETE_FIELD: '删除字段',
+  BATCH_CREATE_FIELDS: '批量新增字段',
+  BATCH_DELETE_FIELDS: '批量删除字段',
+  BATCH_UPDATE_FIELDS_DISPLAY: '批量更新字段显示',
+  REORDER_FIELDS: '字段排序',
+  'PERMISSION_TREE.UPDATE': '更新权限树',
+  DATABASE_RESTORE: '数据库恢复',
+  DATABASE_BACKUP: '数据库备份',
+  DATABASE_BACKUP_DOWNLOAD: '下载备份',
+  DATABASE_BACKUP_DELETE: '删除备份',
+  DATABASE_BACKUP_UPLOAD: '上传备份',
+  CREATE_CATEGORY: '新增分类',
+  UPDATE_CATEGORY: '修改分类',
+  DELETE_CATEGORY: '删除分类',
+}
+function actionLabel(a?: string | null) {
+  if (!a) return a
+  return ACTION_LABELS[a] ?? a
+}
+
 export function AuditCenterClient() {
   const [tab, setTab] = useState<TabKey>('data')
   const [rows, setRows] = useState<LogRow[]>([])
@@ -211,7 +310,7 @@ export function AuditCenterClient() {
                 <SelectTrigger className="h-9"><SelectValue placeholder="全部" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">全部模块</SelectItem>
-                  {MODULE_OPTIONS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                  {MODULE_OPTIONS.map(m => <SelectItem key={m} value={m}>{moduleLabel(m)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -221,7 +320,7 @@ export function AuditCenterClient() {
                 <SelectTrigger className="h-9"><SelectValue placeholder="全部" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">全部动作</SelectItem>
-                  {ACTION_OPTIONS[tab].map(a => <SelectItem key={a.value} value={a.value}>{a.label} ({a.value})</SelectItem>)}
+                  {ACTION_OPTIONS[tab].map(a => <SelectItem key={a.value} value={a.value}>{a.label} ({actionLabel(a.value)})</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -296,8 +395,8 @@ export function AuditCenterClient() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Eye className="w-5 h-5 text-indigo-600" />审计日志详情 · #{detailOpen?.id}
-              <Badge variant="outline" className="ml-2">{detailOpen?.module}</Badge>
-              <Badge className="ml-1">{detailOpen?.action}</Badge>
+              <Badge variant="outline" className="ml-2">{moduleLabel(detailOpen?.module)}</Badge>
+              <Badge className="ml-1">{actionLabel(detailOpen?.action)}</Badge>
             </DialogTitle>
           </DialogHeader>
           {detailOpen && <LogDetail row={detailOpen} />}
@@ -333,8 +432,8 @@ function LogTable({ rows, loading, onOpen }: { rows: LogRow[]; loading: boolean;
               <TableCell>{r.user ? <span><b>{r.user.realName}</b> <span className="text-slate-400 text-xs ml-1">@{r.user.username}</span></span> : <span className="text-slate-400">—</span>}</TableCell>
               <TableCell>
                 <div className="space-y-0.5">
-                  <Badge variant="outline">{r.module}</Badge>
-                  <div className="text-xs text-slate-600">{r.action}</div>
+                  <Badge variant="outline">{moduleLabel(r.module)}</Badge>
+                  <div className="text-xs text-slate-600">{actionLabel(r.action)}</div>
                 </div>
               </TableCell>
               <TableCell className="text-xs space-y-0.5">
@@ -385,8 +484,8 @@ function LogDetail({ row }: { row: LogRow }) {
         <Card><CardHeader className="py-2"><CardTitle className="text-sm">基础信息</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-xs">
             <div className="flex justify-between"><span className="text-slate-500">日志 ID</span><span>{row.id}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">模块</span><Badge variant="outline">{row.module}</Badge></div>
-            <div className="flex justify-between"><span className="text-slate-500">动作</span><span className="font-medium">{row.action}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">模块</span><Badge variant="outline">{moduleLabel(row.module)}</Badge></div>
+            <div className="flex justify-between"><span className="text-slate-500">动作</span><span className="font-medium">{actionLabel(row.action)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">时间</span><span>{formatDateTime(row.createdAt)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">操作人</span><span>{row.user ? `${row.user.realName} @${row.user.username}` : '—'}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">IP</span><span className="font-mono">{row.ipAddress ?? '—'}</span></div>
@@ -460,8 +559,8 @@ function LogDetail({ row }: { row: LogRow }) {
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <Badge variant="outline" className="text-xs">第 {step} 步</Badge>
-                            <Badge variant="outline" className="text-xs">{r.module}</Badge>
-                            <span className="text-xs font-medium">{r.action}</span>
+                            <Badge variant="outline" className="text-xs">{moduleLabel(r.module)}</Badge>
+                            <span className="text-xs font-medium">{actionLabel(r.action)}</span>
                             {isCur && <Badge className="bg-indigo-600 text-white text-xs">当前操作</Badge>}
                           </div>
                           <div className="text-xs text-slate-500">{formatDateTime(r.createdAt)}</div>

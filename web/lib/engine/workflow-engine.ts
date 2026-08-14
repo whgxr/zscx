@@ -545,7 +545,7 @@ export async function revokeInstance(
   ip?: string | null,
   ua?: string | null,
 ): Promise<boolean> {
-  return prisma.$transaction(async tx => {
+  return prisma.$transaction(async (tx: any) => {
     const inst = await tx.approvalInstance.findUnique({ where: { id: instanceId } })
     if (!inst) throw new Error('instance not found')
     if (inst.initiatorId !== revokerId) throw new Error('only initiator can revoke')
@@ -580,7 +580,7 @@ export async function revokeInstance(
 
 export async function scanTimeout(limit = 200): Promise<{ id: number; action: string }[]> {
   const now = new Date()
-  return prisma.$transaction(async tx => {
+  return prisma.$transaction(async (tx: any) => {
     const pendings = await tx.approvalNodeInstance.findMany({
       where: { status: 'PENDING' as any, dueAt: { lte: now } },
       take: limit,

@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
         where: { assigneeId: user.id, status: 'PENDING' },
         select: { instanceId: true },
       })
-      where.id = { in: nodeInstances.map(ni => ni.instanceId) }
+      where.id = { in: nodeInstances.map((ni: { instanceId: number }) => ni.instanceId) }
     }
 
     const [instances, total] = await Promise.all([

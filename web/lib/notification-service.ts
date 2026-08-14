@@ -25,10 +25,11 @@ export class NotificationService {
         content: options.content,
         targetType: options.targetType,
         targetRoleId: options.targetRoleId,
-        targetUserIds: options.targetUserIds ? JSON.stringify(options.targetUserIds) : undefined,
+        // targetUserIds / linkParams 为 Json 字段，直接传数组/对象，由 Prisma 序列化，避免双重编码
+        targetUserIds: options.targetUserIds,
         priority: options.priority || 'NORMAL',
         linkUrl: options.linkUrl,
-        linkParams: options.linkParams ? JSON.stringify(options.linkParams) : undefined,
+        linkParams: options.linkParams,
         createdBy: options.createdBy,
         expiredAt: options.expiredAt
       }
@@ -105,7 +106,13 @@ export class NotificationService {
 
       case 'USER':
         if (notification.targetUserIds) {
-          const userIds = JSON.parse(JSON.stringify(notification.targetUserIds)) as number[]
+          const raw = notification.targetUserIds as any
+          // 兼容数组与字符串两种存储形态（历史数据可能被双重 encode 为字符串）
+          const userIds: number[] = Array.isArray(raw)
+            ? raw
+            : typeof raw === 'string'
+              ? JSON.parse(raw)
+              : []
           return prisma.user.findMany({
             where: { id: { in: userIds }, status: 'ACTIVE' },
             select: { id: true }
@@ -130,8 +137,19 @@ export class NotificationService {
     const where: any = {
       OR: [
         { targetType: 'ALL' },
+        // USER 类型通知无法用 Json contains 在 MySQL 上可靠过滤，先全量取出，再在后处理中按 targetUserIds 判断是否发给当前用户
+        { targetType: 'USER' },
       ],
-      expiredAt: { not: { lt: new Date() } }
+      // expiredAt 为 NULL 表示永久有效，必须显式包含；否则 Prisma 的 NOT(col < now)
+      // 会因为 SQL 三值逻辑把 NULL 行过滤掉，导致所有未设置过期时间的通知都收不到
+      AND: [
+        {
+          OR: [
+            { expiredAt: null },
+            { expiredAt: { gte: new Date() } },
+          ],
+        },
+      ],
     }
 
     if (options?.type) {
@@ -161,7 +179,13 @@ export class NotificationService {
     const filtered = notifications.filter((n: any) => {
       if (n.targetType !== 'USER') return true
       try {
-        const ids = Array.isArray(n.targetUserIds) ? n.targetUserIds : []
+        const raw = n.targetUserIds as any
+        // 兼容数组与字符串两种存储形态（历史数据可能被双重 encode 为字符串）
+        const ids: number[] = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string'
+            ? JSON.parse(raw)
+            : []
         return ids.includes(userId)
       } catch {
         return false
@@ -176,12 +200,15 @@ export class NotificationService {
 
     const readMap = new Map(readRecords.map(r => [r.notificationId, r]))
 
-    return filtered.map(n => ({
-      ...n,
-      isRead: !!readMap.get(n.id)?.readAt,
-      isDeleted: !!readMap.get(n.id)?.isDeleted,
-      readAt: readMap.get(n.id)?.readAt
-    }))
+    return filtered
+      .map(n => ({
+        ...n,
+        isRead: !!readMap.get(n.id)?.readAt,
+        isDeleted: !!readMap.get(n.id)?.isDeleted,
+        readAt: readMap.get(n.id)?.readAt
+      }))
+      // 过滤掉用户已删除的通知，避免删除后刷新又重新出现
+      .filter(n => !n.isDeleted)
   }
 
   async getUnreadCount(userId: number): Promise<number> {
@@ -210,8 +237,8 @@ export class NotificationService {
   }
 
   async deleteNotification(notificationId: number, userId: number) {
-    await prisma.notificationRead.update({
-      where: { notificationId_userId: { notificationId, userId } },
+    await prisma.notificationRead.updateMany({
+      where: { notificationId, userId },
       data: { isDeleted: true }
     })
   }

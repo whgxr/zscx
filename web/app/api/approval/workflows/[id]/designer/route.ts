@@ -296,7 +296,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       jsonDef = canvasToEngine(canvas)
     }
 
-    return NextResponse.json({ ok: true, data: { workflow: wf, canvasData: canvas, jsonDefinition: jsonDef, table: wf.table } })
+    return NextResponse.json({ ok: true, data: { workflow: wf, workflowName: wf.name, canvasData: canvas, jsonDefinition: jsonDef, table: wf.table } })
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e.message ?? '获取失败' }, { status: 500 })
   }
@@ -337,6 +337,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
           globals.triggerCondition === null || globals.triggerCondition === undefined
             ? Prisma.JsonNull
             : (globals.triggerCondition as any),
+        // 专项动作审批配置
+        specialAction:
+          globals.specialAction === null || globals.specialAction === undefined
+            ? Prisma.JsonNull
+            : (globals.specialAction as any),
       }
     })
     return NextResponse.json({ ok: true, data: { status: updated.status, version: updated.version } })
@@ -389,7 +394,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // 同步 ApprovalNode：先删后建（精简 Schema：仅保留 nodeKey/nodeType/nodeName）
     const ordered = [...canvas.nodes].sort((a, b) => (a.position.x - b.position.x) + (a.position.y - b.position.y) * 0.0001)
 
-    await prisma.$transaction(async tx => {
+    await prisma.$transaction(async (tx: any) => {
       await tx.approvalNode.deleteMany({ where: { workflowId: id } })
       if (ordered.length) {
         const rows = ordered.map((cn) => {
@@ -414,6 +419,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             globals.triggerCondition === null || globals.triggerCondition === undefined
               ? Prisma.JsonNull
               : (globals.triggerCondition as any),
+          specialAction:
+            globals.specialAction === null || globals.specialAction === undefined
+              ? Prisma.JsonNull
+              : (globals.specialAction as any),
           version: publishedVersion,
           status: setActive as any,
           publishedAt: new Date(),

@@ -29,6 +29,12 @@ export function Header({ user }: HeaderProps) {
   const router = useRouter()
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
+  const formatDate = () => {
+    const now = new Date()
+    const week = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()]
+    return `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${week}`
+  }
+
   useEffect(() => {
     const checkSession = async () => {
       try {
@@ -68,11 +74,15 @@ export function Header({ user }: HeaderProps) {
   }
 
   return (
-    <header className="h-16 bg-white border-b flex items-center justify-between px-6">
-      <div>
-        <h2 className="text-lg font-semibold text-gray-800">
-          欢迎回来，{user.realName || user.username}
-        </h2>
+    <header className="h-16 shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm">
+      <div className="flex items-center gap-3">
+        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        <div>
+          <h2 className="text-base font-semibold text-gray-800 leading-tight">
+            欢迎回来，{user.realName || user.username}
+          </h2>
+          <p className="text-xs text-gray-400">{formatDate()}</p>
+        </div>
       </div>
       <div className="flex items-center gap-4">
         <NotificationCenter onNavigate={(url) => router.push(url)} />
