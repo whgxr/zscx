@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { generateId } from '@/lib/utils'
 import { AttachmentType } from '@prisma/client'
+import { buildObjectKey, ensureBucket, saveObject } from '@/lib/storage'
 
 export const runtime = 'nodejs'
 
@@ -106,19 +106,12 @@ export async function POST(
       return NextResponse.json({ message: '文件内容与扩展名不符' }, { status: 400 })
     }
 
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'record-attachments')
-    const dateDir = new Date().toISOString().slice(0, 7).replace('-', '/')
-    const fullDir = path.join(uploadDir, dateDir)
-
-    try {
-      await mkdir(fullDir, { recursive: true })
-    } catch (e) {}
+    await ensureBucket()
 
     const fileName = `${generateId()}${ext}`
-    const filePath = path.join(fullDir, fileName)
-    const relativePath = `/uploads/record-attachments/${dateDir}/${fileName}`.replace(/\\/g, '/')
+    const objectKey = buildObjectKey('record-attachments', fileName)
 
-    await writeFile(filePath, buffer)
+    await saveObject(objectKey, buffer, file.type)
 
     const attachmentType = type === 'image' ? AttachmentType.IMAGE : getAttachmentType(file.type, ext)
 
@@ -130,7 +123,7 @@ export async function POST(
         displayName: displayName.trim(),
         originalName: file.name,
         fileName,
-        filePath: relativePath,
+        filePath: objectKey,
         fileSize: file.size,
         mimeType: file.type,
         uploadedBy: user.id,

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
-import { renderDocxToBuffer, type DocxPageSettings } from '@/lib/docx-renderer'
+import { renderDocxToBuffer, renderRichDocxToBuffer, type DocxPageSettings } from '@/lib/docx-renderer'
+import { renderDocxTemplate } from '@/lib/office-renderer'
 import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -47,8 +48,7 @@ export async function POST(req: NextRequest, { params }: { params: { tableName: 
     if (!tpl) return NextResponse.json({ ok: false, error: '模板不存在' }, { status: 404 })
     if (tpl.type !== 'WORD') return NextResponse.json({ ok: false, error: '该模板不是 WORD 类型' }, { status: 400 })
 
-    const docCfg: any = tpl.documentConfig ?? { blocks: [] }
-    const blocks = (docCfg.blocks ?? []) as any[]
+    const docCfg: any = tpl.documentConfig ?? {}
     const page: DocxPageSettings = {
       paperSize: (tpl.paperSize as any) ?? docCfg.paper?.paperSize,
       orientation: (tpl.orientation as any) ?? docCfg.paper?.orientation,
@@ -57,7 +57,18 @@ export async function POST(req: NextRequest, { params }: { params: { tableName: 
     const recordData = deepParse(record.data) ?? {}
     const related = body.related ?? null
 
-    const buf = await renderDocxToBuffer(blocks, { record: recordData, related, title: tpl.name, page })
+    let buf
+    if (tpl.documentFileKey) {
+      // 文件化模板（ONLYOFFICE）：真实 docx 直接替换 {{field}}
+      buf = await renderDocxTemplate(tpl.documentFileKey, recordData)
+    } else if (Array.isArray(docCfg.content?.paragraphs)) {
+      // 富文本所见即所得模式（documentConfig.content）
+      buf = await renderRichDocxToBuffer(docCfg.content, { record: recordData, related, title: tpl.name, page })
+    } else {
+      // 兼容旧 blocks 模式
+      const blocks = (docCfg.blocks ?? []) as any[]
+      buf = await renderDocxToBuffer(blocks, { record: recordData, related, title: tpl.name, page })
+    }
     const ms = Date.now() - t0
     const filename = `${tpl.name}_R${recordId}_${new Date().toISOString().slice(0,10).replace(/-/g,'')}`
 

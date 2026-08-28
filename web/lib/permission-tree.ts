@@ -29,6 +29,31 @@ export const TABLE_OPS = [
   { key: 'SYNC', label: '同步调查↔征收' },
 ] as const
 
+/**
+ * 用户级权限树操作（映射到 TablePermission 布尔字段，1:1）
+ *   用于 /dashboard/permissions/[userId] 与 H5 用户权限页的树形勾选
+ */
+export const USER_TABLE_OPS = [
+  { key: 'VIEW', label: '查看记录', field: 'canView' },
+  { key: 'CREATE', label: '新增记录', field: 'canCreate' },
+  { key: 'UPDATE', label: '编辑记录', field: 'canEdit' },
+  { key: 'DELETE', label: '删除记录', field: 'canDelete' },
+  { key: 'EXPORT_EXCEL', label: '导出 Excel', field: 'canExportExcel' },
+  { key: 'EXPORT_PDF', label: '导出 PDF', field: 'canExportPdf' },
+  { key: 'IMPORT', label: '导入数据', field: 'canImport' },
+  { key: 'PRINT', label: '打印/文书', field: 'canPrint' },
+] as const
+
+/** 操作 key → TablePermission 字段名 */
+export const USER_OP_TO_FIELD: Record<string, string> = Object.fromEntries(
+  USER_TABLE_OPS.map(o => [o.key, o.field])
+)
+
+/** TablePermission 字段名 → 操作 key */
+export const USER_FIELD_TO_OP: Record<string, string> = Object.fromEntries(
+  USER_TABLE_OPS.map(o => [o.field, o.key])
+)
+
 export const ADMIN_OPS = [
   { key: 'tables', label: '数据表管理' },
   { key: 'categories', label: '分类管理' },
@@ -56,7 +81,9 @@ export interface PermissionTreeNode {
   children?: PermissionTreeNode[]
 }
 
-export async function buildPermissionTree(): Promise<PermissionTreeNode[]> {
+export async function buildPermissionTree(
+  tableOps: readonly { key: string; label: string }[] = TABLE_OPS
+): Promise<PermissionTreeNode[]> {
   // 顶级分类 + 其下所有表（按 module 划分）
   const allCats = await prisma.tableCategory.findMany({
     orderBy: [{ module: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
@@ -96,7 +123,7 @@ export async function buildPermissionTree(): Promise<PermissionTreeNode[]> {
             moduleKey: mod.key, categoryId: cat.id, tableId: tbl.id,
             children: [],
           }
-          tblNode.children = TABLE_OPS.map(op => ({
+          tblNode.children = tableOps.map(op => ({
             id: `tableOp:${tbl.id}:${op.key}`,
             type: 'tableOp' as const, label: op.label,
             moduleKey: mod.key, categoryId: cat.id, tableId: tbl.id,

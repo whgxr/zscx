@@ -52,6 +52,9 @@ export const ROUTE_TITLES: Record<string, string> = {
   '/dashboard/audit': '审计日志中心',
   '/dashboard/error-logs': '错误日志',
   '/dashboard/profile': '个人资料',
+  '/dashboard/document-templates': '文档模板',
+  '/dashboard/word-templates': 'Word 模板',
+  '/dashboard/roles': '角色管理',
 }
 
 /** 根据 pathname + 查询参数解析标签唯一 key */
@@ -134,6 +137,10 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
 
   const prepareLabel = useCallback((key: string, label: string) => {
     labelsRef.current[key] = label
+    // 标签已存在时同步刷新标题（供页面自身在挂载时注册动态标题）
+    setTabs(prev =>
+      prev.map(t => (t.key === key && t.label !== label ? { ...t, label } : t))
+    )
   }, [])
 
   const openOrFocus = useCallback(
@@ -148,7 +155,9 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
         const exists = prev.some(t => t.key === key)
         if (exists) {
           return prev.map(t =>
-            t.key === key ? { ...t, element, href } : t
+            t.key === key
+              ? { ...t, element, href, label: label || t.label }
+              : t
           )
         }
         return [
@@ -167,9 +176,18 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
-  const focusTab = useCallback((key: string) => {
-    setActiveKey(key)
-  }, [])
+  const focusTab = useCallback(
+    (key: string) => {
+      const t = tabsRef.current.find(item => item.key === key)
+      if (!t) return
+      setActiveKey(key)
+      // 同步地址栏与标签状态，保证内容/刷新/侧边栏高亮与标签一致
+      if (t.href && t.href !== window.location.pathname + window.location.search) {
+        router.push(t.href)
+      }
+    },
+    [router]
+  )
 
   const closeTab = useCallback(
     (key: string) => {

@@ -19,7 +19,7 @@ import {
   Save, Upload, Eye, Bold, Italic, Underline,
   AlignLeft, AlignCenter, AlignRight, Palette, Type, Plus, Trash2,
   Database, Merge, Unlink, Grid3x3, Minus, Calculator, Settings, X, Search,
-  Loader2, Undo,
+  Loader2, Undo, Download,
 } from 'lucide-react'
 import * as ExcelJS from 'exceljs'
 import { CellData, PageSetup, FIELD_PATTERN, getColLabel, emptyCell } from '@/types/cell-data'
@@ -228,6 +228,7 @@ export default function FormExcelDesigner({
   const [formulaInput, setFormulaInput] = useState('')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const layoutFileInputRef = useRef<HTMLInputElement>(null)
   const isSelecting = useRef(false)
   const resizingCol = useRef<number | null>(null)
   const resizeStartPos = useRef<number>(0)
@@ -827,21 +828,70 @@ export default function FormExcelDesigner({
     }
   }
 
+  /* ---- 导出 / 导入布局 ---- */
+
+  // 序列化当前完整配置，供导出与保存使用
+  const buildConfig = (): FormExcelConfig => ({
+    grid,
+    rowHeights,
+    colWidths,
+    pageSetup,
+    subTables,
+    defaultFontSize: 13,
+    defaultRowHeight: 24,
+  })
+
+  const handleExportLayout = () => {
+    const data = JSON.stringify({ version: 1, ...buildConfig() }, null, 2)
+    const blob = new Blob([data], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = '表单布局配置.json'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImportLayoutFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result))
+        const cfg = parsed && Array.isArray(parsed.grid) ? parsed : parsed?.config
+        if (!cfg || !Array.isArray(cfg.grid) || !Array.isArray(cfg.rowHeights) || !Array.isArray(cfg.colWidths)) {
+          alert('导入失败：文件格式不正确')
+          return
+        }
+        // 补全单元格默认字段，并通过 mergeHidden 归一化合并区域
+        const newGrid = cfg.grid.map((r: any[]) =>
+          (r || []).map((c: any) => ({ ...emptyCell(), ...c }))
+        )
+        setGrid(normalizedGrid(newGrid))
+        setRowHeights(cfg.rowHeights)
+        setColWidths(cfg.colWidths)
+        if (cfg.pageSetup) setPageSetup(cfg.pageSetup)
+        if (Array.isArray(cfg.subTables)) setSubTables(cfg.subTables)
+        setActiveCell(null)
+        setSelection(null)
+        alert('布局导入成功')
+      } catch (err) {
+        alert('导入失败：文件解析出错')
+      }
+    }
+    reader.readAsText(file)
+  }
+
   /* ---- 保存 ---- */
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      const config: FormExcelConfig = {
-        grid,
-        rowHeights,
-        colWidths,
-        pageSetup,
-        subTables,
-        defaultFontSize: 13,
-        defaultRowHeight: 24,
-      }
-      await onSave(config)
+      await onSave(buildConfig())
     } catch (err) {
       alert('保存失败')
     } finally {
@@ -939,6 +989,21 @@ export default function FormExcelDesigner({
           )}
         </div>
         <div className="flex items-center gap-2">
+          <input
+            ref={layoutFileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleImportLayoutFile}
+          />
+          <Button variant="outline" size="sm" onClick={handleExportLayout} title="将当前布局导出为可再次导入的配置文件">
+            <Download className="w-4 h-4 mr-1" />
+            导出布局
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => layoutFileInputRef.current?.click()} title="从配置文件载入布局">
+            <Upload className="w-4 h-4 mr-1" />
+            导入布局
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
             <Upload className="w-4 h-4 mr-1" />
             导入Excel样表

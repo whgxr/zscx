@@ -69,8 +69,12 @@ export async function GET(req: NextRequest) {
       !!user.role?.canManageApproval ||
       !!user.role?.canManageTables
 
+    // status 是后端实例状态枚举 InstanceStatus（PENDING/PROCESSING/APPROVED/REJECTED/CANCELLED/RESTARTED）。
+    // 前端 filter 只会传合法枚举值；但 URL 可能被手动拼错，或旧前端传过 "pending" "all" 之类的非法值，
+    // 这里只接受合法枚举值，非法值直接忽略，避免 prisma 抛 "Invalid value for argument `status`. Expected InstanceStatus." 500。
+    const VALID_STATUS = new Set(['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED', 'CANCELLED', 'RESTARTED'])
     const where: any = {}
-    if (status) where.status = status
+    if (status && VALID_STATUS.has(status)) where.status = status
     if (tableId) where.tableId = tableId
     if (recordId) where.recordId = recordId
 
@@ -119,7 +123,8 @@ export async function GET(req: NextRequest) {
           nodeInstances: {
             orderBy: [{ id: 'asc' }],
             include: {
-              node: { select: { id: true, nodeKey: true, nodeName: true, nodeType: true } },
+              // node 使用单独查询 + LEFT JOIN 语义手动补全，避免 Prisma 对必填关系抛 "got null instead" 错误
+              // （流程节点被重新设计/删除后，历史 ApprovalNodeInstance 的 nodeId 会变成孤儿）
               assignee: { select: { id: true, realName: true, username: true, avatar: true } },
               transferredUser: { select: { id: true, realName: true, username: true } },
               transferredFromUser: { select: { id: true, realName: true, username: true } },
@@ -132,6 +137,30 @@ export async function GET(req: NextRequest) {
       }),
       prisma.approvalInstance.count({ where })
     ])
+
+    // ---- 防御性补全：nodeInstances[].node（LEFT JOIN 语义，容忍节点已被删除） ----
+    const nodeIds = [...new Set(
+      rows.flatMap(r => (r.nodeInstances ?? []).map((ni: any) => ni.nodeId).filter(Boolean))
+    )] as number[]
+    const nodeMap = new Map<number, any>()
+    if (nodeIds.length > 0) {
+      const nodes = await prisma.approvalNode.findMany({
+        where: { id: { in: nodeIds } },
+        select: { id: true, nodeKey: true, nodeName: true, nodeType: true }
+      })
+      nodes.forEach(n => nodeMap.set(n.id, n))
+    }
+    for (const row of rows as any[]) {
+      for (const ni of row.nodeInstances ?? []) {
+        const real = nodeMap.get(ni.nodeId)
+        ni.node = real ?? {
+          id: ni.nodeId,
+          nodeKey: 'DELETED',
+          nodeName: '[节点已删除]',
+          nodeType: 'UNKNOWN'
+        }
+      }
+    }
 
     let data = rows as any[]
     if (keyword) {

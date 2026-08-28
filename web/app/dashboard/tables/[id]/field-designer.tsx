@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTabs, resolveKeyFromHref } from '@/components/layout/tabs-context'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import FormExcelDesigner from '@/components/form-excel-designer'
@@ -115,6 +116,12 @@ interface ImportField {
 
 export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
   const router = useRouter()
+  const { prepareLabel } = useTabs()
+  // 注册标签标题：字段设计：表名
+  useEffect(() => {
+    prepareLabel(resolveKeyFromHref(window.location.href), `字段设计：${table.label}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [fields, setFields] = useState<TableField[]>(table.fields)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -314,6 +321,8 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
     forceShowInLevyList: false,
     editScope: 'ALWAYS',
     options: [] as { label: string; value: string }[],
+    requireImageUpload: false,
+    newRecordEditableFields: [] as string[],
   })
   const [showOptions, setShowOptions] = useState(false)
   const [newOptionLabel, setNewOptionLabel] = useState('')
@@ -344,6 +353,8 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       forceShowInLevyList: false,
       editScope: 'ALWAYS',
       options: [],
+      requireImageUpload: false,
+      newRecordEditableFields: [],
     })
     setDetailConfig({})
     setShowOptions(false)
@@ -416,6 +427,10 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
       forceShowInLevyList: field.forceShowInLevyList,
       editScope: field.editScope || 'ALWAYS',
       options: fieldOptions,
+      requireImageUpload: !!(field.config as any)?.requireImageUpload,
+      newRecordEditableFields: Array.isArray((field.config as any)?.newRecordEditableFields)
+        ? (field.config as any).newRecordEditableFields
+        : [],
     })
     setShowOptions(hasOptions(field.type) && fieldOptions.length > 0)
     setNewOptionLabel('')
@@ -498,6 +513,18 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
           minRows: detailConfig.minRows ?? 0,
           maxRows: detailConfig.maxRows ?? 100,
         }
+      } else if (formData.type === 'UPLOAD_IMAGE') {
+        // v1.2.2+ 门禁图片：要求先上传图片才能录入（与现有附件分离，存于 data[字段名]）
+        const existingConfig = (editingField?.config as any) || {}
+        const cfg: any = { ...existingConfig }
+        if (formData.requireImageUpload) {
+          cfg.requireImageUpload = true
+          cfg.newRecordEditableFields = formData.newRecordEditableFields || []
+        } else {
+          cfg.requireImageUpload = false
+          cfg.newRecordEditableFields = []
+        }
+        submitData.config = cfg
       } else {
         submitData.config = null
       }
@@ -1389,6 +1416,51 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                                 onCheckedChange={(v) => setFormData({ ...formData, required: v })}
                               />
                             </div>
+                            {formData.type === 'UPLOAD_IMAGE' && (
+                              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <p className="font-medium text-sm text-amber-700">要求先上传图片才能录入</p>
+                                    <p className="text-xs text-amber-600">录入员必须先上传此图片，才能编辑填写其他数据；上传后自动通知有录入权限的人员。</p>
+                                  </div>
+                                  <Switch
+                                    checked={formData.requireImageUpload}
+                                    onCheckedChange={(v) => setFormData({ ...formData, requireImageUpload: v })}
+                                  />
+                                </div>
+                                {formData.requireImageUpload && (
+                                  <div className="border-t border-amber-200 pt-2">
+                                    <p className="font-medium text-sm text-amber-700 mb-1">新增记录时可填写的指定字段</p>
+                                    <p className="text-xs text-amber-600 mb-2">新建记录时，除门禁照片上传外，仅以下勾选的字段允许填写，其余字段锁定。</p>
+                                    <div className="max-h-40 overflow-y-auto space-y-1 rounded-md border border-amber-200 bg-white p-2">
+                                      {fields
+                                        .filter((f) => f.name !== editingField?.name && !f.isSystem)
+                                        .filter((f) => !['UPLOAD_IMAGE', 'UPLOAD_FILE', 'DETAIL_TABLE', 'RELATION', 'LEVY_RELATION'].includes(f.type))
+                                        .map((f) => {
+                                          const checked = formData.newRecordEditableFields.includes(f.name)
+                                          return (
+                                            <div key={f.id} className="flex items-center gap-2">
+                                              <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={(e) => {
+                                                  const next = checked
+                                                    ? formData.newRecordEditableFields.filter((n) => n !== f.name)
+                                                    : [...formData.newRecordEditableFields, f.name]
+                                                  setFormData({ ...formData, newRecordEditableFields: next })
+                                                }}
+                                                className="h-4 w-4 accent-amber-600"
+                                              />
+                                              <span className="text-sm text-gray-700">{f.label}</span>
+                                              <span className="text-xs text-gray-400 font-mono">{f.name}</span>
+                                            </div>
+                                          )
+                                        })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div className="flex items-center justify-between">
                               <div>
                                 <p className="font-medium text-sm">列表显示</p>
@@ -1633,6 +1705,9 @@ export function FieldDesigner({ table, userRole }: FieldDesignerProps) {
                                     <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">
                                       {field.editScope === 'SURVEY_ONLY' ? '仅调查可填' : field.editScope === 'LEVY_ONLY' ? '仅征收可填' : '调查/征收可填'}
                                     </Badge>
+                                  )}
+                                  {(field.config as any)?.requireImageUpload && (
+                                    <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800 border-amber-200">需先传图</Badge>
                                   )}
                                 </div>
                               </TableCell>

@@ -59,7 +59,7 @@ export async function matchWorkflowForTrigger(
   const allCandidates = await tx.approvalWorkflow.findMany({
     where: {
       status: { in: ['ACTIVE', 'PUBLISHED'] },
-      AND: [{ NOT: { jsonDefinition: null } }],
+      jsonDefinition: { not: null },
     },
     select: {
       id: true, version: true, isDefault: true,
@@ -128,7 +128,7 @@ export async function matchWorkflowForTrigger(
     where: {
       status: { in: ['ACTIVE', 'PUBLISHED'] },
       isDefault: true,
-      AND: [{ NOT: { jsonDefinition: null } }],
+      jsonDefinition: { not: null },
     },
     orderBy: { version: 'desc' },
     take: 1,
@@ -242,7 +242,7 @@ export async function startInstance(params: {
         targetType: 'USER',
         targetUserIds: res.ccUserIds,
         priority: 'LOW',
-        linkUrl: `/dashboard/approval/${res.instanceId}`,
+        linkUrl: `/approval?tab=cc`,
       })
     }
   } catch (_) { /* notification failure should not block primary flow */ }
@@ -296,13 +296,20 @@ export async function executeNodeAction(params: {
   ip?: string | null
   ua?: string | null
 }): Promise<{ ok: boolean; error?: string; message?: string; status?: number; data?: any }> {
-  // 校验待办
+  // 校验待办（分离 node 查询，容忍节点被删除/流程重新设计导致的孤儿 nodeId）
   const ni = await prisma.approvalNodeInstance.findUnique({
     where: { id: params.nodeInstanceId },
-    include: { instance: true, node: true },
-  })
+    include: { instance: true },
+  }) as any
   if (!ni) return { ok: false, error: '待办不存在', status: 404 }
   if (ni.status !== 'PENDING') return { ok: false, error: '待办状态非 PENDING', status: 409 }
+  ni.node = await prisma.approvalNode.findUnique({
+    where: { id: ni.nodeId },
+    select: { id: true, nodeKey: true, nodeName: true, nodeType: true, workflowId: true },
+  })
+  if (!ni.node) {
+    return { ok: false, error: '审批节点信息缺失（流程可能已被重新设计），请发起新的审批', status: 409 }
+  }
   // 授权校验：当前用户必须是该节点的 assignee（防止任意用户越权处理他人待办）
   if (ni.assigneeId !== null && ni.assigneeId !== params.assigneeId) {
     return { ok: false, error: '您不是该待办的审批人，无权操作', status: 403 }
@@ -482,7 +489,7 @@ export async function executeNodeAction(params: {
         targetType: 'USER',
         targetUserIds: res.ccTargets,
         priority: 'LOW',
-        linkUrl: `/dashboard/approval/${ni.instanceId}`,
+        linkUrl: `/approval?tab=cc`,
       })
     }
   } catch (_) { /* notification failure should not block */ }

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { ExcelTemplateDesigner } from './excel-designer'
+import OfficeTemplateEditor from '@/components/office/office-template-editor'
 
 export default async function TemplateDetailPage({
   params,
@@ -9,36 +9,22 @@ export default async function TemplateDetailPage({
   params: { id: string }
 }) {
   const user = await getCurrentUser()
+  if (!user) redirect('/login')
 
-  if (!user) {
-    redirect('/login')
-  }
-
-  if (user.role?.name !== 'ADMIN' && user.role?.name !== 'MANAGER') {
-    redirect('/dashboard')
-  }
-
-  const template = await prisma.exportTemplate.findUnique({
-    where: { id: parseInt(params.id) },
-    include: {
-      table: {
-        include: {
-          fields: {
-            orderBy: { sortOrder: 'asc' },
-          },
-        },
-      },
-    },
+  const id = parseInt(params.id)
+  const tpl = await prisma.exportTemplate.findUnique({
+    where: { id },
+    include: { table: { include: { fields: { orderBy: { id: 'asc' } } } } },
   })
+  if (!tpl) redirect('/dashboard/export-templates')
 
-  if (!template) {
-    redirect('/dashboard/export-templates')
+  // WORD 类型走专用 Word 设计器（同为 ONLYOFFICE，但按 type 区分入口）
+  if (tpl.type === 'WORD') {
+    redirect(`/dashboard/word-templates/${tpl.id}`)
   }
 
-  // v1.2.2+: WORD 类型模板走专用 Word 设计器
-  if (template.type === 'WORD') {
-    redirect(`/dashboard/word-templates/${template.id}`)
-  }
+  const isAdmin = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER'
+  if (!isAdmin && tpl.createdBy !== user.id) redirect('/dashboard/export-templates')
 
-  return <ExcelTemplateDesigner template={template as any} />
+  return <OfficeTemplateEditor templateId={tpl.id} kind="cell" title={tpl.name} />
 }

@@ -8,7 +8,9 @@ import { Badge } from '@/components/ui/badge'
 import { DynamicForm } from '@/components/dynamic-form'
 import { ArrowLeft, Edit, Save, X, History, UserCheck, Send, RefreshCw, Printer, FileDown, FileText, FileSpreadsheet, ClipboardList, Scale } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
+import { useTabs, resolveKeyFromHref } from '@/components/layout/tabs-context'
 import { SnapshotHistoryDialog } from '@/components/snapshot-history-dialog'
+import { SpecialRequestDialog } from '@/components/approval/special-request-dialog'
 import { DataTable, TableField, DataRecord, RecordStatus } from '@prisma/client'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -24,7 +26,6 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   // v1.2.2+ 征收模块状态
   PENDING_APPROVAL: { label: '待审批', variant: 'warning' },
   CHANGED: { label: '已变更', variant: 'default' },
-  SYNC_PENDING: { label: '待同步', variant: 'default' },
 }
 
 const INSTANCE_STATUS_COLOR: Record<string, string> = {
@@ -76,12 +77,24 @@ interface RecordDetailClientProps {
   }
   initialEditMode?: boolean
   module?: string
+  userRole?: string
 }
 
-export function RecordDetailClient({ table, record, initialEditMode = false, module: moduleProp = '' }: RecordDetailClientProps) {
+export function RecordDetailClient({ table, record, initialEditMode = false, module: moduleProp = '', userRole = '' }: RecordDetailClientProps) {
+  // v1.2.3+ 门禁二级：管理员/超管可绕过"先上传图片"锁定，直接编辑全部字段
+  const isAdminRole = userRole === 'ADMIN' || userRole === 'MANAGER'
   const router = useRouter()
   const currentModule = moduleProp || ''
   const moduleQuery = currentModule ? `?module=${currentModule}` : ''
+  const { prepareLabel } = useTabs()
+  // 注册标签标题：表名 · 记录#id
+  useEffect(() => {
+    prepareLabel(
+      resolveKeyFromHref(window.location.href),
+      `${table.label} · 记录#${record.id}`
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [isEditing, setIsEditing] = useState(initialEditMode)
   const [formData, setFormData] = useState<Record<string, any>>(record.data as any || {})
   const [loading, setLoading] = useState(false)
@@ -99,28 +112,11 @@ export function RecordDetailClient({ table, record, initialEditMode = false, mod
   }
   useEffect(() => { loadApprovals() }, [record.id])
 
-  // 提交审批（手动）
-  const [submittingApproval, setSubmittingApproval] = useState(false)
+  // 专项审批发起弹窗（从当前记录发起，锁定目标记录，无需再选）
+  const [approvalOpen, setApprovalOpen] = useState(false)
 
   // 数据快照 / 变更历史
   const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false)
-
-  const submitApproval = async () => {
-    if (!confirm('确认提交该记录到审批流程？')) return
-    setSubmittingApproval(true)
-    try {
-      const r = await fetch('/api/approval/v2/instances', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tableId: table.id, recordId: record.id, triggerEvent: 'MANUAL_SUBMIT' }),
-      })
-      const j = await r.json()
-      if (!j.ok) return alert(j.error ?? '提交失败')
-      alert(`已发起审批实例 #${j.data.instanceId}`)
-      loadApprovals()
-      router.refresh()
-    } finally { setSubmittingApproval(false) }
-  }
 
   const statusInfo = statusMap[record.status as RecordStatus]
 
@@ -230,12 +226,11 @@ export function RecordDetailClient({ table, record, initialEditMode = false, mod
           </Button>
           <Button
             variant="secondary"
-            onClick={submitApproval}
-            disabled={submittingApproval}
-            title="提交审批（手动触发 MANUAL_SUBMIT）"
+            onClick={() => setApprovalOpen(true)}
+            title="发起专项动作审批（已锁定当前记录）"
           >
             <Send className="w-4 h-4 mr-2" />
-            提交审批
+            发起审批
           </Button>
           {isEditing ? (
             <>
@@ -271,6 +266,7 @@ export function RecordDetailClient({ table, record, initialEditMode = false, mod
             disabled={!isEditing}
             layoutConfig={table.formLayoutConfig}
             module={currentModule === 'survey' ? 'survey' : currentModule === 'levy' ? 'levy' : 'both'}
+            ignoreGateLock={isAdminRole}
           />
         </CardContent>
       </Card>
@@ -497,6 +493,16 @@ export function RecordDetailClient({ table, record, initialEditMode = false, mod
         tableName={table.name}
         recordId={record.id}
         tableLabel={table.label}
+      />
+
+      <SpecialRequestDialog
+        open={approvalOpen}
+        onOpenChange={setApprovalOpen}
+        tableId={table.id}
+        tableLabel={table.label}
+        defaultRecordId={record.id}
+        defaultRecordData={record.data as any}
+        onDone={loadApprovals}
       />
     </div>
   )

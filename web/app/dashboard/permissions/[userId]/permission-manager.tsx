@@ -1,25 +1,23 @@
 "use client"
 
-import { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Switch } from "@/components/ui/switch"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, Save, Shield } from 'lucide-react'
+import { ArrowLeft, Save, Shield, ShieldAlert, Search, CheckCircle2 } from 'lucide-react'
+import { PermissionTree } from '@/components/permission-tree'
 
-interface Permission {
-  tableId: number
-  tableName: string
-  tableLabel: string
-  canView: boolean
-  canCreate: boolean
-  canEdit: boolean
-  canDelete: boolean
-  canExportExcel: boolean
-  canExportPdf: boolean
-  canPrint: boolean
-  canImport: boolean
+interface PTreeNode {
+  id: string
+  type: any
+  label: string
+  moduleKey?: string
+  categoryId?: number
+  tableId?: number
+  opKey?: string
+  children?: PTreeNode[]
 }
 
 interface PermissionManagerProps {
@@ -29,47 +27,45 @@ interface PermissionManagerProps {
     realName: string
     role: string
   }
-  initialPermissions: Permission[]
+  tree: PTreeNode[]
+  initialSelected: string[]
 }
 
-export function PermissionManager({ targetUser, initialPermissions }: PermissionManagerProps) {
+export function PermissionManager({ targetUser, tree, initialSelected }: PermissionManagerProps) {
   const router = useRouter()
-  const [permissions, setPermissions] = useState<Permission[]>(initialPermissions)
+  const [selected, setSelected] = useState<string[]>(initialSelected ?? [])
   const [loading, setLoading] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [filter, setFilter] = useState('')
 
-  const updatePermission = (tableId: number, field: keyof Permission, value: boolean) => {
-    setPermissions(perms => perms.map(p => {
-      if (p.tableId === tableId) {
-        const updated = { ...p, [field]: value }
-        if (field !== 'canView' && value && !p.canView) {
-          updated.canView = true
-        }
-        if (field === 'canView' && !value) {
-          updated.canCreate = false
-          updated.canEdit = false
-          updated.canDelete = false
-          updated.canExportExcel = false
-          updated.canExportPdf = false
-          updated.canPrint = false
-          updated.canImport = false
-        }
-        return updated
-      }
-      return p
-    }))
-  }
+  const isAdmin = targetUser.role === 'ADMIN' || targetUser.role === 'MANAGER'
+
+  const filteredTree = useMemo(() => filterTree(tree, filter.trim().toLowerCase()), [tree, filter])
+  const totalLeafCount = useMemo(() => countLeaves(tree), [tree])
+  const selectedLeavesCount = useMemo(() => {
+    const allLeaves = new Set<string>()
+    const walk = (n: PTreeNode) => {
+      const kids = n.children ?? []
+      if (!kids.length) allLeaves.add(n.id)
+      else kids.forEach(walk)
+    }
+    tree.forEach(walk)
+    return selected.filter(s => allLeaves.has(s)).length
+  }, [selected, tree])
 
   const handleSave = async () => {
     setLoading(true)
+    setSaved(false)
     try {
       const res = await fetch(`/api/permissions/${targetUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ permissions }),
+        body: JSON.stringify({ selectedIds: selected }),
       })
 
       if (res.ok) {
-        alert('权限保存成功')
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2000)
         router.refresh()
       } else {
         const data = await res.json()
@@ -81,8 +77,6 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
       setLoading(false)
     }
   }
-
-  const isAdmin = targetUser.role === 'ADMIN' || targetUser.role === 'MANAGER'
 
   return (
     <div className="space-y-6">
@@ -99,10 +93,16 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
             </p>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={loading || isAdmin}>
-          <Save className="w-4 h-4 mr-2" />
-          {loading ? '保存中...' : '保存权限'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-500">
+            已勾选 {selectedLeavesCount}/{totalLeafCount} 叶子权限 · 共 {selected.length} 项（含父级）
+          </span>
+          {saved && <Badge className="bg-emerald-600 text-white"><CheckCircle2 className="w-3 h-3 mr-1" />已保存</Badge>}
+          <Button onClick={handleSave} disabled={loading || isAdmin}>
+            <Save className="w-4 h-4 mr-2" />
+            {loading ? '保存中...' : '保存权限'}
+          </Button>
+        </div>
       </div>
 
       {isAdmin && (
@@ -120,95 +120,54 @@ export function PermissionManager({ targetUser, initialPermissions }: Permission
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">数据表权限</CardTitle>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-indigo-600" />
+              权限树配置
+            </CardTitle>
+          </div>
+          <CardDescription className="pt-1">
+            按「模块 → 分类 → 数据表 → 操作」结构勾选；勾选父节点会自动勾选所有子节点，取消子节点会自动取消其无兄弟被选的父级。
+          </CardDescription>
+          <div className="pt-3 flex items-center gap-2">
+            <Search className="w-4 h-4 text-slate-400" />
+            <Input placeholder="搜索节点（模块/分类/表/操作）…" value={filter} onChange={e => setFilter(e.target.value)} className="max-w-md h-9" />
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-3 px-4 font-medium">数据表</th>
-                  <th className="text-center py-3 px-4 font-medium">查看</th>
-                  <th className="text-center py-3 px-4 font-medium">新增</th>
-                  <th className="text-center py-3 px-4 font-medium">编辑</th>
-                  <th className="text-center py-3 px-4 font-medium">删除</th>
-                  <th className="text-center py-3 px-4 font-medium">导出Excel</th>
-                  <th className="text-center py-3 px-4 font-medium">导出PDF</th>
-                  <th className="text-center py-3 px-4 font-medium">导入</th>
-                  <th className="text-center py-3 px-4 font-medium">打印</th>
-                </tr>
-              </thead>
-              <tbody>
-                {permissions.map((perm) => (
-                  <tr key={perm.tableId} className="border-b last:border-0 hover:bg-gray-50">
-                    <td className="py-3 px-4">
-                      <div className="font-medium">{perm.tableLabel}</div>
-                      <div className="text-xs text-gray-500">{perm.tableName}</div>
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <Switch
-                        checked={perm.canView}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canView', v)}
-                        disabled={isAdmin}
-                      />
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <Switch
-                        checked={perm.canCreate}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canCreate', v)}
-                        disabled={isAdmin || !perm.canView}
-                      />
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <Switch
-                        checked={perm.canEdit}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canEdit', v)}
-                        disabled={isAdmin || !perm.canView}
-                      />
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <Switch
-                        checked={perm.canDelete}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canDelete', v)}
-                        disabled={isAdmin || !perm.canView}
-                      />
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <Switch
-                        checked={perm.canExportExcel}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canExportExcel', v)}
-                        disabled={isAdmin || !perm.canView}
-                      />
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <Switch
-                        checked={perm.canExportPdf}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canExportPdf', v)}
-                        disabled={isAdmin || !perm.canView}
-                      />
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <Switch
-                        checked={perm.canImport}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canImport', v)}
-                        disabled={isAdmin || !perm.canView}
-                      />
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <Switch
-                        checked={perm.canPrint}
-                        onCheckedChange={(v) => updatePermission(perm.tableId, 'canPrint', v)}
-                        disabled={isAdmin || !perm.canView}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="border rounded-lg p-3 max-h-[70vh] overflow-auto bg-slate-50/50">
+            {filteredTree.length ? (
+              <PermissionTree tree={filteredTree as any} value={selected} onChange={setSelected} />
+            ) : (
+              <div className="text-sm text-slate-500 text-center py-16">未匹配到节点</div>
+            )}
           </div>
         </CardContent>
       </Card>
     </div>
   )
+}
+
+function countLeaves(tree: PTreeNode[]): number {
+  let n = 0
+  const walk = (x: PTreeNode) => {
+    const kids = x.children ?? []
+    if (!kids.length) n++
+    else kids.forEach(walk)
+  }
+  tree.forEach(walk)
+  return n
+}
+
+function filterTree(tree: PTreeNode[], kw: string): PTreeNode[] {
+  if (!kw) return tree
+  const keep = (n: PTreeNode): PTreeNode | null => {
+    const kids = (n.children ?? []).map(keep).filter(Boolean) as PTreeNode[]
+    const labelMatch = n.label.toLowerCase().includes(kw)
+    const idMatch = n.id.toLowerCase().includes(kw)
+    if (labelMatch || idMatch || kids.length) return { ...n, children: kids.length ? kids : undefined }
+    return null
+  }
+  return tree.map(keep).filter(Boolean) as PTreeNode[]
 }

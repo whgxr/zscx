@@ -58,6 +58,7 @@ import {
 } from 'lucide-react'
 import { ExportTemplate, DataTable, TableField } from '@prisma/client'
 import * as ExcelJS from 'exceljs'
+import { useTabs, resolveKeyFromHref } from '@/components/layout/tabs-context'
 import { CellData, PageSetup, RowConfig, ColConfig, DEFAULT_ROWS, DEFAULT_COLS, FIELD_PATTERN, getColLabel, emptyCell } from '@/types/cell-data'
 
 interface TemplateWithTable extends ExportTemplate {
@@ -109,6 +110,12 @@ function CellDisplay({ value, fields }: { value: any; fields: TableField[] }) {
 
 export function ExcelTemplateDesigner({ template }: ExcelTemplateDesignerProps) {
   const router = useRouter()
+  const { prepareLabel } = useTabs()
+  // 注册标签标题：Excel 模板名
+  useEffect(() => {
+    prepareLabel(resolveKeyFromHref(window.location.href), `Excel：${template.name}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [name, setName] = useState(template.name)
   const [description, setDescription] = useState(template.description || '')
   const [saving, setSaving] = useState(false)

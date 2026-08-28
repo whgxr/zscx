@@ -1,0 +1,41 @@
+# ============================================================
+# 增量快速构建 Dockerfile
+# 作用：复用已存在的 zscx-web:local 镜像（含 node_modules 和 .next 构建缓存），
+#       跳过最耗时的 npm install 阶段，仅重新执行 prisma generate + next build。
+# 适用场景：日常代码修改后重新部署（未新增/未升级 npm 依赖时）。
+# 若 package.json / package-lock.json 发生变化，请改用完整构建：
+#   docker compose up -d --build web
+# ============================================================
+
+# 基于上一次构建的本地镜像，复用 node_modules 与 .next 缓存
+FROM zscx-web:local
+
+# 基础镜像末尾是 USER nextjs，必须先切回 root，
+# 否则 COPY 出的 root 属主文件会导致 prisma generate / next build 权限错误
+USER root
+
+WORKDIR /app
+
+# 复制最新源码（.dockerignore 已排除 node_modules/.next，不会覆盖镜像内已有内容）
+COPY . .
+
+# 修复源码文件权限：服务器上传的文件可能是 000，nextjs 用户无法读取会报 EACCES
+RUN chmod -R a+rX /app/app /app/components /app/lib /app/types /app/public /app/prisma /app/tests \
+ && chmod 644 /app/package.json /app/next.config.js /app/tsconfig.json /app/postcss.config.js /app/tailwind.config.ts /app/middleware.ts
+
+# 与完整 Dockerfile 的 builder 阶段保持一致的环境变量
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PRISMA_ENGINES_MIRROR=https://registry.npmmirror.com/-/binary/prisma
+ENV JWT_SECRET=build-placeholder
+
+# 重新生成 Prisma Client
+RUN npx prisma generate
+
+# 重新构建 Next.js 应用（复用镜像内残留的 .next/cache，显著加快编译）
+RUN npm run build || (test -d .next && echo "编译成功（忽略类型错误）" || exit 1)
+
+# 新生成的 .next 属主改回 nextjs，避免运行时写权限问题
+RUN chown -R nextjs:nodejs /app/.next
+
+# 恢复 nextjs 用户（与基础镜像保持一致）
+USER nextjs

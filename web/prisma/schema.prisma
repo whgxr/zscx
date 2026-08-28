@@ -313,7 +313,6 @@ enum RecordStatus {
   ARCHIVED         // 已归档
   PENDING_APPROVAL // 审批中（v1.2.2+）
   CHANGED          // 已修改待复审（v1.2.2+，征收数据修改完成但最终未盖章）
-  SYNC_PENDING     // 调查数据已变更，等待同步到征收（v1.2.2+）
 }
 
 // ==================== 数据快照与调查→征收同步（v1.2.2+） ====================
@@ -550,6 +549,8 @@ model ExportTemplate {
   description  String?
   config       Json             // Excel 模板配置（现有：单元格样式、合并、公式等）
   documentConfig Json?          // v1.2.2 Word 文书 A4 画布配置（blocks/page/header/footer/margins）
+  documentFileKey String?       // ONLYOFFICE 文件化模板：Word 模板文件在 MinIO 的对象 key（docx）
+  spreadsheetFileKey String?    // ONLYOFFICE 文件化模板：Excel 模板文件在 MinIO 的对象 key（xlsx）
   paperSize    String?          // 纸张：A4 (默认) / A5 / Letter
   orientation  String?          // portrait (默认) / landscape
   outputFormat String?          // 首选输出：DOCX / PDF

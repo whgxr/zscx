@@ -46,6 +46,7 @@ export default async function H5RecordDetailPage({
   const isAdmin = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER'
   let canEdit = isAdmin
   let canView = isAdmin
+  let canDelete = isAdmin
 
   if (!isAdmin) {
     const perm = await prisma.tablePermission.findFirst({
@@ -53,12 +54,14 @@ export default async function H5RecordDetailPage({
     })
     canView = !!perm?.canView
     canEdit = !!perm?.canEdit
+    canDelete = !!perm?.canDelete
     // M4 树形权限：再查 role.permissions
     const rolePerms: string[] = (user.role as any)?.permissions ?? []
     if (rolePerms.length) {
       const s = new Set(rolePerms)
       canView = canView || s.has(`table:${table.id}`) || s.has(`tableOp:${table.id}:VIEW`)
       canEdit = canEdit || s.has(`tableOp:${table.id}:UPDATE`)
+      canDelete = canDelete || s.has(`tableOp:${table.id}:DELETE`)
     }
     if (!canView) {
       return <div className="p-8 text-center text-gray-500">无权限访问</div>
@@ -76,6 +79,8 @@ export default async function H5RecordDetailPage({
       table={JSON.parse(JSON.stringify(table))}
       record={JSON.parse(JSON.stringify(record))}
       canEdit={canEdit}
+      canDelete={canDelete}
+      isAdmin={isAdmin}
       module={module}
     />
   )

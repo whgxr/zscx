@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { RecordStatus, FieldType } from '@prisma/client'
 import { moduleOfTable, stripNonEditableFields } from '@/lib/levy-sync-detector'
 import { tryLevySaveAutoTrigger } from '@/lib/approval-service'
+import { notifyGateImageUploadedIfNeeded } from '@/lib/gate-image-notify'
 
 export async function GET(
   req: NextRequest,
@@ -156,6 +157,13 @@ export async function PUT(
         ipAddress: ipAddress ?? undefined,
         userAgent: userAgent ?? undefined,
       },
+    })
+
+    // v1.2.2+ 门禁图片：更新时若门禁图片由空→有值，通知可编辑人员录入
+    await notifyGateImageUploadedIfNeeded({
+      table: { id: table.id, name: table.name, label: table.label, fields: table.fields },
+      prevData: existingRecord.data,
+      record: { id: record.id, data: record.data },
     })
 
     // v1.2.2+ M2-T4: 若是征收模块 + 绑定了 LEVY_SAVE 触发流程，自动发起审批

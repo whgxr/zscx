@@ -283,7 +283,7 @@ export class NotificationService {
       targetType: 'USER',
       targetUserIds: assigneeIds,
       priority: 'HIGH',
-      linkUrl: `/dashboard/approval/${instanceId}`
+      linkUrl: `/approval?tab=todo`
     })
   }
 }

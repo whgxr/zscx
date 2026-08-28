@@ -4,30 +4,18 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Save, Loader2 } from 'lucide-react'
+import { PermissionTree } from '@/components/permission-tree'
 
 export function H5AdminPermissionsEditClient({
-  targetUser, tables, permMap,
+  targetUser, tree, initialSelected,
 }: {
   targetUser: any
-  tables: any[]
-  permMap: Record<number, any>
+  tree: any[]
+  initialSelected: string[]
 }) {
   const router = useRouter()
-  const [perms, setPerms] = useState<Record<number, { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean }>>(() => {
-    const init: Record<number, any> = {}
-    tables.forEach(t => {
-      init[t.id] = permMap[t.id] || { canView: false, canCreate: false, canEdit: false, canDelete: false }
-    })
-    return init
-  })
+  const [selected, setSelected] = useState<string[]>(initialSelected ?? [])
   const [loading, setLoading] = useState(false)
-
-  const toggle = (tableId: number, field: 'canView' | 'canCreate' | 'canEdit' | 'canDelete') => {
-    setPerms(prev => ({
-      ...prev,
-      [tableId]: { ...prev[tableId], [field]: !prev[tableId][field] },
-    }))
-  }
 
   const handleSave = async () => {
     setLoading(true)
@@ -35,19 +23,7 @@ export function H5AdminPermissionsEditClient({
       const res = await fetch(`/api/permissions/${targetUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          permissions: Object.entries(perms).map(([tableId, p]) => ({
-            tableId: parseInt(tableId),
-            canView: p.canView,
-            canCreate: p.canCreate,
-            canEdit: p.canEdit,
-            canDelete: p.canDelete,
-            canExportExcel: false,
-            canExportPdf: false,
-            canPrint: false,
-            canImport: false,
-          })),
-        }),
+        body: JSON.stringify({ selectedIds: selected }),
       })
       if (res.ok) {
         alert('保存成功')
@@ -72,28 +48,14 @@ export function H5AdminPermissionsEditClient({
         <h1 className="text-lg font-semibold">{targetUser.realName || targetUser.username} 的权限</h1>
       </div>
 
-      {tables.map((table: any) => {
-        const p = perms[table.id]
-        return (
-          <div key={table.id} className="bg-white rounded-xl p-4 shadow-sm mb-3">
-            <h3 className="text-sm font-medium mb-3">{table.label}</h3>
-            <div className="grid grid-cols-4 gap-2">
-              {(['canView', 'canCreate', 'canEdit', 'canDelete'] as const).map(field => (
-                <label
-                  key={field}
-                  className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg text-xs cursor-pointer border ${
-                    p[field] ? 'bg-primary/5 border-primary text-primary' : 'bg-gray-50 border-gray-200 text-gray-400'
-                  }`}
-                  onClick={() => toggle(table.id, field)}
-                >
-                  <span>{field === 'canView' ? '查看' : field === 'canCreate' ? '新增' : field === 'canEdit' ? '编辑' : '删除'}</span>
-                  <input type="checkbox" checked={p[field]} readOnly className="hidden" />
-                </label>
-              ))}
-            </div>
-          </div>
-        )
-      })}
+      <div className="bg-white rounded-xl p-4 shadow-sm mb-3">
+        <p className="text-xs text-gray-500 mb-3">
+          按「模块 → 分类 → 数据表 → 操作」勾选；勾选父节点自动勾选全部子节点。
+        </p>
+        <div className="border rounded-lg p-2 max-h-[60vh] overflow-auto bg-slate-50/50">
+          <PermissionTree tree={tree as any} value={selected} onChange={setSelected} />
+        </div>
+      </div>
 
       <div className="flex gap-3 mt-4">
         <Button variant="outline" className="flex-1 h-11 rounded-xl" onClick={() => router.push('/h5/admin/permissions')}>

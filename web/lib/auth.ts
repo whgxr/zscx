@@ -103,41 +103,58 @@ export async function validateSession(token: string): Promise<boolean> {
   if (!payload) return false
 
   const cacheKey2 = cacheKey('session', token)
-  const cached = await getOrSetCache(
+  let cached = await getOrSetCache(
     cacheKey2,
     async () => {
-      const session = await prisma.userSession.findFirst({
-        where: { token },
-      })
-
-      if (!session || !session.isActive) return { valid: false }
-
-      if (session.expiresAt && new Date() > session.expiresAt) {
-        return { valid: false }
-      }
-
-      const timeoutMinutes = await getSessionTimeoutMinutes()
-      const lastActive = new Date(session.lastActiveAt).getTime()
-      const now = Date.now()
-      if (now - lastActive > timeoutMinutes * 60 * 1000) {
-        return { valid: false }
-      }
-
-      return { valid: true, sessionId: session.id }
+      return await resolveSessionFromDb(token)
     },
     300
   )
 
+  // 缓存的会话被判无效时，穿透再查一次数据库（容忍 lastActiveAt 刚被重置或其他刚修复的场景）
+  if (!cached || !cached.valid) {
+    const fresh = await resolveSessionFromDb(token)
+    if (fresh && fresh.valid) {
+      await cacheDelete(cacheKey2)
+      cached = fresh
+    }
+  }
+
   if (!cached || !cached.valid) return false
 
-  if (cached.sessionId) {
-    await prisma.userSession.update({
-      where: { id: cached.sessionId },
-      data: { lastActiveAt: new Date() },
-    })
+  if (cached.sessionId != null && !Number.isNaN(Number(cached.sessionId))) {
+    try {
+      await prisma.userSession.update({
+        where: { id: Number(cached.sessionId) },
+        data: { lastActiveAt: new Date() },
+      })
+    } catch (_err) {
+      // 防御性处理：如果 session 已被删除/异常，仅跳过更新 lastActiveAt，不影响鉴权通过
+    }
   }
 
   return true
+}
+
+async function resolveSessionFromDb(token: string): Promise<{ valid: boolean; sessionId?: number }> {
+  const session = await prisma.userSession.findFirst({
+    where: { token },
+  })
+
+  if (!session || !session.isActive) return { valid: false }
+
+  if (session.expiresAt && new Date() > session.expiresAt) {
+    return { valid: false }
+  }
+
+  const timeoutMinutes = await getSessionTimeoutMinutes()
+  const lastActive = new Date(session.lastActiveAt).getTime()
+  const now = Date.now()
+  if (now - lastActive > timeoutMinutes * 60 * 1000) {
+    return { valid: false }
+  }
+
+  return { valid: true, sessionId: session.id }
 }
 
 export async function invalidateUserSessions(userId: number): Promise<void> {

@@ -594,6 +594,48 @@ async function main() {
     console.log('   ⚠️  ApprovalWorkflow.specialAction 迁移跳过:', e.message)
   }
 
+  // ==================== 41. 移除 DataRecord.status 的 SYNC_PENDING（状态不参与调查↔征收同步） ====================
+  console.log('\n41. 清理 DataRecord.status 枚举中的 SYNC_PENDING（状态不参与同步）...')
+  try {
+    const [scols] = await prisma.$queryRawUnsafe(`SHOW COLUMNS FROM \`DataRecord\` LIKE 'status'`)
+    const col = scols && scols[0]
+    if (col && col.Type && col.Type.includes('SYNC_PENDING')) {
+      // 先把存量 SYNC_PENDING（待同步）记录归入 CHANGED，保证枚举收缩可执行
+      await prisma.$executeRawUnsafe(`UPDATE \`DataRecord\` SET \`status\`='CHANGED' WHERE \`status\`='SYNC_PENDING'`)
+      await prisma.$executeRawUnsafe(`ALTER TABLE \`DataRecord\` MODIFY COLUMN \`status\` ENUM('DRAFT','SUBMITTED','REVIEWED','REJECTED','ARCHIVED','PENDING_APPROVAL','CHANGED') NOT NULL DEFAULT 'DRAFT'`)
+      console.log('   ✅ DataRecord.status 已移除 SYNC_PENDING')
+    } else {
+      console.log('   ⚠️  DataRecord.status 不含 SYNC_PENDING 或列不存在，跳过')
+    }
+  } catch (e) {
+    console.log('   ⚠️  DataRecord.status 枚举迁移跳过:', e.message)
+  }
+
+  // ==================== 42. ExportTemplate.documentFileKey / spreadsheetFileKey（ONLYOFFICE 文件化模板） ====================
+  console.log('\n42. ExportTemplate 增加 documentFileKey/spreadsheetFileKey（ONLYOFFICE 文件化模板）...')
+  try {
+    const [dc] = await prisma.$queryRawUnsafe(`SHOW COLUMNS FROM \`ExportTemplate\` LIKE 'documentFileKey'`)
+    if (!dc) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE \`ExportTemplate\` ADD COLUMN \`documentFileKey\` VARCHAR(191) NULL`)
+      console.log('   ✅ ExportTemplate.documentFileKey 添加完成')
+    } else {
+      console.log('   ⚠️  ExportTemplate.documentFileKey 已存在，跳过')
+    }
+  } catch (e) {
+    console.log('   ⚠️  ExportTemplate.documentFileKey 迁移跳过:', e.message)
+  }
+  try {
+    const [sc] = await prisma.$queryRawUnsafe(`SHOW COLUMNS FROM \`ExportTemplate\` LIKE 'spreadsheetFileKey'`)
+    if (!sc) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE \`ExportTemplate\` ADD COLUMN \`spreadsheetFileKey\` VARCHAR(191) NULL`)
+      console.log('   ✅ ExportTemplate.spreadsheetFileKey 添加完成')
+    } else {
+      console.log('   ⚠️  ExportTemplate.spreadsheetFileKey 已存在，跳过')
+    }
+  } catch (e) {
+    console.log('   ⚠️  ExportTemplate.spreadsheetFileKey 迁移跳过:', e.message)
+  }
+
   console.log('\n✅ 数据库迁移完成！')
 }
 

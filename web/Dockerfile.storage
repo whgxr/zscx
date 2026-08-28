@@ -1,0 +1,13 @@
+# 阶段1：在最小环境安装 minio 依赖（避免在大镜像里触发全量 npm 重装导致卡死）
+FROM node:18-slim AS minio-deps
+WORKDIR /opt/minio
+RUN npm install minio@8.0.7 --no-audit --no-fund --registry=https://registry.npmmirror.com
+
+# 阶段2：基于当前运行镜像做增量构建（复用其 node_modules，只注入 minio）
+FROM zscx-web:local
+USER root
+COPY . .
+COPY --from=minio-deps /opt/minio/node_modules /app/.minio-deps
+RUN cp -r /app/.minio-deps/. /app/node_modules/ && rm -rf /app/.minio-deps
+RUN npx prisma generate
+RUN npm run build

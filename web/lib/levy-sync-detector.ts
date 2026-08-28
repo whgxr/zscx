@@ -7,7 +7,7 @@
 //   2. 找出关联的征收记录（Levy Table 中，对应 LEVY_RELATION 字段存储了 surveyRecordId）
 //   3. 比较当前调查快照数据 vs 征收记录 data 中同字段的值，生成 fieldDiffs
 //   4. 写入 DataSnapshot + DataSyncRequest(PENDING)
-//   5. 把征收记录 status 置为 SYNC_PENDING（触发前端徽标）
+//   （状态不参与调查↔征收同步，不再设置 SYNC_PENDING）
 //
 // 审批通过后的应用：见 applyApprovedSyncRequest()
 
@@ -121,7 +121,7 @@ export async function triggerSyncForSurveyRecordIfNeeded(params: {
         // data JSON 查询；MySQL 5.7+ 支持 JSON_EXTRACT / CAST；这里退化为全表扫描然后在内存过滤
         // （对单租户定制化系统可接受；后期可改成 generated column + index）
       },
-      select: { id: true, data: true, status: true },
+      select: { id: true, data: true },
     })
 
     // 内存过滤 LEVY_RELATION 字段值 === surveyRecordId 的记录
@@ -194,16 +194,7 @@ export async function triggerSyncForSurveyRecordIfNeeded(params: {
       }
 
       // ===== SNAPSHOT_APPROVAL 模式（默认） =====
-      // 把征收记录状态置为 SYNC_PENDING
-      if (levyRec.status !== 'SYNC_PENDING') {
-        try {
-          await prisma.dataRecord.update({
-            where: { id: levyRec.id },
-            data: { status: 'SYNC_PENDING', updatedBy: changedBy ?? null },
-          })
-        } catch (e) { /* ignore enum transition race */ }
-      }
-
+      // 状态不参与调查↔征收同步（已移除 SYNC_PENDING），仅创建待审核同步请求
       const syncReq = await prisma.dataSyncRequest.create({
         data: {
           source: 'SURVEY' as SyncSource,
@@ -243,9 +234,7 @@ export async function triggerSyncForSurveyRecordIfNeeded(params: {
 
 /**
  * 审批通过后应用同步：
- *   - 把 fieldDiffs 的 after 合并到目标 levyRecord.data
- *   - 若征收记录 status 是 SYNC_PENDING，改回原 CHANGED / REVIEWED / DRAFT
- *     （这里统一改成 REVIEWED，含义：征收记录最终数据已与调查对齐，可盖章签署）
+ *   - 把 fieldDiffs 的 after 合并到目标 levyRecord.data（不改动记录状态）
  *   - 写 SYNC_APPLY 快照（落在 levy table 上，便于审计中心看 levy 侧变更）
  *   - 更新 DataSyncRequest 状态 = APPROVED
  */
@@ -266,7 +255,7 @@ export async function applyApprovedSyncRequest(params: {
     const fieldDiffs = (req.fieldDiffs as FieldDiffMap) || {}
     const currentLevy = await prisma.dataRecord.findUnique({
       where: { id: req.levyRecordId },
-      select: { id: true, data: true, status: true, tableId: true },
+      select: { id: true, data: true, tableId: true },
     })
     if (!currentLevy) return { ok: false, error: '关联的征收记录不存在' }
     const levyData = (currentLevy.data as Record<string, any>) || {}
@@ -283,12 +272,11 @@ export async function applyApprovedSyncRequest(params: {
       metadata: { ipAddress: params.ipAddress, userAgent: params.userAgent, fromSyncRequestId: req.id },
     })
 
-    // 更新征收记录 data + 状态
+    // 仅合并同步数据，不改动征收记录状态（状态不参与调查↔征收同步）
     await prisma.dataRecord.update({
       where: { id: currentLevy.id },
       data: {
         data: merged as any,
-        status: 'REVIEWED',
         updatedBy: params.reviewedBy,
       },
     })
@@ -318,9 +306,6 @@ export async function applyApprovedSyncRequest(params: {
         userAgent: params.userAgent ?? undefined,
       },
     })
-
-    // 若该调查记录没有其它待审核同步请求，则恢复其状态（提交同步时被置为 SYNC_PENDING）
-    await restoreSurveyRecordStatus(req, params.reviewedBy)
 
     // 通知原提交人：同步请求已通过
     if (req.requestedBy) {
@@ -361,27 +346,6 @@ export async function rejectSyncRequest(params: {
     if (!req) return { ok: false, error: '同步请求不存在' }
     if (req.status !== 'PENDING') return { ok: false, error: '同步请求状态不是待审核' }
 
-    // 检查这条 levy 记录是否还有其他 PENDING 请求，没有就把 SYNC_PENDING 改回 REVIEWED
-    const otherPending = await prisma.dataSyncRequest.count({
-      where: {
-        levyRecordId: req.levyRecordId,
-        status: 'PENDING',
-        id: { not: req.id },
-      },
-    })
-    if (otherPending === 0) {
-      const cur = await prisma.dataRecord.findUnique({
-        where: { id: req.levyRecordId },
-        select: { status: true },
-      })
-      if (cur?.status === 'SYNC_PENDING') {
-        await prisma.dataRecord.update({
-          where: { id: req.levyRecordId },
-          data: { status: 'REVIEWED', updatedBy: params.reviewedBy },
-        })
-      }
-    }
-
     const updated = await prisma.dataSyncRequest.update({
       where: { id: req.id },
       data: {
@@ -406,9 +370,6 @@ export async function rejectSyncRequest(params: {
       },
     })
 
-    // 若该调查记录没有其它待审核同步请求，则恢复其状态（提交同步时被置为 SYNC_PENDING）
-    await restoreSurveyRecordStatus(req, params.reviewedBy)
-
     // 通知原提交人：同步请求已被拒绝
     if (req.requestedBy) {
       try {
@@ -428,31 +389,6 @@ export async function rejectSyncRequest(params: {
   } catch (e: any) {
     console.error('[rejectSyncRequest] failed:', e)
     return { ok: false, error: e?.message || '拒绝失败' }
-  }
-}
-
-/**
- * 恢复调查记录状态：提交同步请求时被置为 SYNC_PENDING，当该记录没有其它待审核同步请求时改回 REVIEWED
- */
-async function restoreSurveyRecordStatus(req: DataSyncRequest, reviewedBy: number) {
-  if (!req.surveyRecordId) return
-  const otherPending = await prisma.dataSyncRequest.count({
-    where: {
-      surveyRecordId: req.surveyRecordId,
-      status: 'PENDING',
-      id: { not: req.id },
-    },
-  })
-  if (otherPending === 0) {
-    const cur = await prisma.dataRecord
-      .findUnique({ where: { id: req.surveyRecordId }, select: { status: true } })
-      .catch(() => null)
-    if (cur?.status === 'SYNC_PENDING') {
-      await prisma.dataRecord.update({
-        where: { id: req.surveyRecordId },
-        data: { status: 'REVIEWED', updatedBy: reviewedBy },
-      })
-    }
   }
 }
 

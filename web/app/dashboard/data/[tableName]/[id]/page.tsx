@@ -53,5 +53,5 @@ export default async function RecordDetailPage({
     (tableWithLayout.category?.module === 'SURVEY' ? 'survey' : tableWithLayout.category?.module === 'LEVY' ? 'levy' : '') ||
     ''
 
-  return <RecordDetailClient table={tableWithLayout} record={record} initialEditMode={searchParams.mode === 'edit'} module={module} />
+  return <RecordDetailClient table={tableWithLayout} record={record} initialEditMode={searchParams.mode === 'edit'} module={module} userRole={user.role?.name} />
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import ExcelJS from 'exceljs'
+import { renderXlsxTemplate } from '@/lib/office-renderer'
 import { ExportType } from '@prisma/client'
 
 const statusText: Record<string, string> = {
@@ -120,6 +121,35 @@ export async function GET(
     }
 
     const workbook = new ExcelJS.Workbook()
+
+    // 文件化模板（ONLYOFFICE）：真实 xlsx 直接替换 {{field}}，合并/公式/样式原样保留
+    if (templateConfig?.spreadsheetFileKey) {
+      const first = records[0]
+      const data = (first?.data && typeof first.data === 'object') ? first.data : {}
+      const buffer = await renderXlsxTemplate(templateConfig.spreadsheetFileKey, data)
+      const fileName = `${exportTemplate?.name || table.label}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      try {
+        await prisma.operationLog.create({
+          data: {
+            userId: user.id,
+            action: 'EXPORT_EXCEL',
+            module: 'EXPORT',
+            tableId: table.id,
+            detail: { templateId, useTemplate, recordCount: records.length, fileName } as any,
+            ipAddress: req.headers.get('x-forwarded-for') || req.headers.get('remote-address') || null,
+            userAgent: (req.headers.get('user-agent') || null)?.slice(0, 191),
+          },
+        })
+      } catch (logError) { /* ignore */ }
+      const disposition = isPreview ? 'inline' : 'attachment'
+      return new NextResponse(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        },
+      })
+    }
 
     if (useTemplate && (templateConfig?.univerData || templateConfig?.zcellData || templateConfig?.grid)) {
       await exportTemplateExcel(workbook, table, records, templateConfig, exportTemplate)

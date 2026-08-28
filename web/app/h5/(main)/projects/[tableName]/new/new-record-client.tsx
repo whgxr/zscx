@@ -44,6 +44,21 @@ export function H5NewRecordClient({ table, module: moduleProp = '' }: H5NewRecor
 
   const formFields = table.fields.filter((f: any) => f.showInForm)
 
+  // v1.2.2+ 门禁图片：存在"要求先上传图片"字段且未上传时，锁定其它字段
+  const imageGateField = table.fields.find((f: any) => (f.config as any)?.requireImageUpload)
+  const gateVal = imageGateField ? formData[imageGateField.name] : undefined
+  const gateEmpty =
+    gateVal === undefined || gateVal === null || gateVal === '' ||
+    (Array.isArray(gateVal) && gateVal.length === 0)
+  const gateLocked = !!imageGateField && gateEmpty
+
+  // v1.2.3+ 门禁二级：新增记录时仅允许填写门禁照片 + 配置的指定字段，其余全部锁定
+  const newRecordEditableNames = imageGateField
+    ? [imageGateField.name, ...(Array.isArray((imageGateField.config as any)?.newRecordEditableFields) ? (imageGateField.config as any).newRecordEditableFields : [])]
+    : undefined
+  const isInNewRecordScope = (field: any) =>
+    !newRecordEditableNames || newRecordEditableNames.includes(field.name)
+
   const handleChange = (name: string, value: any) => {
     setFormData({ ...formData, [name]: value })
   }
@@ -99,9 +114,15 @@ export function H5NewRecordClient({ table, module: moduleProp = '' }: H5NewRecor
   }
 
   const handleSubmit = async (status: RecordStatus = RecordStatus.DRAFT) => {
-    // 验证必填字段
+    // 验证必填字段（门禁未解锁时，锁定字段不参与必填校验；新增记录限定填写范围内才参与必填校验）
     const requiredFields = formFields.filter((f: any) => f.required)
-    const missingFields = requiredFields.filter((f: any) => {
+    const requiredCheck = requiredFields.filter((f: any) => {
+      if (newRecordEditableNames && !isInNewRecordScope(f)) return false
+      // 门禁未解锁时，仅跳过"不在新增记录允许填写范围内"的字段的必填校验；已勾选可填写的字段始终校验
+      if (gateLocked && !(imageGateField && f.name === imageGateField.name) && !(newRecordEditableNames && newRecordEditableNames.includes(f.name))) return false
+      return true
+    })
+    const missingFields = requiredCheck.filter((f: any) => {
       const val = formData[f.name]
       return val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)
     }).map((f: any) => f.label)
@@ -173,7 +194,9 @@ export function H5NewRecordClient({ table, module: moduleProp = '' }: H5NewRecor
 
   const renderField = (field: any) => {
     const value = formData[field.name] || ''
-    const editable = isFieldEditableInModule(field.editScope, moduleType)
+    const isGateField = imageGateField && field.name === imageGateField.name
+    // 门禁锁定（先上传照片）不应覆盖新增记录明确允许填写的指定字段（newRecordEditableNames 中的字段始终可填写）
+    const editable = (isGateField || !gateLocked || (newRecordEditableNames && newRecordEditableNames.includes(field.name))) && isInNewRecordScope(field) && isFieldEditableInModule(field.editScope, moduleType)
 
     switch (field.type) {
       case FieldType.TEXT:
@@ -422,6 +445,13 @@ export function H5NewRecordClient({ table, module: moduleProp = '' }: H5NewRecor
 
       {/* 表单 */}
       <div className="flex-1 px-4 py-4 space-y-4">
+        {imageGateField && (
+          <div className={`px-3 py-2.5 rounded-xl text-sm border ${gateLocked ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-green-300 bg-green-50 text-green-700'}`}>
+            {gateLocked
+              ? <>请先上传「{imageGateField.label}」照片，上传后才能填写其余数据。</>
+              : <>「{imageGateField.label}」照片已上传，可以开始录入数据。</>}
+          </div>
+        )}
         {formFields.map((field: any) => (
           <div key={field.id} className="space-y-1.5">
             <Label className="text-sm font-medium">

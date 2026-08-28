@@ -150,6 +150,12 @@ export function resolveField(fieldPath: string, contexts: any[]): any {
     // 在父级上下文中查找
     return resolveField(remaining, contexts.slice(0, parentCtxStart))
   }
+  // 安全属性读取：禁止访问原型链敏感属性（防止 constructor 等原型链注入）
+  const DANGEROUS_PROPS = new Set(['constructor', '__proto__', 'prototype'])
+  function safeGet(obj: any, key: string): any {
+    if (obj == null || DANGEROUS_PROPS.has(key)) return undefined
+    return obj[key]
+  }
   // alias 优先（如 item.xxx → 在最近的 each ctx 内找别名对应的对象再取 xxx）
   const parts = fieldPath.split('.')
   // 如果第一部分匹配某层 context.__alias，则从该层的对象开始
@@ -157,7 +163,7 @@ export function resolveField(fieldPath: string, contexts: any[]): any {
     const c = contexts[i]
     if (c && c.__alias === parts[0]) {
       let v: any = c.__item
-      for (let p = 1; p < parts.length; p++) v = v == null ? undefined : v[parts[p]]
+      for (let p = 1; p < parts.length; p++) v = safeGet(v, parts[p])
       return v
     }
   }
@@ -165,7 +171,7 @@ export function resolveField(fieldPath: string, contexts: any[]): any {
   let v: any = contexts[contexts.length - 1]?.root ?? contexts[contexts.length - 1] ?? null
   for (let i = 0; i < parts.length; i++) {
     if (v == null) return undefined
-    v = v[parts[i]]
+    v = safeGet(v, parts[i])
   }
   return v
 }
@@ -247,23 +253,202 @@ function numberToChineseRMB(n: any): string {
   return sign + s.replace(/(零.)*零元/, '元').replace(/(零.)+/g, '零').replace(/^整$/, '零元整')
 }
 
-// 简易表达式求值（支持 ==/!=/>/>=/</<=/&&/||/!()/括号）
+// ============================================================================
+// 安全表达式求值器（递归下降解析 + AST 求值）
+// 支持：==/!=/>/>=/</<=/&&/||/!/括号/字符串/数字/布尔/null/字段引用
+// 完全不使用 eval / new Function，杜绝代码注入（CWE-95）
+// ============================================================================
+
+type ExprToken =
+  | { type: 'op'; value: string }
+  | { type: 'num'; value: number }
+  | { type: 'str'; value: string }
+  | { type: 'ident'; value: string }
+  | { type: 'kw'; value: 'true' | 'false' | 'null' | 'undefined' }
+
+/** 表达式词法分析：正确处理字符串字面量，不在字符串内部切分运算符 */
+function tokenizeExpr(expr: string): ExprToken[] {
+  const tokens: ExprToken[] = []
+  let i = 0
+  const n = expr.length
+  while (i < n) {
+    // 跳过空白
+    if (/\s/.test(expr[i])) { i++; continue }
+
+    // 字符串字面量（双引号 / 单引号）
+    if (expr[i] === '"' || expr[i] === "'") {
+      const quote = expr[i]
+      i++
+      let str = ''
+      while (i < n && expr[i] !== quote) {
+        if (expr[i] === '\\' && i + 1 < n) { str += expr[i + 1]; i += 2 }
+        else { str += expr[i]; i++ }
+      }
+      i++ // 跳过闭合引号
+      tokens.push({ type: 'str', value: str })
+      continue
+    }
+
+    // 数字（含负数）
+    if (/[0-9]/.test(expr[i]) || (expr[i] === '-' && i + 1 < n && /[0-9]/.test(expr[i + 1]))) {
+      let num = ''
+      if (expr[i] === '-') { num += '-'; i++ }
+      while (i < n && /[0-9.]/.test(expr[i])) { num += expr[i]; i++ }
+      tokens.push({ type: 'num', value: parseFloat(num) })
+      continue
+    }
+
+    // 多字符运算符（优先匹配）
+    const twoChar = expr.slice(i, i + 2)
+    if (['==', '!=', '>=', '<=', '&&', '||'].includes(twoChar)) {
+      tokens.push({ type: 'op', value: twoChar })
+      i += 2
+      continue
+    }
+
+    // 单字符运算符
+    if (['>', '<', '!', '(', ')'].includes(expr[i])) {
+      tokens.push({ type: 'op', value: expr[i] })
+      i++
+      continue
+    }
+
+    // 标识符 / 字段名（支持 a.b.c、@index、../field 等）
+    if (/[a-zA-Z_@.\/]/.test(expr[i])) {
+      let ident = ''
+      while (i < n && /[a-zA-Z0-9_@.\/]/.test(expr[i])) { ident += expr[i]; i++ }
+      if (ident === 'true' || ident === 'false' || ident === 'null' || ident === 'undefined') {
+        tokens.push({ type: 'kw', value: ident })
+      } else {
+        tokens.push({ type: 'ident', value: ident })
+      }
+      continue
+    }
+
+    // 未知字符跳过（容错，不抛异常）
+    i++
+  }
+  return tokens
+}
+
+type ExprNode =
+  | { type: 'literal'; value: any }
+  | { type: 'field'; name: string }
+  | { type: 'unary'; op: '!'; operand: ExprNode }
+  | { type: 'binary'; op: string; left: ExprNode; right: ExprNode }
+
+/** 递归下降语法分析器：or → and → not → comparison → primary */
+class ExprParser {
+  private tokens: ExprToken[]
+  private pos = 0
+
+  constructor(tokens: ExprToken[]) { this.tokens = tokens }
+
+  private peek(): ExprToken | undefined { return this.tokens[this.pos] }
+  private consume(): ExprToken | undefined { return this.tokens[this.pos++] }
+
+  private expectOp(op: string): boolean {
+    const t = this.peek()
+    if (t && t.type === 'op' && t.value === op) { this.pos++; return true }
+    return false
+  }
+
+  parse(): ExprNode { return this.parseOr() }
+
+  private parseOr(): ExprNode {
+    let left = this.parseAnd()
+    while (this.expectOp('||')) {
+      left = { type: 'binary', op: '||', left, right: this.parseAnd() }
+    }
+    return left
+  }
+
+  private parseAnd(): ExprNode {
+    let left = this.parseNot()
+    while (this.expectOp('&&')) {
+      left = { type: 'binary', op: '&&', left, right: this.parseNot() }
+    }
+    return left
+  }
+
+  private parseNot(): ExprNode {
+    if (this.expectOp('!')) {
+      return { type: 'unary', op: '!', operand: this.parseNot() }
+    }
+    return this.parseComparison()
+  }
+
+  private parseComparison(): ExprNode {
+    const left = this.parsePrimary()
+    const t = this.peek()
+    if (t && t.type === 'op' && ['==', '!=', '>', '>=', '<', '<='].includes(t.value)) {
+      this.pos++
+      return { type: 'binary', op: t.value, left, right: this.parsePrimary() }
+    }
+    return left
+  }
+
+  private parsePrimary(): ExprNode {
+    const t = this.consume()
+    if (!t) return { type: 'literal', value: false }
+
+    // 括号
+    if (t.type === 'op' && t.value === '(') {
+      const expr = this.parseOr()
+      this.expectOp(')')
+      return expr
+    }
+
+    if (t.type === 'num') return { type: 'literal', value: t.value }
+    if (t.type === 'str') return { type: 'literal', value: t.value }
+    if (t.type === 'kw') {
+      switch (t.value) {
+        case 'true': return { type: 'literal', value: true }
+        case 'false': return { type: 'literal', value: false }
+        case 'null': return { type: 'literal', value: null }
+        case 'undefined': return { type: 'literal', value: undefined }
+      }
+    }
+    if (t.type === 'ident') return { type: 'field', name: t.value }
+
+    return { type: 'literal', value: false }
+  }
+}
+
+/** AST 安全求值：遍历语法树，字段引用通过 resolveField 解析 */
+function evalExprNode(node: ExprNode, contexts: any[]): any {
+  switch (node.type) {
+    case 'literal':
+      return node.value
+    case 'field':
+      return resolveField(node.name, contexts)
+    case 'unary':
+      if (node.op === '!') return !evalExprNode(node.operand, contexts)
+      return false
+    case 'binary': {
+      const l = evalExprNode(node.left, contexts)
+      const r = evalExprNode(node.right, contexts)
+      switch (node.op) {
+        case '||': return l || r
+        case '&&': return l && r
+        case '==': return l == r
+        case '!=': return l != r
+        case '>': return l > r
+        case '>=': return l >= r
+        case '<': return l < r
+        case '<=': return l <= r
+        default: return false
+      }
+    }
+  }
+}
+
+/** 对外入口：安全布尔表达式求值（无 eval / new Function） */
 export function evalBoolExpression(expr: string, contexts: any[]): boolean {
-  const e = expr.replace(/==|\!=|\>=|\<=|&&|\|\||[><!()]/g, s => ' ' + s + ' ')
-  const tokens = e.split(/\s+/).filter(Boolean)
-  // 预处理：把标识符替换成字面量
-  const resolved: string[] = tokens.map(tok => {
-    if (['==', '!=', '>', '>=', '<', '<=', '&&', '||', '!', '(', ')', 'true', 'false', 'null', 'undefined'].includes(tok)) return tok
-    if ((tok.startsWith('"') && tok.endsWith('"')) || (tok.startsWith("'") && tok.endsWith("'"))) return tok
-    if (/^-?\d+(\.\d+)?$/.test(tok)) return tok
-    const v = resolveField(tok, contexts)
-    if (typeof v === 'string') return JSON.stringify(v)
-    if (typeof v === 'number' || typeof v === 'boolean' || v == null) return String(v)
-    return JSON.stringify(v)
-  })
   try {
-    const fn = new Function(`return !!(${resolved.join(' ') || 'false'})`)
-    return fn()
+    const tokens = tokenizeExpr(expr)
+    const ast = new ExprParser(tokens).parse()
+    return Boolean(evalExprNode(ast, contexts))
   } catch {
     return false
   }

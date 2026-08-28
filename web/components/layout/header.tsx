@@ -81,7 +81,7 @@ export function Header({ user }: HeaderProps) {
           <h2 className="text-base font-semibold text-gray-800 leading-tight">
             欢迎回来，{user.realName || user.username}
           </h2>
-          <p className="text-xs text-gray-400">{formatDate()}</p>
+          <p className="text-xs text-gray-400" suppressHydrationWarning>{formatDate()}</p>
         </div>
       </div>
       <div className="flex items-center gap-4">

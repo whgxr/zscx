@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { SnapshotHistoryDialog } from '@/components/snapshot-history-dialog'
+import { SpecialRequestDialog } from '@/components/approval/special-request-dialog'
 import { FieldType, RecordStatus } from '@prisma/client'
 
 const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
@@ -26,7 +27,6 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   // v1.2.2+ 征收模块状态
   PENDING_APPROVAL: { label: '待审批', variant: 'warning' },
   CHANGED: { label: '已变更', variant: 'default' },
-  SYNC_PENDING: { label: '待同步', variant: 'default' },
 }
 
 const statusColorMap: Record<string, string> = {
@@ -76,6 +76,58 @@ export function H5DataListClient({ table, user, isAdmin, permission, module: mod
 
   // 数据快照 / 变更历史
   const [snapshotRecord, setSnapshotRecord] = useState<any>(null)
+
+  // 专项审批发起弹窗
+  const [approvalOpen, setApprovalOpen] = useState(false)
+  // 从哪条记录发起（列表卡片/详情页）：用于锁定目标记录，无需再选
+  const [approvalTarget, setApprovalTarget] = useState<{ id: number; data: any } | null>(null)
+
+  // v1.2.3+ 门禁二级：数据列表直接上传调查登记表照片（未上传时）
+  const gateField = table.fields.find((f: any) => (f.config as any)?.requireImageUpload)
+  const [gateUploadingId, setGateUploadingId] = useState<number | null>(null)
+  const gateFileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleGateUploadTrigger = (recordId: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (gateUploadingId !== null) return
+    setGateUploadingId(recordId)
+    // 由隐藏 input 的 capture + click 直接触发拍照/选图
+    const input = gateFileInputRef.current
+    if (input) {
+      input.click()
+      // 若用户取消选择，input change 仍会触发，通过 e.target.files 为空分支复位
+    }
+  }
+
+  const handleGateFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    const recordId = gateUploadingId
+    e.target.value = ''
+    if (!file || !gateField || recordId === null) { setGateUploadingId(null); return }
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('fieldName', gateField.name)
+      const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd })
+      if (!uploadRes.ok) { alert('图片上传失败'); setGateUploadingId(null); return }
+      const { url } = await uploadRes.json()
+      const record = records.find((r: any) => r.id === recordId)
+      if (!record) { setGateUploadingId(null); return }
+      const cur = record.data?.[gateField.name]
+      const curArr: string[] = Array.isArray(cur) ? cur : (cur ? [cur] : [])
+      const updRes = await fetch(`/api/data/${table.name}/${recordId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: { ...(record.data || {}), [gateField.name]: [...curArr, url] }, status: record.status }),
+      })
+      if (!updRes.ok) {
+        const data = await updRes.json().catch(() => ({}))
+        alert((data as any).message || '保存失败')
+      } else {
+        fetchRecords()
+      }
+    } catch { alert('上传失败') } finally { setGateUploadingId(null) }
+  }
 
   const openUploadModal = (recordId: number, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -286,6 +338,11 @@ export function H5DataListClient({ table, user, isAdmin, permission, module: mod
           <div className="space-y-2">
             {records.map((record) => {
               const sInfo = statusMap[record.status as RecordStatus]
+              // v1.2.2+ 门禁图片：该记录是否已上传门禁图片
+              const gateField = table.fields.find((f: any) => (f.config as any)?.requireImageUpload)
+              const gateVal = gateField ? record.data?.[gateField.name] : undefined
+              const hasGateImage = !(gateVal === undefined || gateVal === null || gateVal === '' ||
+                (Array.isArray(gateVal) && gateVal.length === 0))
               return (
                 <Card
                   key={record.id}
@@ -296,6 +353,11 @@ export function H5DataListClient({ table, user, isAdmin, permission, module: mod
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs text-gray-400 font-mono">#{record.id}</span>
                       <div className="flex items-center gap-2">
+                        {hasGateImage && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-500 text-white">
+                            已上传图片
+                          </span>
+                        )}
                         {attachmentCounts[record.id] > 0 && (
                           <span className="flex items-center gap-0.5 text-xs text-gray-400">
                             <Paperclip className="w-3 h-3" />
@@ -346,6 +408,16 @@ export function H5DataListClient({ table, user, isAdmin, permission, module: mod
 
                     {/* 快捷操作栏 */}
                     <div className="mt-2 -mx-1 flex flex-wrap gap-1.5">
+                      {gateField && !hasGateImage && (
+                        <button
+                          onClick={(e) => handleGateUploadTrigger(record.id, e)}
+                          disabled={gateUploadingId !== null}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-amber-50 text-amber-600 border border-amber-200"
+                        >
+                          <Upload className="w-3 h-3" />
+                          {gateUploadingId === record.id ? '上传中...' : `上传${gateField.label}`}
+                        </button>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); setSnapshotRecord(record) }}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-50 text-slate-600 border border-slate-200"
@@ -353,20 +425,7 @@ export function H5DataListClient({ table, user, isAdmin, permission, module: mod
                         <History className="w-3 h-3" /> 变更历史
                       </button>
                       <button
-                        onClick={async (e) => {
-                          e.stopPropagation()
-                          if (!confirm('确认发起审批？')) return
-                          try {
-                            const res = await fetch('/api/approval/instances', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ tableId: table.id, recordId: record.id, triggerEvent: 'MANUAL' }),
-                            })
-                            const data = await res.json()
-                            if (res.ok) { alert('已发起审批'); fetchRecords() }
-                            else alert(data.message || '发起失败')
-                          } catch { alert('发起失败') }
-                        }}
+                        onClick={(e) => { e.stopPropagation(); setApprovalTarget(record); setApprovalOpen(true) }}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-100"
                       >
                         <Send className="w-3 h-3" /> 发起审批
@@ -427,6 +486,18 @@ export function H5DataListClient({ table, user, isAdmin, permission, module: mod
           </div>
         )}
       </div>
+
+      {/* 调查登记表照片上传隐藏输入（未上传时在卡片上触发） */}
+      {gateField && (
+        <input
+          ref={gateFileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handleGateFileChange}
+        />
+      )}
 
       {/* 新增按钮 */}
       {canCreate && (
@@ -581,6 +652,16 @@ export function H5DataListClient({ table, user, isAdmin, permission, module: mod
         tableName={table.name}
         recordId={snapshotRecord?.id ?? 0}
         tableLabel={table.label}
+      />
+
+      <SpecialRequestDialog
+        open={approvalOpen}
+        onOpenChange={setApprovalOpen}
+        tableId={table.id}
+        tableLabel={table.label}
+        defaultRecordId={approvalTarget?.id}
+        defaultRecordData={approvalTarget?.data}
+        onDone={fetchRecords}
       />
     </div>
   )

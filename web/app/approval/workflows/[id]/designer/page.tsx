@@ -10,11 +10,13 @@ import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { WorkflowDesigner } from '@/components/designer/WorkflowDesigner'
+import { useTabs, resolveKeyFromHref } from '@/components/layout/tabs-context'
 
 export default function DesignerPage() {
   const params = useParams()
   const router = useRouter()
   const id = params.id as string
+  const { prepareLabel } = useTabs()
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -33,8 +35,10 @@ export default function DesignerPage() {
         const res = await fetch(`/api/approval/workflows/${id}/designer`)
         const json = await res.json()
         if (!json.ok) throw new Error(json.error ?? '加载失败')
+        const name = json.data.workflowName ?? json.data.name ?? '未命名流程'
+        prepareLabel(resolveKeyFromHref(window.location.href), `流程设计：${name}`)
         setData({
-          name: json.data.workflowName ?? json.data.name ?? '未命名流程',
+          name,
           status: json.data.status ?? 'DRAFT',
           jsonDefinition: json.data.jsonDefinition ?? null,
           canvasData: json.data.canvasData ?? null,

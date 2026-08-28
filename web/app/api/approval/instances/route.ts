@@ -16,8 +16,10 @@ export async function GET(req: NextRequest) {
     const tableId = searchParams.get('tableId') ? parseInt(searchParams.get('tableId')!) : undefined
     const myApproval = searchParams.get('myApproval') === 'true'
 
+    // status 只接受合法的 prisma InstanceStatus 枚举值；非法枚举（如 pending/all 等来自旧前端/脚本的拼错）直接忽略，避免 500。
+    const VALID_STATUS = new Set(['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED', 'CANCELLED', 'RESTARTED'])
     const where: any = {}
-    if (status) {
+    if (status && VALID_STATUS.has(status)) {
       where.status = status
     }
     if (tableId) {
@@ -40,7 +42,7 @@ export async function GET(req: NextRequest) {
           initiator: { select: { realName: true, username: true } },
           nodeInstances: {
             include: {
-              node: true,
+              // node 使用单独查询补全，防止孤儿 nodeId 导致 Prisma 必填报错
               assignee: { select: { realName: true } },
             },
           },
@@ -51,6 +53,24 @@ export async function GET(req: NextRequest) {
       }),
       prisma.approvalInstance.count({ where }),
     ])
+
+    // ---- 防御性补全 nodeInstances[].node ----
+    const nis = (instances as any[]).flatMap(i => i.nodeInstances ?? [])
+    const nodeIds = [...new Set(nis.map((n: any) => n.nodeId).filter(Boolean))] as number[]
+    const nodeMap = new Map<number, any>()
+    if (nodeIds.length > 0) {
+      const nodes = await prisma.approvalNode.findMany({
+        where: { id: { in: nodeIds } }
+      })
+      nodes.forEach(n => nodeMap.set(n.id, n))
+    }
+    for (const inst of instances as any[]) {
+      for (const ni of inst.nodeInstances ?? []) {
+        ni.node = nodeMap.get(ni.nodeId) ?? {
+          id: ni.nodeId, nodeKey: 'DELETED', nodeName: '[节点已删除]', nodeType: 'UNKNOWN'
+        }
+      }
+    }
 
     return NextResponse.json({ instances, total, page, pageSize })
   } catch (error) {

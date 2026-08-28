@@ -1,11 +1,23 @@
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { buildPermissionTree, USER_TABLE_OPS, USER_FIELD_TO_OP } from '@/lib/permission-tree'
 import { PermissionManager } from './permission-manager'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ArrowLeft } from 'lucide-react'
+
+const PERMISSION_FIELDS = [
+  'canView',
+  'canCreate',
+  'canEdit',
+  'canDelete',
+  'canExportExcel',
+  'canExportPdf',
+  'canPrint',
+  'canImport',
+] as const
 
 export default async function PermissionsPage({
   params,
@@ -25,7 +37,8 @@ export default async function PermissionsPage({
   const targetUserId = parseInt(params.userId)
 
   let targetUser: any = null
-  let permissions: any[] = []
+  let tree: any[] = []
+  let selectedIds: string[] = []
 
   try {
     targetUser = await prisma.user.findUnique({
@@ -37,6 +50,8 @@ export default async function PermissionsPage({
       redirect('/dashboard/permissions')
     }
 
+    tree = await buildPermissionTree(USER_TABLE_OPS)
+
     const tables = await prisma.dataTable.findMany({
       where: { status: 'ACTIVE' },
       orderBy: { sortOrder: 'asc' },
@@ -47,22 +62,14 @@ export default async function PermissionsPage({
       },
     })
 
-    permissions = tables.map((table: any) => {
+    selectedIds = []
+    for (const table of tables) {
       const perm = table.permissions[0]
-      return {
-        tableId: table.id,
-        tableName: table.name,
-        tableLabel: table.label,
-        canView: perm?.canView ?? false,
-        canCreate: perm?.canCreate ?? false,
-        canEdit: perm?.canEdit ?? false,
-        canDelete: perm?.canDelete ?? false,
-        canExportExcel: perm?.canExportExcel ?? perm?.canExport ?? false,
-        canExportPdf: perm?.canExportPdf ?? perm?.canExport ?? false,
-        canPrint: perm?.canPrint ?? false,
-        canImport: perm?.canImport ?? false,
+      for (const field of PERMISSION_FIELDS) {
+        const op = (USER_FIELD_TO_OP as Record<string, string>)[field]
+        if ((perm as any)?.[field] && op) selectedIds.push(`tableOp:${table.id}:${op}`)
       }
-    })
+    }
   } catch (err) {
     console.error('Permission detail page error:', err)
     return (
@@ -101,7 +108,8 @@ export default async function PermissionsPage({
         realName: targetUser.realName,
         role: targetUser.role?.name || targetUser.role?.label || '未知',
       }}
-      initialPermissions={permissions}
+      tree={tree}
+      initialSelected={selectedIds}
     />
   )
 }

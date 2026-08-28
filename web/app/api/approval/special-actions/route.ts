@@ -26,6 +26,11 @@ export async function GET(req: NextRequest) {
     const isAdmin =
       user.role?.name === 'ADMIN' || !!user.role?.canManageApproval || !!user.role?.canManageTables
 
+    // 可选按目标表过滤（数据页发起仅在当前表下展示专项流程）
+    const { searchParams } = new URL(req.url)
+    const tableIdParam = searchParams.get('tableId')
+    const tableId = tableIdParam ? Number(tableIdParam) : undefined
+
     const wfs = await prisma.approvalWorkflow.findMany({
       where: {
         status: { in: ['ACTIVE', 'PUBLISHED'] },
@@ -36,14 +41,17 @@ export async function GET(req: NextRequest) {
       orderBy: { updatedAt: 'desc' },
     })
 
-    // 按角色过滤：管理员可见全部；普通用户仅当其角色在 visibleRoleIds 中
+    // 按角色过滤：管理员可见全部授权；普通用户仅当其角色在 visibleRoleIds 中
     const visible = wfs.filter(wf => {
       const sa = parseSpecialAction(wf.specialAction)
       if (!sa) return false
-      if (isAdmin) return true
-      const roleIds = sa.visibleRoleIds ?? []
-      if (!Array.isArray(roleIds) || roleIds.length === 0) return false
-      return roleIds.includes(user.roleId)
+      // 指定了目标表时，仅保留该表下的专项流程
+      if (tableId && sa.targetTableId && Number(sa.targetTableId) !== tableId) return false
+      if (!isAdmin) {
+        const roleIds = sa.visibleRoleIds ?? []
+        if (!Array.isArray(roleIds) || roleIds.length === 0 || !roleIds.includes(user.roleId)) return false
+      }
+      return true
     })
 
     const data = visible.map(wf => {

@@ -306,14 +306,32 @@ interface DynamicFormProps {
   disabled?: boolean
   layoutConfig?: FormLayoutConfig | null
   module?: 'survey' | 'levy' | 'both'
+  /** v1.2.3+ 门禁二级：新增记录时仅允许这些字段名可编辑（门禁照片 + 指定字段），其余全部锁定 */
+  restrictToFieldNames?: string[]
+  /** v1.2.3+ 门禁二级：管理员/超管可绕过"先上传图片"锁定，直接编辑全部字段 */
+  ignoreGateLock?: boolean
 }
 
-export function DynamicForm({ fields, values, onChange, disabled, layoutConfig, module = 'both' }: DynamicFormProps) {
+export function DynamicForm({ fields, values, onChange, disabled, layoutConfig, module = 'both', restrictToFieldNames, ignoreGateLock }: DynamicFormProps) {
   const formFields = fields.filter(f => f.showInForm)
 
-  // v1.2.2+ 可填写阶段：当前模块下该字段是否可编辑（combine 全局 disabled）
-  const fieldDisabled = (field: TableField) =>
-    !!disabled || !isFieldEditableInModule(field.editScope, module)
+  // v1.2.2+ 门禁图片：若存在"要求先上传图片"字段且尚未上传，则除该字段外全部锁定
+  const imageGateField = fields.find((f: any) => (f.config as any)?.requireImageUpload)
+  const gateValue = imageGateField ? (values as any)?.[imageGateField.name] : undefined
+  const gateEmpty =
+    gateValue === undefined || gateValue === null || gateValue === '' ||
+    (Array.isArray(gateValue) && gateValue.length === 0)
+  const gateLocked = !!imageGateField && (!disabled) && gateEmpty && !ignoreGateLock
+
+  // v1.2.2+ 可填写阶段：当前模块下该字段是否可编辑（combine 全局 disabled + 门禁锁定 + 新增限定字段）
+  const fieldDisabled = (field: TableField) => {
+    if (!!disabled) return true
+    if (!isFieldEditableInModule(field.editScope, module)) return true
+    if (restrictToFieldNames && !restrictToFieldNames.includes(field.name)) return true
+    // 门禁锁定（先上传照片）不应覆盖新增记录明确允许填写的字段（restrictToFieldNames 中的指定字段始终可填写）
+    if (gateLocked && imageGateField && field.name !== imageGateField.name && !(restrictToFieldNames && restrictToFieldNames.includes(field.name))) return true
+    return false
+  }
 
   const handleChange = (name: string, value: any) => {
     onChange({ ...values, [name]: value })
@@ -997,41 +1015,60 @@ export function DynamicForm({ fields, values, onChange, disabled, layoutConfig, 
   }
 
   /** ========== 主渲染入口 ========== */
+  const gateBanner = imageGateField && (
+    <div className={`mb-3 px-3 py-2 rounded-lg text-sm border ${gateLocked ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-green-300 bg-green-50 text-green-700'}`}>
+      {gateLocked
+        ? <>请先上传「{imageGateField.label}」照片，上传后才能填写其余数据。</>
+        : <>「{imageGateField.label}」照片已上传，可以开始录入数据。</>}
+    </div>
+  )
+
   if (isFormExcelConfig(layoutConfig)) {
-    return renderFormExcelGrid(layoutConfig as FormExcelConfig)
+    return (
+      <div>
+        {gateBanner}
+        {renderFormExcelGrid(layoutConfig as FormExcelConfig)}
+      </div>
+    )
   }
   if (hasValidLayout) {
     return (
-      <div className="excel-form-wrapper">
-        {layoutConfig!.groups.map((group: any) => {
-          // 新版网格格式（有 rows 数组）
-          if (Array.isArray(group.rows) && group.rows.length > 0) {
-            return renderExcelGridGroup(group as FormLayoutGroup)
-          }
-          // 旧版 items 格式
-          if (Array.isArray(group.items)) {
-            return renderItemsGroup(group)
-          }
-          // 最旧版 fields 格式
-          return renderLegacyGroup(group)
-        })}
+      <div>
+        {gateBanner}
+        <div className="excel-form-wrapper">
+          {layoutConfig!.groups.map((group: any) => {
+            // 新版网格格式（有 rows 数组）
+            if (Array.isArray(group.rows) && group.rows.length > 0) {
+              return renderExcelGridGroup(group as FormLayoutGroup)
+            }
+            // 旧版 items 格式
+            if (Array.isArray(group.items)) {
+              return renderItemsGroup(group)
+            }
+            // 最旧版 fields 格式
+            return renderLegacyGroup(group)
+          })}
+        </div>
       </div>
     )
   }
 
   // 无布局 fallback：单列行列表
   return (
-    <div className="excel-form-wrapper">
-      <div className="excel-form-group">
-        <div className="excel-grid" style={{ gridTemplateColumns: '1fr' }}>
-          {formFields.map((field, idx) => {
-            const isLast = idx === formFields.length - 1
-            return (
-              <div key={field.id} className={cn("excel-cell", isLast && "!border-b-0")}>
-                {renderFieldCell(field)}
-              </div>
-            )
-          })}
+    <div>
+      {gateBanner}
+      <div className="excel-form-wrapper">
+        <div className="excel-form-group">
+          <div className="excel-grid" style={{ gridTemplateColumns: '1fr' }}>
+            {formFields.map((field, idx) => {
+              const isLast = idx === formFields.length - 1
+              return (
+                <div key={field.id} className={cn("excel-cell", isLast && "!border-b-0")}>
+                  {renderFieldCell(field)}
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
     </div>

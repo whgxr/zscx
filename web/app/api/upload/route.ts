@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { generateId } from '@/lib/utils'
 import { FileType } from '@prisma/client'
+import { buildObjectKey, buildProxyUrl, ensureBucket, saveObject } from '@/lib/storage'
 
 export const runtime = 'nodejs'
 
@@ -138,21 +138,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: '文件内容与扩展名不符' }, { status: 400 })
     }
 
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads')
-    const dateDir = new Date().toISOString().slice(0, 7).replace('-', '/')
-    const fullDir = path.join(uploadDir, dateDir)
-
-    try {
-      await mkdir(fullDir, { recursive: true })
-    } catch (e) {
-      // 目录已存在
-    }
+    await ensureBucket()
 
     const fileName = `${generateId()}${ext}`
-    const filePath = path.join(fullDir, fileName)
-    const relativePath = `/uploads/${dateDir}/${fileName}`.replace(/\\/g, '/')
+    const objectKey = buildObjectKey('', fileName)
+    const proxyUrl = buildProxyUrl(objectKey)
 
-    await writeFile(filePath, buffer)
+    await saveObject(objectKey, buffer, file.type)
 
     const fileType = getFileType(file.type)
 
@@ -162,7 +154,7 @@ export async function POST(req: NextRequest) {
         fieldName: fieldName || undefined,
         originalName: file.name,
         fileName,
-        filePath: relativePath,
+        filePath: objectKey,
         fileSize: file.size,
         mimeType: file.type,
         fileType,
@@ -172,7 +164,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       file: savedFile,
-      url: relativePath,
+      url: proxyUrl,
     })
   } catch (error) {
     console.error('Upload error:', error)

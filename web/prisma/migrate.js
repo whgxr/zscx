@@ -779,13 +779,17 @@ async function main() {
   }
 
   // ==================== 27. DataRecord.status 枚举追加 v1.2.2 新值 ====================
-  console.log('\n27. 扩展 DataRecord.status 枚举 - 添加 PENDING_APPROVAL/CHANGED/SYNC_PENDING...')
+  console.log('\n27. 扩展 DataRecord.status 枚举 - 添加 PENDING_APPROVAL/CHANGED（已停用 SYNC_PENDING）...')
   try {
+    // 先将存量的 SYNC_PENDING（待同步）记录归入 CHANGED，保证枚举收缩可执行
+    await conn.execute(`
+      UPDATE \`DataRecord\` SET \`status\` = 'CHANGED' WHERE \`status\` = 'SYNC_PENDING'
+    `)
     await conn.execute(`
       ALTER TABLE \`DataRecord\`
-      MODIFY COLUMN \`status\` ENUM('DRAFT','SUBMITTED','REVIEWED','REJECTED','ARCHIVED','PENDING_APPROVAL','CHANGED','SYNC_PENDING') NOT NULL DEFAULT 'DRAFT'
+      MODIFY COLUMN \`status\` ENUM('DRAFT','SUBMITTED','REVIEWED','REJECTED','ARCHIVED','PENDING_APPROVAL','CHANGED') NOT NULL DEFAULT 'DRAFT'
     `)
-    console.log('   ✅ DataRecord.status 枚举扩展完成')
+    console.log('   ✅ DataRecord.status 枚举扩展完成（不含 SYNC_PENDING）')
   } catch (e) {
     console.log('   ⚠️  DataRecord.status 修改跳过:', e.message)
   }
@@ -1163,6 +1167,31 @@ async function main() {
     }
   } catch (e) {
     console.log('   ⚠️  ApprovalWorkflow.specialAction 迁移跳过:', e.message)
+  }
+
+  // ==================== 41. ExportTemplate.documentFileKey / spreadsheetFileKey（ONLYOFFICE 文件化模板） ====================
+  console.log('\n41. ExportTemplate 增加 documentFileKey/spreadsheetFileKey（ONLYOFFICE 文件化模板）...')
+  try {
+    const [dc] = await conn.execute(`SHOW COLUMNS FROM \`ExportTemplate\` LIKE 'documentFileKey'`)
+    if (!dc.length) {
+      await conn.execute('ALTER TABLE `ExportTemplate` ADD COLUMN `documentFileKey` VARCHAR(191) NULL')
+      console.log('   ✅ ExportTemplate.documentFileKey 添加完成')
+    } else {
+      console.log('   ⚠️  ExportTemplate.documentFileKey 已存在，跳过')
+    }
+  } catch (e) {
+    console.log('   ⚠️  ExportTemplate.documentFileKey 迁移跳过:', e.message)
+  }
+  try {
+    const [sc] = await conn.execute(`SHOW COLUMNS FROM \`ExportTemplate\` LIKE 'spreadsheetFileKey'`)
+    if (!sc.length) {
+      await conn.execute('ALTER TABLE `ExportTemplate` ADD COLUMN `spreadsheetFileKey` VARCHAR(191) NULL')
+      console.log('   ✅ ExportTemplate.spreadsheetFileKey 添加完成')
+    } else {
+      console.log('   ⚠️  ExportTemplate.spreadsheetFileKey 已存在，跳过')
+    }
+  } catch (e) {
+    console.log('   ⚠️  ExportTemplate.spreadsheetFileKey 迁移跳过:', e.message)
   }
 
   // ==================== 验证 ====================

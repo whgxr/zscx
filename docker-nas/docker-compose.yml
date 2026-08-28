@@ -35,6 +35,25 @@ services:
       timeout: 5s
       retries: 5
 
+  minio:
+    image: minio/minio:latest
+    container_name: zscx-minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-zscxadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-zscxsecret123456}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD-SHELL", "echo > /dev/tcp/127.0.0.1/9000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   web:
     image: zscx-web:local
     container_name: zscx-web
@@ -50,11 +69,21 @@ services:
       - NEXT_PUBLIC_APP_NAME=${APP_NAME:-房屋征收调查系统}
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
+      # 对象存储 (MinIO / S3 兼容)
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio}
+      - MINIO_PORT=${MINIO_PORT:-9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-zscxadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-zscxsecret123456}
+      - MINIO_BUCKET=${MINIO_BUCKET:-zscx}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+      - MINIO_REGION=${MINIO_REGION:-us-east-1}
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_started
     volumes:
       - uploads:/app/public/uploads
       - backups:/app/backups
@@ -68,3 +97,4 @@ volumes:
   uploads:
   backups:
   redis_data:
+  minio_data:

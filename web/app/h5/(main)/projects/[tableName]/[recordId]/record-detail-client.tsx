@@ -15,6 +15,7 @@ import {
 import { formatDateTime } from '@/lib/utils'
 import { FieldType, RecordStatus } from '@prisma/client'
 import { isFieldEditableInModule } from '@/lib/levy-edit-scope'
+import { SpecialRequestDialog } from '@/components/approval/special-request-dialog'
 
 const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   DRAFT: { label: '草稿', variant: 'secondary' },
@@ -25,7 +26,6 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   // v1.2.2+ 征收模块状态
   PENDING_APPROVAL: { label: '待审批', variant: 'warning' },
   CHANGED: { label: '已变更', variant: 'default' },
-  SYNC_PENDING: { label: '待同步', variant: 'default' },
 }
 
 const statusColorMap: Record<string, string> = {
@@ -40,16 +40,20 @@ interface H5RecordDetailClientProps {
   table: any
   record: any
   canEdit: boolean
+  canDelete?: boolean
+  isAdmin?: boolean
   module?: string
 }
 
-export function H5RecordDetailClient({ table, record, canEdit, module: moduleProp = '' }: H5RecordDetailClientProps) {
+export function H5RecordDetailClient({ table, record, canEdit, canDelete = false, isAdmin = false, module: moduleProp = '' }: H5RecordDetailClientProps) {
   const router = useRouter()
   const currentModule = moduleProp || ''
   const moduleType = currentModule === 'survey' ? 'survey' : currentModule === 'levy' ? 'levy' : 'both'
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState<Record<string, any>>(record.data as any || {})
   const [loading, setLoading] = useState(false)
+  // 专项审批发起弹窗
+  const [approvalOpen, setApprovalOpen] = useState(false)
 
   // 附件
   const [attachments, setAttachments] = useState<any[]>(record.attachments || [])
@@ -62,6 +66,22 @@ export function H5RecordDetailClient({ table, record, canEdit, module: modulePro
 
   const sInfo = statusMap[record.status as RecordStatus]
   const formFields = table.fields.filter((f: any) => f.showInForm)
+
+  // v1.2.2+ 门禁图片：编辑态下若门禁图片未上传，锁定其它字段（管理员/超管可旁路）
+  const imageGateField = table.fields.find((f: any) => (f.config as any)?.requireImageUpload)
+  const gateVal = imageGateField ? (isEditing ? formData[imageGateField.name] : record.data?.[imageGateField.name]) : undefined
+  const gateEmpty =
+    gateVal === undefined || gateVal === null || gateVal === '' ||
+    (Array.isArray(gateVal) && gateVal.length === 0)
+  const gateLocked = !!imageGateField && isEditing && gateEmpty && !isAdmin
+  // 非编辑态下，判断该记录是否已上传门禁图片以决定"编辑"是否可点击
+  const readGateEmpty = imageGateField
+    ? (() => {
+        const v = record.data?.[imageGateField.name]
+        return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
+      })()
+    : false
+  const canClickEdit = isAdmin || !readGateEmpty
 
   const handleSave = async () => {
     setLoading(true)
@@ -153,10 +173,75 @@ export function H5RecordDetailClient({ table, record, canEdit, module: modulePro
   const renderFieldValue = (field: any) => {
     const val = isEditing ? formData[field.name] : record.data?.[field.name]
     const isEmpty = val === undefined || val === null || val === ''
-    const editable = isFieldEditableInModule(field.editScope, moduleType)
+    const isGateField = imageGateField && field.name === imageGateField.name
+    const editable = (isGateField || !gateLocked) && isFieldEditableInModule(field.editScope, moduleType)
 
     if (isEditing) {
       switch (field.type) {
+        case FieldType.UPLOAD_IMAGE: {
+          const urls: string[] = Array.isArray(val) ? val : (val ? [val] : [])
+          return (
+            <div className="flex flex-wrap gap-2">
+              {urls.map((url, idx) => (
+                <div key={idx} className="relative w-20 h-20 rounded-lg overflow-hidden bg-gray-100">
+                  <img src={url} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, [field.name]: urls.filter((_, i) => i !== idx) })}
+                    className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              {editable && (
+                <label className="w-20 h-20 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer">
+                  <Camera className="w-6 h-6 text-gray-400" />
+                  <span className="text-xs text-gray-400 mt-1">拍照</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        const fd = new FormData()
+                        fd.append('file', file)
+                        fd.append('fieldName', field.name)
+                        try {
+                          const res = await fetch('/api/upload', { method: 'POST', body: fd })
+                          if (res.ok) {
+                            const data = await res.json()
+                            const current = formData[field.name]
+                            const arr: string[] = Array.isArray(current) ? current : (current ? [current] : [])
+                            setFormData({ ...formData, [field.name]: [...arr, data.url] })
+                          }
+                        } catch { alert('上传失败') }
+                      }
+                    }}
+                  />
+                </label>
+              )}
+            </div>
+          )
+        }
+        case FieldType.UPLOAD_FILE: {
+          const files: string[] = Array.isArray(val) ? val : (val ? [val] : [])
+          return (
+            <div className="space-y-2">
+              {files.map((url, idx) => (
+                <div key={idx} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                  <FileText className="w-4 h-4 text-gray-500" />
+                  <span className="text-sm flex-1 truncate">{url.split('/').pop()}</span>
+                  <button type="button" onClick={() => setFormData({ ...formData, [field.name]: files.filter((_, i) => i !== idx) })} className="text-red-500">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )
+        }
         case FieldType.TEXT:
         case FieldType.PHONE:
         case FieldType.EMAIL:
@@ -327,7 +412,7 @@ export function H5RecordDetailClient({ table, record, canEdit, module: modulePro
                 </Button>
               </div>
             ) : (
-              <Button size="sm" className="h-8 rounded-lg" onClick={() => setIsEditing(true)}>
+              <Button size="sm" className="h-8 rounded-lg" disabled={!canClickEdit} title={canClickEdit ? '' : `请先在列表上传「${imageGateField?.label ?? '门牌'}」照片`} onClick={() => setIsEditing(true)}>
                 <Edit className="w-4 h-4 mr-1" />
                 编辑
               </Button>
@@ -347,19 +432,7 @@ export function H5RecordDetailClient({ table, record, canEdit, module: modulePro
             </p>
             <div className="grid grid-cols-5 gap-1.5">
               <button
-                onClick={async () => {
-                  if (!confirm('确认发起审批？')) return
-                  try {
-                    const res = await fetch('/api/approval/instances', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ tableId: table.id, recordId: record.id, triggerEvent: 'MANUAL' }),
-                    })
-                    const data = await res.json()
-                    if (res.ok) alert('已发起审批')
-                    else alert(data.message || '发起失败')
-                  } catch { alert('发起失败') }
-                }}
+                onClick={() => setApprovalOpen(true)}
                 className="flex flex-col items-center gap-1 p-2 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100"
               >
                 <Send className="w-4 h-4" />
@@ -419,6 +492,13 @@ export function H5RecordDetailClient({ table, record, canEdit, module: modulePro
           <h3 className="text-sm font-medium text-gray-900 mb-3">
             {isEditing ? '编辑信息' : '基本信息'}
           </h3>
+          {imageGateField && isEditing && (
+            <div className={`px-3 py-2.5 rounded-xl text-sm border mb-3 ${gateLocked ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-green-300 bg-green-50 text-green-700'}`}>
+              {gateLocked
+                ? <>请先上传「{imageGateField.label}」照片，上传后才能编辑其余数据。</>
+                : <>「{imageGateField.label}」照片已上传，可以开始录入数据。</>}
+            </div>
+          )}
           <div className="space-y-3">
             {formFields.map((field: any) => (
               <div key={field.id} className="space-y-1">
@@ -565,7 +645,7 @@ export function H5RecordDetailClient({ table, record, canEdit, module: modulePro
                     >
                       <Eye className="w-4 h-4" />
                     </Button>
-                    {canEdit && (
+                    {canDelete && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -604,6 +684,15 @@ export function H5RecordDetailClient({ table, record, canEdit, module: modulePro
             </div>
           </div>
         </div>
+
+        <SpecialRequestDialog
+          open={approvalOpen}
+          onOpenChange={setApprovalOpen}
+          tableId={table.id}
+          tableLabel={table.label}
+          defaultRecordId={record.id}
+          defaultRecordData={record.data}
+        />
       </div>
     </div>
   )

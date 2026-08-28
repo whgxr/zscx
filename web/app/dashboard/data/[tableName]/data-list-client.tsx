@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -62,12 +62,15 @@ import {
   ClipboardList,
   Scale,
   History,
+  Send,
 } from 'lucide-react'
 import { ExportDialog } from '@/components/export/export-dialog'
 import { SnapshotHistoryDialog } from '@/components/snapshot-history-dialog'
 import { ImportDialog } from '@/components/import/import-dialog'
 import { QrCodeButton } from '@/components/qr-code-button'
+import { SpecialRequestDialog } from '@/components/approval/special-request-dialog'
 import { formatDateTime } from '@/lib/utils'
+import { useTabs, resolveKeyFromHref } from '@/components/layout/tabs-context'
 import { DataTable, TableField, RecordStatus, Role, FieldType } from '@prisma/client'
 import JSZip from 'jszip'
 import jsPDF from 'jspdf'
@@ -102,7 +105,6 @@ const statusMap: Record<RecordStatus, { label: string; variant: string }> = {
   // v1.2.2+ 征收模块状态
   PENDING_APPROVAL: { label: '待审批', variant: 'warning' },
   CHANGED: { label: '已变更', variant: 'default' },
-  SYNC_PENDING: { label: '待同步', variant: 'default' },
 }
 
 function ImageThumbnail({ src, alt = '' }: { src: string; alt?: string }) {
@@ -158,8 +160,22 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
   const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false)
   const [snapshotRecord, setSnapshotRecord] = useState<any>(null)
 
+  // 专项审批发起弹窗
+  const [approvalOpen, setApprovalOpen] = useState(false)
+  // 从哪条记录发起（列表行）：用于锁定目标记录，无需再选
+  const [approvalTarget, setApprovalTarget] = useState<{ id: number; data: any } | null>(null)
+
   const currentModule = moduleProp || ''
   const moduleQuery = currentModule ? `?module=${currentModule}` : ''
+  const { prepareLabel } = useTabs()
+  // 注册标签标题（与侧边栏一致：表名（调查/征收））
+  useEffect(() => {
+    const tabLabel = currentModule
+      ? `${table.label}（${currentModule === 'survey' ? '调查' : '征收'}）`
+      : table.label
+    prepareLabel(resolveKeyFromHref(window.location.href), tabLabel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // 列设置按模块分开存储，避免调查/征收共用同一份列配置
   const columnStorageKey = `table_columns_${table.name}${currentModule ? `_${currentModule}` : ''}`
 
@@ -175,6 +191,12 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
   const [uploading, setUploading] = useState(false)
   const [attachmentCounts, setAttachmentCounts] = useState<Record<number, number>>({})
   const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<number[]>([])
+
+  // v1.2.3+ 门禁二级：数据列表直接上传门禁图片
+  const gateField = table.fields.find((f: any) => (f.config as any)?.requireImageUpload)
+  const isAdminRole = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER'
+  const [gateUploadingId, setGateUploadingId] = useState<number | null>(null)
+  const gateFileInputRef = useRef<HTMLInputElement>(null)
 
   const canEdit = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canEdit
   const canDelete = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canDelete
@@ -334,6 +356,60 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
       }
     } catch (err) {
       alert('删除失败')
+    }
+  }
+
+  // v1.2.3+ 门禁二级：数据列表直接上传门禁图片（上传成功通过 PUT 触发通知，随后刷新列表）
+  const handleGateUploadTrigger = (record: any) => {
+    if (!gateField || gateUploadingId) return
+    setGateUploadingId(record.id)
+    gateFileInputRef.current?.click()
+  }
+
+  const handleGateFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    const recordId = gateUploadingId
+    e.target.value = ''
+    if (!file || !gateField || recordId === null) {
+      setGateUploadingId(null)
+      return
+    }
+    try {
+      const uploadRes = await fetch('/api/upload', {
+        method: 'POST',
+        body: (() => {
+          const fd = new FormData()
+          fd.append('file', file)
+          fd.append('fieldName', gateField.name)
+          return fd
+        })(),
+      })
+      if (!uploadRes.ok) {
+        alert('图片上传失败'); setGateUploadingId(null); return
+      }
+      const { url } = await uploadRes.json()
+      const record = records.find((r: any) => r.id === recordId)
+      if (!record) { setGateUploadingId(null); return }
+      const cur = record.data?.[gateField.name]
+      const curArr: string[] = Array.isArray(cur) ? cur : (cur ? [cur] : [])
+      const updRes = await fetch(`/api/data/${table.name}/${recordId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          data: { ...(record.data || {}), [gateField.name]: [...curArr, url] },
+          status: record.status,
+        }),
+      })
+      if (!updRes.ok) {
+        const d = await updRes.json().catch(() => ({}))
+        alert((d as any).message || '保存失败')
+      } else {
+        fetchRecords()
+      }
+    } catch (err) {
+      alert('上传失败')
+    } finally {
+      setGateUploadingId(null)
     }
   }
 
@@ -809,7 +885,17 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
     }
   }
 
-  const totalPages = Math.ceil(total / pageSize)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  // 分页页码窗口：显示当前页附近的页码（首/末/…），避免页数多时过长
+  const pageNumbers = useMemo(() => {
+    const pages = new Set<number>()
+    pages.add(1)
+    pages.add(totalPages)
+    for (let p = page - 2; p <= page + 2; p++) {
+      if (p >= 1 && p <= totalPages) pages.add(p)
+    }
+    return Array.from(pages).sort((a, b) => a - b)
+  }, [page, totalPages])
   const canCreate = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canCreate
   const canPrint = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canPrint
   const canExportExcel = user.role?.name === 'ADMIN' || user.role?.name === 'MANAGER' || permission?.canExportExcel
@@ -961,6 +1047,10 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
                 records.map((record) => {
                   const statusInfo = statusMap[record.status as RecordStatus]
                   const isSelected = selectedRecordIds.includes(record.id)
+                  // v1.2.2+ 门禁图片：记录是否已上传门禁图片
+                  const gateVal = gateField ? record.data?.[gateField.name] : undefined
+                  const hasGateImage = !(gateVal === undefined || gateVal === null || gateVal === '' ||
+                    (Array.isArray(gateVal) && gateVal.length === 0))
                   return (
                     <TableRow key={record.id}>
                       <TableCell>
@@ -1015,7 +1105,14 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
                         </TableCell>
                       ))}
                       <TableCell>
-                        <Badge variant={statusInfo?.variant as any}>{statusInfo?.label}</Badge>
+                        {hasGateImage && (
+                          <div className="flex items-center justify-center mb-1">
+                            <Badge className="bg-green-500 text-white border-none text-xs">已上传图片</Badge>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-center">
+                          <Badge variant={statusInfo?.variant as any}>{statusInfo?.label}</Badge>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Button
@@ -1054,10 +1151,33 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
                             <History className="w-4 h-4" />
                           </Button>
                           <QrCodeButton tableName={table.name} recordId={record.id} />
+                          {gateField && !hasGateImage && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              title="上传调查登记表照片"
+                              disabled={gateUploadingId !== null}
+                              onClick={() => handleGateUploadTrigger(record)}
+                              className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                            >
+                              <Upload className="w-4 h-4" />
+                              <span className="ml-1">上传</span>
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
-                            title="编辑"
+                            className="text-indigo-600 hover:text-indigo-700"
+                            title="发起专项动作审批（已锁定当前记录）"
+                            onClick={() => { setApprovalTarget({ id: record.id, data: record.data }); setApprovalOpen(true) }}
+                          >
+                            <Send className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title={!hasGateImage && !isAdminRole ? '请先上传调查登记表照片' : '编辑'}
+                            disabled={!hasGateImage && !isAdminRole}
                             onClick={() => router.push(`/dashboard/data/${table.name}/${record.id}?mode=edit${moduleQuery ? `&${moduleQuery.substring(1)}` : ''}`)}
                           >
                             <Edit className="w-4 h-4" />
@@ -1111,7 +1231,7 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
               <p className="text-sm text-gray-500">
                 共 {total} 条记录，第 {page} / {totalPages} 页
               </p>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-1">
                 <Button
                   variant="outline"
                   size="sm"
@@ -1120,6 +1240,23 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
+                {pageNumbers.map((p, idx) => {
+                  const prev = idx > 0 ? pageNumbers[idx - 1] : 0
+                  const showGap = p - prev > 1
+                  return (
+                    <Fragment key={p}>
+                      {showGap && <span className="px-1 text-sm text-gray-400">…</span>}
+                      <Button
+                        variant={p === page ? 'default' : 'outline'}
+                        size="sm"
+                        className="min-w-[32px]"
+                        onClick={() => setPage(p)}
+                      >
+                        {p}
+                      </Button>
+                    </Fragment>
+                  )
+                })}
                 <Button
                   variant="outline"
                   size="sm"
@@ -1467,15 +1604,17 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
                       >
                         <Eye className="w-4 h-4" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-500 hover:text-red-600"
-                        onClick={() => handleDeleteAttachment(attachment.id)}
-                        title="删除"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+                      {canDelete && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-500 hover:text-red-600"
+                          onClick={() => handleDeleteAttachment(attachment.id)}
+                          title="删除"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1549,6 +1688,26 @@ export function DataListClient({ table, user, permission, module: moduleProp }: 
         recordId={snapshotRecord?.id ?? 0}
         tableLabel={table.label}
       />
+
+      <SpecialRequestDialog
+        open={approvalOpen}
+        onOpenChange={setApprovalOpen}
+        tableId={table.id}
+        tableLabel={table.label}
+        defaultRecordId={approvalTarget?.id}
+        defaultRecordData={approvalTarget?.data}
+        onDone={fetchRecords}
+      />
+
+      {gateField && (
+        <input
+          ref={gateFileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleGateFileChange}
+        />
+      )}
     </div>
   )
 }

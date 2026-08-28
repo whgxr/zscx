@@ -39,6 +39,25 @@ services:
       timeout: 5s
       retries: 5
 
+  minio:
+    image: minio/minio:latest
+    container_name: zscx-minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-zscxadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-zscxsecret123456}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD-SHELL", "echo > /dev/tcp/127.0.0.1/9000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   web:
     build:
       context: ../web
@@ -59,11 +78,30 @@ services:
       - NEXT_PUBLIC_APP_NAME=${APP_NAME:-房屋征收调查系统}
       - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-https://REDACTED_DOMAIN}
       - NODE_ENV=production
+      # ONLYOFFICE Document Server（模板编辑器）
+      # 前端加载 DS 编辑器的地址：内网默认用内网 IP；外网默认用 http 直连地址（带端口）。
+      # 注意：浏览器"混合内容"限制，https 页面(如 REDACTED_DOMAIN)无法加载 http 的 DS；模板设计须走 http 页面(如 http://REDACTED_DOMAIN:777)才可加载 http 的 DS。
+      - ONLYOFFICE_DS_URL=${ONLYOFFICE_DS_URL:-http://REDACTED_IP:8088}
+      # 浏览器侧加载 DS 的外网地址（office-config 返回的 ds）；DS 为 http 直连时必须也用 http，否则 https 页面会 Mixed Content 拦截
+      - ONLYOFFICE_PUBLIC_DS_URL=${ONLYOFFICE_PUBLIC_DS_URL:-http://REDACTED_DOMAIN:8088}
+      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-REDACTED_JWT}
+      # DS 后端下载 document.url / 回调 callbackUrl 用的内网可达地址（避免 DS 拉取 https 公网失败）
+      - ONLYOFFICE_INTERNAL_URL=${ONLYOFFICE_INTERNAL_URL:-http://REDACTED_IP:777}
+      # 对象存储 (MinIO / S3 兼容)
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio}
+      - MINIO_PORT=${MINIO_PORT:-9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-zscxadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-zscxsecret123456}
+      - MINIO_BUCKET=${MINIO_BUCKET:-zscx}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+      - MINIO_REGION=${MINIO_REGION:-us-east-1}
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_started
     volumes:
       - uploads:/app/public/uploads
       - backups:/app/backups
@@ -72,5 +110,6 @@ services:
 volumes:
   mysql_data:
   redis_data:
+  minio_data:
   uploads:
   backups:

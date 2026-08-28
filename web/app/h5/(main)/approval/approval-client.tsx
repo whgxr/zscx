@@ -60,7 +60,7 @@ export function H5ApprovalClient({ userId, todo, mine }: { userId: number; todo:
   const handleAction = async (t: TodoItem, action: 'APPROVE' | 'REJECT' | 'TRANSFER', comment = '', transferTo?: number) => {
     setActing(t.nodeId)
     try {
-      const res = await fetch('/api/approval/nodes/act', {
+      const res = await fetch(`/api/approval/nodes/${t.nodeId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

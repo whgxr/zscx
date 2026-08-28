@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { 
   Bell, 
   X, 
@@ -85,6 +86,7 @@ const priorityLabels: Record<string, string> = {
 }
 
 export function NotificationsClient({ user }: NotificationsClientProps) {
+  const router = useRouter()
   const [notifications, setNotifications] = useState<(NotificationWithCreator & { isRead: boolean })[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [showPublishDialog, setShowPublishDialog] = useState(false)
@@ -183,6 +185,15 @@ export function NotificationsClient({ user }: NotificationsClientProps) {
     }
   }
 
+  const handleNotificationClick = (notification: NotificationWithCreator & { isRead: boolean }) => {
+    if (!notification.isRead) {
+      markAsRead(notification.id)
+    }
+    if ((notification as any).linkUrl) {
+      router.push((notification as any).linkUrl)
+    }
+  }
+
   const filteredNotifications = notifications.filter(n =>
     n.title.toLowerCase().includes(searchKeyword.toLowerCase()) ||
     n.content.toLowerCase().includes(searchKeyword.toLowerCase())
@@ -238,9 +249,10 @@ export function NotificationsClient({ user }: NotificationsClientProps) {
             {filteredNotifications.map((notification) => (
               <Card 
                 key={notification.id} 
-                className={`p-4 transition-colors ${
-                  notification.isRead ? 'bg-white' : 'bg-primary/5 border-primary/20'
+                className={`p-4 transition-colors cursor-pointer ${
+                  notification.isRead ? 'bg-white hover:bg-gray-50' : 'bg-primary/5 border-primary/20 hover:bg-primary/10'
                 }`}
+                onClick={() => handleNotificationClick(notification)}
               >
                 <div className="flex items-start gap-4">
                   <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${

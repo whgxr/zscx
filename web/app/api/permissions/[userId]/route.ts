@@ -1,6 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { buildPermissionTree, USER_TABLE_OPS, USER_OP_TO_FIELD, USER_FIELD_TO_OP } from '@/lib/permission-tree'
+
+const PERMISSION_FIELDS = [
+  'canView',
+  'canCreate',
+  'canEdit',
+  'canDelete',
+  'canExportExcel',
+  'canExportPdf',
+  'canPrint',
+  'canImport',
+] as const
+
+function tablePermissionFromRecord(perm: any) {
+  return {
+    canView: perm?.canView ?? false,
+    canCreate: perm?.canCreate ?? false,
+    canEdit: perm?.canEdit ?? false,
+    canDelete: perm?.canDelete ?? false,
+    canExportExcel: perm?.canExportExcel ?? false,
+    canExportPdf: perm?.canExportPdf ?? false,
+    canPrint: perm?.canPrint ?? false,
+    canImport: perm?.canImport ?? false,
+  }
+}
 
 export async function GET(
   req: NextRequest,
@@ -13,7 +38,9 @@ export async function GET(
     }
 
     const userId = parseInt(params.userId)
-    
+
+    const tree = await buildPermissionTree(USER_TABLE_OPS)
+
     const tables = await prisma.dataTable.findMany({
       where: { status: 'ACTIVE' },
       orderBy: { sortOrder: 'asc' },
@@ -24,24 +51,23 @@ export async function GET(
       },
     })
 
+    const selectedIds: string[] = []
     const permissions = tables.map(table => {
       const perm = table.permissions[0]
+      const p = tablePermissionFromRecord(perm)
+      for (const field of PERMISSION_FIELDS) {
+        const op = USER_FIELD_TO_OP[field]
+        if (p[field] && op) selectedIds.push(`tableOp:${table.id}:${op}`)
+      }
       return {
         tableId: table.id,
         tableName: table.name,
         tableLabel: table.label,
-        canView: perm?.canView ?? false,
-        canCreate: perm?.canCreate ?? false,
-        canEdit: perm?.canEdit ?? false,
-        canDelete: perm?.canDelete ?? false,
-        canExportExcel: perm?.canExportExcel ?? false,
-        canExportPdf: perm?.canExportPdf ?? false,
-        canPrint: perm?.canPrint ?? false,
-        canImport: perm?.canImport ?? false,
+        ...p,
       }
     })
 
-    return NextResponse.json({ permissions })
+    return NextResponse.json({ tree, selectedIds, permissions })
   } catch (error) {
     console.error('Get permissions error:', error)
     return NextResponse.json({ message: '获取权限失败' }, { status: 500 })
@@ -60,42 +86,61 @@ export async function PUT(
 
     const userId = parseInt(params.userId)
     const body = await req.json()
-    const { permissions } = body
 
-    for (const perm of permissions) {
+    // 兼容两种提交格式：
+    //   1) 树形：{ selectedIds: string[] }（tableOp:{tableId}:{OP}）
+    //   2) 旧表格：{ permissions: [{ tableId, canView, ... }] }
+    let selectedIds: string[] = []
+    if (Array.isArray(body.selectedIds)) {
+      selectedIds = body.selectedIds.filter((x: any) => typeof x === 'string')
+    } else if (Array.isArray(body.permissions)) {
+      for (const perm of body.permissions) {
+        for (const field of PERMISSION_FIELDS) {
+          const op = USER_FIELD_TO_OP[field]
+          if (perm[field] && op) selectedIds.push(`tableOp:${perm.tableId}:${op}`)
+        }
+      }
+    }
+
+    // 按表聚合操作权限
+    const byTable: Record<number, Record<string, boolean>> = {}
+    for (const id of selectedIds) {
+      const m = /^tableOp:(\d+):([A-Z_]+)$/.exec(id)
+      if (!m) continue
+      const tableId = Number(m[1])
+      const field = USER_OP_TO_FIELD[m[2]]
+      if (!field) continue
+      byTable[tableId] = byTable[tableId] || {}
+      byTable[tableId][field] = true
+    }
+
+    const tables = await prisma.dataTable.findMany({
+      where: { status: 'ACTIVE' },
+      select: { id: true },
+    })
+
+    for (const table of tables) {
+      const fields = byTable[table.id] || {}
+      const p = tablePermissionFromRecord(fields)
+      const anyTrue = PERMISSION_FIELDS.some(f => p[f])
+
       const existing = await prisma.tablePermission.findUnique({
-        where: { userId_tableId: { userId, tableId: perm.tableId } },
+        where: { userId_tableId: { userId, tableId: table.id } },
       })
 
-      if (existing) {
-        await prisma.tablePermission.update({
-          where: { id: existing.id },
-          data: {
-            canView: perm.canView,
-            canCreate: perm.canCreate,
-            canEdit: perm.canEdit,
-            canDelete: perm.canDelete,
-            canExportExcel: perm.canExportExcel,
-            canExportPdf: perm.canExportPdf,
-            canPrint: perm.canPrint,
-            canImport: perm.canImport,
-          },
-        })
-      } else if (perm.canView || perm.canCreate || perm.canEdit || perm.canDelete || perm.canExportExcel || perm.canExportPdf || perm.canPrint || perm.canImport) {
-        await prisma.tablePermission.create({
-          data: {
-            userId,
-            tableId: perm.tableId,
-            canView: perm.canView,
-            canCreate: perm.canCreate,
-            canEdit: perm.canEdit,
-            canDelete: perm.canDelete,
-            canExportExcel: perm.canExportExcel,
-            canExportPdf: perm.canExportPdf,
-            canPrint: perm.canPrint,
-            canImport: perm.canImport,
-          },
-        })
+      if (anyTrue) {
+        if (existing) {
+          await prisma.tablePermission.update({
+            where: { id: existing.id },
+            data: { ...p },
+          })
+        } else {
+          await prisma.tablePermission.create({
+            data: { userId, tableId: table.id, ...p },
+          })
+        }
+      } else if (existing) {
+        await prisma.tablePermission.delete({ where: { id: existing.id } })
       }
     }
 
@@ -104,7 +149,7 @@ export async function PUT(
         userId: currentUser.id,
         action: 'UPDATE_PERMISSIONS',
         module: 'PERMISSION',
-        detail: { userId, permissions },
+        detail: { userId, selectedCount: selectedIds.length },
       },
     })
 

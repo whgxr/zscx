@@ -3,8 +3,17 @@ import { readFile } from 'fs/promises'
 import path from 'path'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { getObjectBuffer } from '@/lib/storage'
 
 export const runtime = 'nodejs'
+
+/** 读取附件内容：新文件从对象存储读，旧文件（filePath 以 /uploads/ 开头）从本地磁盘读 */
+async function readAttachmentBuffer(attachment: { filePath: string }): Promise<Buffer> {
+  if (attachment.filePath.startsWith('/uploads/')) {
+    return readFile(path.join(process.cwd(), 'public', attachment.filePath))
+  }
+  return getObjectBuffer(attachment.filePath)
+}
 
 async function getPdfPageCount(buffer: Buffer): Promise<number> {
   try {
@@ -56,11 +65,10 @@ export async function GET(
       return NextResponse.json({ message: '附件不存在' }, { status: 404 })
     }
 
-    const filePath = path.join(process.cwd(), 'public', attachment.filePath)
     let fileBuffer: Buffer
 
     try {
-      fileBuffer = await readFile(filePath)
+      fileBuffer = await readAttachmentBuffer(attachment)
     } catch (e) {
       return NextResponse.json({ message: '文件不存在' }, { status: 404 })
     }

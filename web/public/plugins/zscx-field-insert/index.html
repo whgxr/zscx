@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>字段插入</title>
+  <!-- ONLYOFFICE 插件桥接脚本：提供 window.Asc.plugin（与编辑器 postMessage 通信的 API）。
+       该文件取自 DS 容器 /var/www/onlyoffice/documentserver/sdkjs-plugins/v1/plugins.js，
+       同源托管避免跨域。 -->
+  <script src="./plugins.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .wrap { display: flex; flex-direction: column; height: 100%; background: #f8fafc; color: #334155; }
+    .head { padding: 10px 12px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0; background: #fff; display: flex; align-items: center; gap: 6px; }
+    .head .hint { margin-left: auto; font-size: 10px; font-weight: 400; color: #94a3b8; }
+    .search { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
+    .search input { width: 100%; padding: 5px 8px 5px 22px; font-size: 12px; border: 1px solid #cbd5e1; border-radius: 5px; outline: none; background: #fff url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>') no-repeat 6px center; }
+    .search input:focus { border-color: #3b82f6; }
+    .list { flex: 1; overflow-y: auto; padding: 6px; }
+    .field { display: block; width: 100%; text-align: left; padding: 7px 9px; margin-bottom: 5px; font-size: 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; transition: all .12s; }
+    .field:hover { border-color: #3b82f6; background: #eff6ff; }
+    .field .label { display: block; color: #0f172a; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .field .name { display: block; color: #3b82f6; font-size: 10px; font-family: ui-monospace, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .empty { padding: 20px 12px; text-align: center; color: #94a3b8; font-size: 12px; }
+    .tip { padding: 8px 12px; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <script>window.__ZSCX_FIELDS__ = /*__ZSCX_FIELDS__*/[];</script>
+  <div class="wrap">
+    <div class="head">可插入字段 <span class="hint" id="status">点击插入到光标</span></div>
+    <div class="search"><input id="kw" type="text" placeholder="搜索字段..." /></div>
+    <div class="list" id="list"></div>
+    <div class="tip">点击字段后自动插入 <b>{{字段}}</b> 到当前光标处，Word/Excel 均适用。</div>
+  </div>
+
+  <script>
+    (function () {
+      var FIELDS = [];
+      var listEl = document.getElementById('list'),
+        kwEl = document.getElementById('kw');
+
+      function getOptions() {
+        try {
+          if (window.Asc && window.Asc.plugin && window.Asc.plugin.info && window.Asc.plugin.info.options)
+            return window.Asc.plugin.info.options;
+        } catch (e) {}
+        // 兜底：尝试全窗口 scope（插件宿主可能挂载在顶层）
+        try {
+          if (window.top && window.top.Asc && window.top.Asc.plugin && window.top.Asc.plugin.info && window.top.Asc.plugin.info.options)
+            return window.top.Asc.plugin.info.options;
+        } catch (e) {}
+        return {};
+      }
+
+      // 同源拉取字段：插件 iframe 与业务系统同源(:777)，直接 fetch fields.json，
+      // 规避 ONLYOFFICE 插件沙箱改写 HTML 导致的内联注入失效。（最可靠）
+      function templateIdFromUrl() {
+        try {
+          var m = (location.pathname || '').match(/export-templates\/(\d+)\//);
+          if (m) return m[1];
+          var q = new URLSearchParams(location.search);
+          if (q.get('templateId')) return q.get('templateId');
+        } catch (e) {}
+        return null;
+      }
+      function fetchFields(cb) {
+        var tid = templateIdFromUrl();
+        if (!tid) return cb([]);
+        fetch('/api/export-templates/' + tid + '/office-plugin/fields.json', { cache: 'no-store' })
+          .then(function (r) { return r.json(); })
+          .then(function (j) { cb((j && j.fields) || []); })
+          .catch(function () { cb([]); });
+      }
+
+      function getFields() {
+        // 优先：动态路由注入到 window（最可靠，跨域插件也能拿到）
+        try {
+          if (window.__ZSCX_FIELDS__ && window.__ZSCX_FIELDS__.length) return window.__ZSCX_FIELDS__;
+        } catch (e) {}
+        // 其次：编辑器 config 的 plugins.options[guid]
+        var opts = getOptions() || {};
+        var f = opts.fields || (opts.all && opts.all.fields);
+        if (f && f.length) return f;
+        return [];
+      }
+
+      function render() {
+        var q = (kwEl.value || '').trim().toLowerCase();
+        var list = q
+          ? FIELDS.filter(function (f) { return (f.label || '').toLowerCase().indexOf(q) >= 0 || (f.name || '').toLowerCase().indexOf(q) >= 0; })
+          : FIELDS;
+        listEl.innerHTML = '';
+        if (!list.length) {
+          var e = document.createElement('div');
+          e.className = 'empty';
+          e.textContent = q ? '无匹配字段' : '暂无可插入字段';
+          listEl.appendChild(e);
+          return;
+        }
+        list.forEach(function (f) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'field';
+          var s1 = document.createElement('span'); s1.className = 'label'; s1.textContent = f.label || f.name;
+          var s2 = document.createElement('span'); s2.className = 'name'; s2.textContent = '{{' + f.name + '}}';
+          btn.appendChild(s1); btn.appendChild(s2);
+          btn.addEventListener('click', function () { insertField(f); });
+          listEl.appendChild(btn);
+        });
+      }
+
+      function toast(msg) {
+        // 非阻塞提示：优先面板标题，其次 showMessage（避免阻塞连续插入）
+        setStatus(String(msg));
+      }
+      function setStatus(msg) {
+        try {
+          var s = document.getElementById('status');
+          if (s) s.textContent = String(msg);
+        } catch (e) {}
+      }
+
+      // 用 callCommand（Document Builder）直接对活动单元格写入占位符。
+      // 优点：1) 一次调用同步完成，可连续插入（无阻塞 alert）；2) SetValue 对合并单元格
+      // 合法，不会报「不能改变合并单元的一部分」。参数经 Asc.scope 传入 builder 作用域。
+      // 若当前环境无 callCommand 则回退 executeMethod("PasteText")。
+      function insertField(f) {
+        var text = '{{' + f.name + '}}';
+        setStatus('插入中...');
+        var pc = window.Asc && window.Asc.plugin;
+        if (pc && typeof pc.callCommand === 'function') {
+          window.Asc.scope = window.Asc.scope || {};
+          window.Asc.scope.__zscxText = text;
+          try {
+            pc.callCommand(
+              function () {
+                var oRange = null;
+                try { oRange = Api.GetSelection(); } catch (e) {}
+                if (!oRange) { try { oRange = Api.GetActiveSheet().GetRange("A1"); } catch (e2) {} }
+                if (oRange) { oRange.SetValue(Asc.scope.__zscxText); }
+              },
+              function () { setStatus('已插入 ' + text); }
+            );
+            return;
+          } catch (e) {
+            // 继续回退
+          }
+        }
+        // 回退：executeMethod PasteText（需进入单元格编辑态插入到光标）
+        try {
+          pc.executeMethod(
+            "PasteText",
+            [text],
+            function () { setStatus('已插入 ' + text); },
+            function () { setStatus('未插入：请先在单元格内双击进入编辑态'); }
+          );
+        } catch (e2) {
+          setStatus('插入失败：' + ((e2 && e2.message) || e2));
+        }
+      }
+
+      // ONLYOFFICE 插件初始化
+      if (window.Asc && window.Asc.plugin) {
+        window.Asc.plugin.init = function () {
+          FIELDS = getFields();
+          render();
+          if (!FIELDS.length) { fetchFields(function (f) { if (f.length) { FIELDS = f; render(); } }); }
+          try { window.Asc.plugin.attachEvent("onVisualHeightChanged", render); } catch (e) {}
+        };
+        // 兼容不同版本：直接渲染
+        setTimeout(function () {
+          var flds = getFields();
+          if (flds.length) { FIELDS = flds; render(); }
+          else { fetchFields(function (f) { if (f.length) { FIELDS = f; render(); } }); }
+        }, 300);
+      }
+
+      kwEl.addEventListener('input', render);
+      FIELDS = getFields();
+      render();
+      if (!FIELDS.length) { fetchFields(function (f) { if (f.length) { FIELDS = f; render(); } }); }
+    })();
+  </script>
+</body>
+</html>
