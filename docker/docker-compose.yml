@@ -58,6 +58,31 @@ services:
       timeout: 5s
       retries: 5
 
+  onlyoffice-ds:
+    # 国内服务器如拉取缓慢，可改用镜像源：docker.m.daocloud.io/onlyoffice/documentserver:latest
+    image: onlyoffice/documentserver:latest
+    container_name: onlyoffice-ds
+    restart: always
+    ports:
+      - "${ONLYOFFICE_DS_PORT:-8088}:80"
+    environment:
+      - JWT_ENABLED=true
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-change-this-secret-please}
+    volumes:
+      # 数据/日志/缓存/数据库持久化，容器重建不丢失
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+      - onlyoffice_cache:/var/lib/onlyoffice
+      - onlyoffice_db:/var/lib/postgresql
+      # 中文字体持久化（只读）：将字体文件放入 docker/onlyoffice-fonts/ 目录
+      - ./onlyoffice-fonts:/usr/share/fonts/truetype/custom:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost/healthcheck || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
   web:
     build:
       context: ../web
@@ -76,17 +101,16 @@ services:
       - UPLOAD_DIR=./public/uploads
       - MAX_FILE_SIZE=10485760
       - NEXT_PUBLIC_APP_NAME=${APP_NAME:-房屋征收调查系统}
-      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-https://REDACTED_DOMAIN}
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-http://127.0.0.1:777}
       - NODE_ENV=production
-      # ONLYOFFICE Document Server（模板编辑器）
-      # 前端加载 DS 编辑器的地址：内网默认用内网 IP；外网默认用 http 直连地址（带端口）。
-      # 注意：浏览器"混合内容"限制，https 页面(如 REDACTED_DOMAIN)无法加载 http 的 DS；模板设计须走 http 页面(如 http://REDACTED_DOMAIN:777)才可加载 http 的 DS。
-      - ONLYOFFICE_DS_URL=${ONLYOFFICE_DS_URL:-http://REDACTED_IP:8088}
-      # 浏览器侧加载 DS 的外网地址（office-config 返回的 ds）；DS 为 http 直连时必须也用 http，否则 https 页面会 Mixed Content 拦截
-      - ONLYOFFICE_PUBLIC_DS_URL=${ONLYOFFICE_PUBLIC_DS_URL:-http://REDACTED_DOMAIN:8088}
-      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-REDACTED_JWT}
-      # DS 后端下载 document.url / 回调 callbackUrl 用的内网可达地址（避免 DS 拉取 https 公网失败）
-      - ONLYOFFICE_INTERNAL_URL=${ONLYOFFICE_INTERNAL_URL:-http://REDACTED_IP:777}
+      # ONLYOFFICE Document Server（模板编辑器）：onlyoffice-ds 随本 compose 自动部署
+      # 内网请求时浏览器加载 DS 的地址（生产请用 .env 覆盖）
+      - ONLYOFFICE_DS_URL=${ONLYOFFICE_DS_URL:-http://127.0.0.1:8088}
+      # 外网请求时浏览器加载 DS 的地址；DS 为 http 直连时必须用 http，https 页面会 Mixed Content 拦截
+      - ONLYOFFICE_PUBLIC_DS_URL=${ONLYOFFICE_PUBLIC_DS_URL:-http://127.0.0.1:8088}
+      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-change-this-secret-please}
+      # DS 后端下载 document.url / 回调的内网可达地址（compose 同网络直接用 web 服务名 zscx-web:3000）
+      - ONLYOFFICE_INTERNAL_URL=${ONLYOFFICE_INTERNAL_URL:-http://zscx-web:3000}
       # 对象存储 (MinIO / S3 兼容)
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio}
       - MINIO_PORT=${MINIO_PORT:-9000}
@@ -102,6 +126,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      onlyoffice-ds:
+        condition: service_healthy
     volumes:
       - uploads:/app/public/uploads
       - backups:/app/backups
@@ -111,5 +137,9 @@ volumes:
   mysql_data:
   redis_data:
   minio_data:
+  onlyoffice_data:
+  onlyoffice_logs:
+  onlyoffice_cache:
+  onlyoffice_db:
   uploads:
   backups:

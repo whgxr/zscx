@@ -2,13 +2,13 @@
 import jwt from 'jsonwebtoken'
 import { buildProxyUrl } from './storage'
 
-export const DS_PUBLIC = process.env.ONLYOFFICE_DS_URL || 'http://REDACTED_IP:8088'
-export const DS_SECRET = process.env.ONLYOFFICE_JWT_SECRET || 'REDACTED_JWT'
+export const DS_PUBLIC = process.env.ONLYOFFICE_DS_URL || 'http://127.0.0.1:8088'
+export const DS_SECRET = process.env.ONLYOFFICE_JWT_SECRET || 'dev-onlyoffice-secret'
 
 /** 业务系统公网地址（DS 与回调都必须可达） */
 export function appPublic(): string {
   return (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '')
-    || process.env.APP_PUBLIC_URL || 'http://REDACTED_IP:777'
+    || process.env.APP_PUBLIC_URL || 'http://127.0.0.1:777'
 }
 
 /** 业务系统公网地址（浏览器加载插件等前端资源用）——与外网用户访问的域名一致。
@@ -16,7 +16,7 @@ export function appPublic(): string {
  * document.url 用的内网地址（ONLYOFFICE_INTERNAL_URL）区分开。 */
 export function publicBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_BASE_URL || process.env.APP_PUBLIC_URL || '')
-    .replace(/\/$/, '') || 'http://REDACTED_IP:777'
+    .replace(/\/$/, '') || 'http://127.0.0.1:777'
 }
 
 export type OfficeKind = 'word' | 'cell'

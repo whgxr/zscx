@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // 业务系统 baseUrl（document.url / callbackUrl）。
     // document.url 除 DS 后端下载外，ONLYOFFICE 前端也会用浏览器直接访问做预览/加载，
     // 故必须与请求来源同源：内网请求用内网地址、外网请求用公网域名，否则外网浏览器访问内网 IP 失败(-4)。
-    // 注：DS 容器对 内网REDACTED_IP:777 与 公网REDACTED_DOMAIN 两条路径下载均已验证可通。
+    // 注：DS 容器对内网地址与公网域名两条路径下载均已验证可通。
     const internal = (process.env.ONLYOFFICE_INTERNAL_URL || '').replace(/\/$/, '')
     const envBase = (process.env.NEXT_PUBLIC_BASE_URL || process.env.APP_PUBLIC_URL || '').replace(/\/$/, '')
     const proto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || req.nextUrl.protocol.replace(/:$/, '')
@@ -61,8 +61,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     })
     // DS 地址：前端加载编辑器。外网用公网域名；内网用内网 IP（host 判定）。
     const dsUrl = isInternalReq
-      ? (process.env.ONLYOFFICE_DS_URL || 'http://REDACTED_IP:8088')
-      : (process.env.ONLYOFFICE_PUBLIC_DS_URL || process.env.ONLYOFFICE_DS_URL || 'http://REDACTED_IP:8088')
+      ? (process.env.ONLYOFFICE_DS_URL || 'http://127.0.0.1:8088')
+      : (process.env.ONLYOFFICE_PUBLIC_DS_URL || process.env.ONLYOFFICE_DS_URL || 'http://127.0.0.1:8088')
     return NextResponse.json({ ds: dsUrl, ...cfg })
   } catch (e: any) {
     console.error('[office-config] error', e)
